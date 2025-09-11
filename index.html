@@ -21,14 +21,43 @@
 
   /* Header layout: clock left, title+updated right; filters below */
   header{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;flex-direction:column;gap:12px}
-  .headrow{display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
+  .headrow{
+    display:flex;
+    gap:16px;
+    align-items:flex-end;   /* align bottoms of clock + headmeta */
+    justify-content:space-between;
+  }
   .clock{font-size:120px;font-weight:800;letter-spacing:.5px;line-height:1}
   .clock .sec { font-size:.5em; font-weight:600; opacity:.9; }
   .clock .ampm{ font-size:.4em; font-weight:700; margin-left:6px; opacity:.85; }
+  .headmeta{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end; /* makes the three lines hug the right edge */
+    text-align:right;
+    min-width:0;
+  }
 
-  .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;min-width:0;text-align:right}
-  .headmeta h1{margin:0;font-size:20px;font-weight:700;line-height:1.2}
-  .stamp{font-size:13px;color:var(--muted);margin-top:6px}
+  .headmeta .station{
+    margin:0;
+    font-size:22px;
+    font-weight:800;
+    line-height:1.15;
+  }
+
+  .headmeta .subtitle{
+    margin-top:4px;
+    font-size:16px;
+    font-weight:700;
+    opacity:.9;
+  }
+
+  .stamp{
+    font-size:13px;
+    color:var(--muted);
+    margin-top:6px;
+  }
   .filters{display:flex;flex-wrap:wrap;gap:8px}
 
   .wrap{padding:16px;display:flex;flex:1;overflow:hidden}
@@ -99,7 +128,8 @@
   <div class="headrow">
     <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
     <div class="headmeta">
-      <h1>Stratford &amp; Stratford International — Live Arrivals/Departures</h1>
+      <h1 class="station">Stratford &amp; Stratford Int’l</h1>
+      <div class="subtitle">Live departures</div>
       <div class="stamp" id="updated">Updated —</div>
     </div>
   </div>
