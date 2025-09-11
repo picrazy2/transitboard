@@ -83,49 +83,48 @@ async def fetch_tfl_stop(client: httpx.AsyncClient, stop_id: str) -> dict:
     return {"stopId": stop_id, "rows": summarise_tfl(data)}
 
 # ---------- Darwin (RDM REST/JSON) ----------
-# Use the EXACT base/version from your RDM product page (you verified 20220120 works)
 DARWIN_BASE = "https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120"
-DARWIN_NUM_ROWS = 10         # up to 10 per call for this product
-DARWIN_TIME_WINDOW = 120     # minutes ahead (optional)
+DARWIN_NUM_ROWS = 150       # up to 150 per call with GetDepartureBoard
+DARWIN_TIME_WINDOW = 120    # minutes ahead
 
 async def fetch_darwin_board(client: httpx.AsyncClient, crs: str) -> dict:
     """
-    Calls GetDepBoardWithDetails for a CRS and flattens to our row shape.
+    Calls GetDepartureBoard for a CRS and flattens to our row shape.
     Returns: {"crs": "...", "rows": [ {to, plat, sched, est, operator} ... ] }
     """
-    url = f"{DARWIN_BASE}/GetDepBoardWithDetails/{crs}"
-    params = {"numRows": str(DARWIN_NUM_ROWS), "timeWindow": str(DARWIN_TIME_WINDOW)}
+    url = f"{DARWIN_BASE}/GetDepartureBoard/{crs}"
+    params = {
+        "numRows": str(DARWIN_NUM_ROWS),
+        "timeWindow": str(DARWIN_TIME_WINDOW),
+    }
     headers = {"x-apikey": DARWIN_TOKEN}
     r = await client.get(url, params=params, headers=headers, timeout=20.0)
     r.raise_for_status()
     data = r.json()
 
     rows = []
-    # Standard shape: top-level "trainServices" (array)
     services = data.get("trainServices") or []
-    # Some variants wrap as {"GetStationBoardResult": {"trainServices": [...]}}
     if not services and "GetStationBoardResult" in data:
         services = data["GetStationBoardResult"].get("trainServices") or []
 
     for svc in services[:DARWIN_NUM_ROWS]:
         dests = svc.get("destination") or []
-        # destination may be list[{"locationName","crs"}] or dict with "location"
         if isinstance(dests, dict) and "location" in dests:
             loc = dests["location"]
-            if isinstance(loc, list):
-                dests = loc
-            else:
-                dests = [loc]
+            dests = loc if isinstance(loc, list) else [loc]
+
         to = ", ".join(d.get("locationName") or "" for d in dests if isinstance(d, dict)) or "—"
+
         rows.append({
             "to": to,
             "plat": svc.get("platform") or "—",
-            "sched": svc.get("std") or svc.get("sta"),
-            "est": svc.get("etd") or svc.get("eta"),
+            "sched": svc.get("std") or "—",
+            "est": svc.get("etd") or "—",
             "operator": svc.get("operator") or "",
         })
 
     return {"crs": crs, "rows": rows}
+
 
 # ---------- API endpoints ----------
 @app.get("/health")
