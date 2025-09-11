@@ -239,10 +239,14 @@
       const crs = (board.crs || '').toUpperCase();
       (board.rows||[]).forEach(r=>{
         const op = (r.operator||'').toLowerCase();
-        let svc = 'ga';
+        let svc = null;
+
+        // Match operators to our service IDs
         if (op.includes('c2c')) svc = 'c2c';
-        const isHS1 = op.includes('southeastern') || crs === CRS_SFA || /st\s*pancras/i.test(r.to||'');
-        if (isHS1) svc = 'hs1';
+        else if (op.includes('southeastern')) svc = 'hs1';
+        else if (op.includes('elizabeth')) svc = 'elizabeth';
+        else if (op.includes('overground')) svc = 'mildmay'; // London Overground branding
+        else svc = 'ga'; // default to Greater Anglia
 
         let hhmm = r.est; if (!hhmm || hhmm === 'On time' || hhmm === 'Delayed') hhmm = r.sched;
         const expected = hhmmToNearestFutureDate(hhmm, serverNow);
@@ -259,12 +263,22 @@
     (payload.tfl||[]).forEach(st=>{
       const stopId = (st.stopId || '').toUpperCase();
       (st.rows||[]).forEach(r=>{
-        let svc = 'dlr';
+        let svc = null;
         const line = (r.line||'').toLowerCase(), mode = (r.mode||'').toLowerCase();
-        if (mode==='tube'){ if (line.includes('central')) svc='central'; else if (line.includes('jubilee')) svc='jubilee'; }
-        else if (mode==='elizabeth-line') svc='elizabeth';
-        else if (mode==='overground' || line.includes('mildmay')) svc='mildmay';
-        else if (mode==='dlr') svc='dlr';
+
+        // 🚫 Skip Elizabeth Line + Overground (Mildmay) because we now get them from Darwin
+        if (mode==='elizabeth-line' || mode==='overground' || line.includes('mildmay')) {
+          return; // don't add this service
+        }
+
+        if (mode==='tube') {
+          if (line.includes('central')) svc='central';
+          else if (line.includes('jubilee')) svc='jubilee';
+        } else if (mode==='dlr') {
+          svc='dlr';
+        }
+
+        if (!svc) return; // ignore anything we don't care about
 
         let expected = null;
         if (r.expected) expected = new Date(r.expected);
@@ -314,6 +328,21 @@
     if (west.length===0) colWest.innerHTML = `<div class="empty">No services</div>`;
     if (east.length===0) colEast.innerHTML = `<div class="empty">No services</div>`;
 
+    function formatPlatform(raw) {
+      if (!raw) return '—';
+      const txt = String(raw).trim();
+      if (/^platform\s*\d+/i.test(txt)) {
+        // Already like "Platform 10"
+        return txt;
+      }
+      if (/^\d+$/i.test(txt)) {
+        // Just a number → prefix with "Platform"
+        return `Platform ${txt}`;
+      }
+      // Anything else (like "—", "Unknown", etc.) → return as-is
+      return txt;
+    }
+
     function mkRow(r){
       const div=document.createElement('div'); div.className='row';
 
@@ -330,9 +359,9 @@
       to.appendChild(chipWrap);
       to.appendChild(destEl);
 
-      const plat=document.createElement('div'); plat.className='plat';
-      const needsPrefix = (r.svc==='ga'||r.svc==='c2c'||r.svc==='hs1');
-      plat.textContent = r.plat ? (needsPrefix ? `Platform ${r.plat}` : r.plat) : '—';
+      const plat = document.createElement('div');
+      plat.className = 'plat';
+      plat.textContent = formatPlatform(r.plat);
 
       div.appendChild(eta); div.appendChild(to); div.appendChild(plat);
       return div;
