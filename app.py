@@ -1,32 +1,32 @@
+# app.py
 import os, time, asyncio
 from typing import Dict, Any, List
-import httpx, xmltodict
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Config from env ---
-TFL_APP_KEY = os.getenv("TFL_APP_KEY", "")
+# === Config from env ===
+TFL_APP_KEY = os.getenv("TFL_APP_KEY", "").strip()
 TFL_STOPPOINTS = [s.strip() for s in os.getenv("TFL_STOPPOINTS", "").split(",") if s.strip()]
 
-DARWIN_TOKEN = os.getenv("DARWIN_TOKEN", "").strip()  # may be empty for now
+DARWIN_TOKEN = os.getenv("DARWIN_TOKEN", "").strip()
 DARWIN_STATIONS = [s.strip().upper() for s in os.getenv("DARWIN_STATIONS", "").split(",") if s.strip()]
 
-# We only *require* TfL to start up
 if not TFL_APP_KEY or not TFL_STOPPOINTS:
-    raise RuntimeError("Missing TFL_APP_KEY or TFL_STOPPOINTS in .env")
+    raise RuntimeError("Missing TFL_APP_KEY or TFL_STOPPOINTS in environment")
 
-# --- Simple in-memory cache with TTL ---
+# Cache (simple in-mem with TTL)
 _cache: Dict[str, Dict[str, Any]] = {}
 _cache_lock = asyncio.Lock()
-TTL_TFL = 25      # seconds
-TTL_DARWIN = 25   # seconds (used only if DARWIN_TOKEN provided)
+TTL_TFL = 25
+TTL_DARWIN = 25
 
 app = FastAPI(title="Stratford Wallboard API")
 
-# Allow your front-end to call this API (tighten origins later)
+# CORS (relax now, tighten later)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,23 +48,26 @@ async def cache_set(key: str, value: Any):
 
 # ---------- TfL (REST/JSON) ----------
 TFL_BASE = "https://api.tfl.gov.uk"
-TFL_HEADERS = {"app_key": TFL_APP_KEY}
 
-async def tfl_get_json(client: httpx.AsyncClient, url: str, params: dict = None):
-    r = await client.get(url, params=params, headers=TFL_HEADERS, timeout=20)
+async def tfl_get_json(client: httpx.AsyncClient, url: str, params: dict | None = None):
+    # TfL expects the app_key as a query param (not a header)
+    qp = {"app_key": TFL_APP_KEY}
+    if params:
+        qp.update(params)
+    r = await client.get(url, params=qp, timeout=20)
     r.raise_for_status()
     return r.json()
 
 def summarise_tfl(preds: List[dict]) -> List[dict]:
     preds = sorted(preds, key=lambda x: x.get("timeToStation", 10**9))
     out = []
-    for p in preds[:30]:  # keep payload tidy
+    for p in preds[:30]:
         out.append({
             "line": p.get("lineName"),
             "mode": p.get("modeName"),
             "platform": p.get("platformName") or p.get("platformNumber") or "—",
             "to": p.get("destinationName") or p.get("towards") or "—",
-            "etaMin": max(0, round((p.get("timeToStation") or 0)/60)),
+            "etaMin": max(0, round((p.get("timeToStation") or 0) / 60)),
             "expected": p.get("expectedArrival"),
             "direction": p.get("direction"),
         })
@@ -72,78 +75,57 @@ def summarise_tfl(preds: List[dict]) -> List[dict]:
 
 async def fetch_tfl_stop(client: httpx.AsyncClient, stop_id: str) -> dict:
     params = {}
-    # For NaPTAN rail node (910G...), filter to EL + Overground (we don't pull National Rail via TfL)
+    # For National Rail NaPTANs (910G...), only pull TfL-managed modes (Elizabeth/Overground)
     if stop_id.upper().startswith("910G"):
         params["modes"] = "elizabeth-line,overground"
     url = f"{TFL_BASE}/StopPoint/{stop_id}/Arrivals"
     data = await tfl_get_json(client, url, params=params)
     return {"stopId": stop_id, "rows": summarise_tfl(data)}
 
-# ---------- Darwin (SOAP/XML) — OPTIONAL ----------
-DARWIN_URL = "https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx"
-
-def darwin_envelope(inner_xml: str) -> str:
-    return f"""<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Header>
-    <AccessToken xmlns="http://thalesgroup.com/RTTI/2017-10-01/ldb/">
-      <TokenValue>{DARWIN_TOKEN}</TokenValue>
-    </AccessToken>
-  </soap:Header>
-  <soap:Body>{inner_xml}</soap:Body>
-</soap:Envelope>"""
-
-async def darwin_post(client: httpx.AsyncClient, inner_xml: str) -> dict:
-    r = await client.post(DARWIN_URL, content=darwin_envelope(inner_xml),
-                          headers={"Content-Type": "text/xml"}, timeout=20)
-    r.raise_for_status()
-    return xmltodict.parse(r.text)
-
-def summarise_darwin(doc: dict, crs: str) -> dict:
-    try:
-        body = doc["soap:Envelope"]["soap:Body"]
-        board = (body.get("GetDepartureBoardResponse") or
-                 body.get("GetArrivalBoardResponse") or
-                 {}).get("GetStationBoardResult")
-    except Exception:
-        return {"crs": crs, "rows": [], "error": "Unexpected SOAP structure"}
-
-    if not board:
-        return {"crs": crs, "rows": []}
-
-    services = (board.get("trainServices") or {}).get("service")
-    if not services:
-        return {"crs": crs, "rows": []}
-    if isinstance(services, dict):
-        services = [services]
-
-    rows = []
-    for s in services[:20]:
-        dest = s.get("destination", {}).get("location", {})
-        if isinstance(dest, list):
-            dest_name = (dest[0] or {}).get("locationName")
-        else:
-            dest_name = dest.get("locationName")
-        rows.append({
-            "sched": s.get("std") or s.get("sta"),
-            "est": s.get("etd") or s.get("eta"),
-            "plat": s.get("platform") or "—",
-            "to": dest_name or "—",
-            "operator": s.get("operator"),
-            "serviceID": s.get("serviceID"),
-        })
-    return {"crs": crs, "rows": rows}
+# ---------- Darwin (RDM REST/JSON) ----------
+# Use the EXACT base/version from your RDM product page (you verified 20220120 works)
+DARWIN_BASE = "https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120"
+DARWIN_NUM_ROWS = 10         # up to 10 per call for this product
+DARWIN_TIME_WINDOW = 120     # minutes ahead (optional)
 
 async def fetch_darwin_board(client: httpx.AsyncClient, crs: str) -> dict:
-    inner = f"""
-<GetDepartureBoardRequest xmlns="http://thalesgroup.com/RTTI/2017-10-01/ldb/">
-  <numRows>12</numRows>
-  <crs>{crs}</crs>
-</GetDepartureBoardRequest>"""
-    doc = await darwin_post(client, inner)
-    return summarise_darwin(doc, crs)
+    """
+    Calls GetDepBoardWithDetails for a CRS and flattens to our row shape.
+    Returns: {"crs": "...", "rows": [ {to, plat, sched, est, operator} ... ] }
+    """
+    url = f"{DARWIN_BASE}/GetDepBoardWithDetails/{crs}"
+    params = {"numRows": str(DARWIN_NUM_ROWS), "timeWindow": str(DARWIN_TIME_WINDOW)}
+    headers = {"x-apikey": DARWIN_TOKEN}
+    r = await client.get(url, params=params, headers=headers, timeout=20.0)
+    r.raise_for_status()
+    data = r.json()
+
+    rows = []
+    # Standard shape: top-level "trainServices" (array)
+    services = data.get("trainServices") or []
+    # Some variants wrap as {"GetStationBoardResult": {"trainServices": [...]}}
+    if not services and "GetStationBoardResult" in data:
+        services = data["GetStationBoardResult"].get("trainServices") or []
+
+    for svc in services[:DARWIN_NUM_ROWS]:
+        dests = svc.get("destination") or []
+        # destination may be list[{"locationName","crs"}] or dict with "location"
+        if isinstance(dests, dict) and "location" in dests:
+            loc = dests["location"]
+            if isinstance(loc, list):
+                dests = loc
+            else:
+                dests = [loc]
+        to = ", ".join(d.get("locationName") or "" for d in dests if isinstance(d, dict)) or "—"
+        rows.append({
+            "to": to,
+            "plat": svc.get("platform") or "—",
+            "sched": svc.get("std") or svc.get("sta"),
+            "est": svc.get("etd") or svc.get("eta"),
+            "operator": svc.get("operator") or "",
+        })
+
+    return {"crs": crs, "rows": rows}
 
 # ---------- API endpoints ----------
 @app.get("/health")
@@ -154,6 +136,7 @@ def health():
         "tflStops": TFL_STOPPOINTS,
         "railEnabled": rail_enabled,
         "railCRS": DARWIN_STATIONS if rail_enabled else [],
+        "darwinBase": DARWIN_BASE if rail_enabled else None,
     }
 
 @app.get("/tfl")
@@ -185,12 +168,11 @@ async def rail_all():
         # If unauthorized or any Darwin hiccup, just return empty so /board still works
         if e.response is not None and e.response.status_code in (401, 403):
             return []
-        # Re-raise other errors
         raise
 
 @app.get("/board")
 async def board():
-    """Combined payload for your iPad."""
+    """Combined payload for the front-end."""
     try:
         tfl_task = tfl_all()
         rail_task = rail_all()
