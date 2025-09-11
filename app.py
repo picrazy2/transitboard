@@ -21,8 +21,8 @@ if not TFL_APP_KEY or not TFL_STOPPOINTS:
 # --- Simple in-memory cache with TTL ---
 _cache: Dict[str, Dict[str, Any]] = {}
 _cache_lock = asyncio.Lock()
-TTL_TFL = 30      # seconds
-TTL_DARWIN = 30   # seconds (used only if DARWIN_TOKEN provided)
+TTL_TFL = 25      # seconds
+TTL_DARWIN = 25   # seconds (used only if DARWIN_TOKEN provided)
 
 app = FastAPI(title="Stratford Wallboard API")
 
