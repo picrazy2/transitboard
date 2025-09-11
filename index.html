@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Stratford Live Board</title>
+<style>
+  :root{
+    --bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22;
+    --central:#e32017; --jubilee:#a0a5a9; --elizabeth:#6950a1;
+    --mildmay:#1f5eff; --dlr:#00afad; --ga:#d71920; --c2c:#6f2c91; --hs1:#003a8c;
+    --ok:#20c05b; --warn:#f2c94c; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  /* Page locked; content area flexes to fill viewport */
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;display:flex;flex-direction:column;overflow:hidden}
+  header{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;flex-direction:column;gap:8px}
+  .clock{font-size:80px;font-weight:800;letter-spacing:0.5px}
+  .clock .sec { font-size:.5em; font-weight:600; opacity:.9; }
+  .clock .ampm{ font-size:.4em; font-weight:700; margin-left:6px; opacity:.85; }
+  .title{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .title h1{margin:0;font-size:18px;font-weight:600}
+  .stamp{font-size:13px;color:var(--muted)}
+  .filters{display:flex;flex-wrap:wrap;gap:8px}
+
+  .wrap{padding:16px;display:flex;flex:1;overflow:hidden}
+  .cols{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(320px,1fr));width:100%}
+  .panel{background:var(--panel);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;min-height:0}
+  .panel h2{margin:0 0 8px;font-size:16px}
+  .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
+
+  /* Row layout tighter: ETA 90px, middle 1fr, Platform 84px */
+  .row{
+    border:1px solid var(--rule);border-radius:12px;padding:8px 10px;display:grid;
+    grid-template-columns: 70px 1fr 70px;gap:8px;align-items:center;background:#111523
+  }
+
+  .eta{display:flex;flex-direction:column;line-height:1}
+  .eta .big{font-variant-numeric:tabular-nums;font-weight:800;font-size:20px}
+  .eta .small{font-size:11px;color:var(--muted);margin-top:4px}
+  .eta.ok   .big{color:var(--ok)}
+  .eta.warn .big{color:var(--warn)}
+  .eta.bad  .big{color:var(--bad)}
+
+  /* Two-column destination area: left is chip + (optional) sublabel; right is dest text */
+  .to{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;line-height:1.2}
+  .chipcol{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
+  .sublabel{font-size:11px;line-height:1;color:var(--muted)}
+
+  .badge{font-size:12px;padding:3px 8px;border-radius:7px;font-weight:800;color:#fff;display:inline-block;white-space:nowrap}
+  .badge.central{background:var(--central)}
+  .badge.jubilee{background:var(--jubilee);color:#111}
+  .badge.elizabeth{background:var(--elizabeth)}
+  .badge.mildmay{background:var(--mildmay)}
+  .badge.dlr{background:var(--dlr);color:#111}
+  .badge.ga{background:var(--ga)}
+  .badge.c2c{background:var(--c2c)}
+  .badge.hs1{background:var(--hs1)}
+  .dest{overflow-wrap:anywhere}
+
+  .plat{justify-self:end;font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
+  .empty{color:var(--muted);font-size:14px;padding:8px 0}
+
+  /* Filter chips */
+  .chip{
+    border:none;padding:6px 10px;border-radius:999px;font-size:14px;font-weight:700;
+    cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:8px;
+    opacity:.35;filter:saturate(.2) brightness(.9);transition:opacity .15s,filter .15s,transform .03s}
+  .chip.selected{opacity:1;filter:none}
+  .chip:active{transform:translateY(1px)}
+  .chip.central{background:var(--central);color:#fff}
+  .chip.jubilee{background:var(--jubilee);color:#111}
+  .chip.elizabeth{background:var(--elizabeth);color:#fff}
+  .chip.mildmay{background:var(--mildmay);color:#fff}
+  .chip.dlr{background:var(--dlr);color:#111}
+  .chip.ga{background:var(--ga);color:#fff}
+  .chip.c2c{background:var(--c2c);color:#fff}
+  .chip.hs1{background:var(--hs1);color:#fff}
+
+  @media (max-width:820px){ .cols{grid-template-columns:1fr} .clock{font-size:56px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
+  <div class="title">
+    <h1>Stratford & Stratford International — Live Arrivals/Departures</h1>
+    <div class="stamp" id="updated">Updated —</div>
+  </div>
+  <div class="filters" id="filters"></div>
+</header>
+
+<div class="wrap">
+  <div class="cols">
+    <div class="panel">
+      <h2>West / Southbound</h2>
+      <div class="list" id="col-west"></div>
+    </div>
+    <div class="panel">
+      <h2>East / Northbound</h2>
+      <div class="list" id="col-east"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // === CONFIG ===
+  const API_BASE = "https://stratfordboard.onrender.com";
+  const FETCH_INTERVAL_MS = 30000;
+  const TICK_INTERVAL_MS  = 1000;
+
+  const CRS_SFA = "SFA";                    // HS1 station (Stratford International)
+  const DLR_STRATFORD_INTL = "940GZZDLSIT"; // DLR StopPoint id (Stratford International)
+
+  // Filters
+  const SERVICES = [
+    {id:"central",   label:"Central",     cls:"central"},
+    {id:"jubilee",   label:"Jubilee",     cls:"jubilee"},
+    {id:"elizabeth", label:"Elizabeth",   cls:"elizabeth"},
+    {id:"mildmay",   label:"Mildmay",     cls:"mildmay"},
+    {id:"dlr",       label:"DLR",         cls:"dlr"},
+    {id:"ga",        label:"Greater Anglia", cls:"ga"},
+    {id:"c2c",       label:"c2c",         cls:"c2c"},
+    {id:"hs1",       label:"Southeastern", cls:"hs1"},
+  ];
+  let selected = new Set(SERVICES.map(s=>s.id));
+
+  // CLOCK
+  function fmt12hNoSec(d){
+    const pad=n=>String(n).padStart(2,"0");
+    let h=d.getHours(), m=pad(d.getMinutes());
+    const ampm = h>=12?'pm':'am'; h=h%12; if(h===0) h=12;
+    return `${h}:${m} ${ampm}`;
+  }
+  function tickClock(){
+    const now = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    let h = now.getHours(); const ampm = h >= 12 ? 'pm' : 'am';
+    h = h % 12; if (h === 0) h = 12;
+    const m = pad(now.getMinutes()), s = pad(now.getSeconds());
+    document.getElementById('clock').innerHTML = `${h}:${m}<span class="sec">:${s}</span><span class="ampm"> ${ampm}</span>`;
+  }
+  setInterval(tickClock, 1000); tickClock();
+
+  // FILTER BAR
+  const filtersEl = document.getElementById('filters');
+  function renderFilters(){
+    filtersEl.innerHTML = '';
+    SERVICES.forEach(s=>{
+      const b = document.createElement('button');
+      b.type='button'; b.className = 'chip ' + s.cls + (selected.has(s.id) ? ' selected':'');
+      b.textContent = s.label;
+      b.onclick = ()=>{
+        const all = selected.size === SERVICES.length;
+        if (all) selected = new Set([s.id]);
+        else {
+          if (selected.has(s.id)) { selected.delete(s.id); if (selected.size===0) SERVICES.forEach(x=>selected.add(x.id)); }
+          else selected.add(s.id);
+        }
+        renderFilters(); renderBoard(lastPayload, {autoscale:true});
+      };
+      filtersEl.appendChild(b);
+    });
+  }
+  renderFilters();
+
+  // FETCH & RENDER
+  const colWest = document.getElementById('col-west');
+  const colEast = document.getElementById('col-east');
+  const updatedEl = document.getElementById('updated');
+  let lastPayload = null;
+
+  // Optional: remove "London " for well-known terminals only
+  function cleanDest(name){
+    if(!name) return '—';
+    let d = name;
+    d = d.replace(/\s*Rail Station/i, '');
+    d = d.replace(/\s*\(.*?\)\s*/g, '');
+    d = d.replace(
+      /^London\s+(Liverpool Street|Paddington|Euston|Victoria|Bridge|Blackfriars|Waterloo|Marylebone|Cannon Street|Fenchurch Street|Charing Cross|King'?s Cross|St\s*Pancras(?:\s*International)?)/i,
+      '$1'
+    );
+    d = d.replace(/St\s*Pancras\s*International/i, "St Pancras Int’l");
+    return d.trim();
+  }
+
+  function normalise(payload){
+    const out = [];
+    const serverNow = new Date((payload.ts || Math.floor(Date.now()/1000))*1000);
+
+    // Rail
+    (payload.rail||[]).forEach(board=>{
+      const crs = (board.crs || '').toUpperCase();
+      (board.rows||[]).forEach(r=>{
+        const op = (r.operator||'').toLowerCase();
+        let svc = 'ga';
+        if (op.includes('c2c')) svc = 'c2c';
+        const isHS1 = op.includes('southeastern') || crs === CRS_SFA || /st\s*pancras/i.test(r.to||'');
+        if (isHS1) svc = 'hs1';
+
+        let hhmm = r.est; if (!hhmm || hhmm === 'On time' || hhmm === 'Delayed') hhmm = r.sched;
+        const expected = hhmmToNearestFutureDate(hhmm, serverNow);
+
+        let dest = cleanDest(r.to) || '—';
+
+        // If this row is from Stratford International (CRS SFA), show a small sublabel
+        const prefix = (crs === CRS_SFA) ? "Stratford Int’l" : null;
+
+        out.push({ svc, to: dest, plat: r.plat || '—', expected, dir: directionOf(dest), prefix });
+      });
+    });
+
+    // TfL
+    (payload.tfl||[]).forEach(st=>{
+      const stopId = (st.stopId || '').toUpperCase();
+      (st.rows||[]).forEach(r=>{
+        let svc = 'dlr';
+        const line = (r.line||'').toLowerCase(), mode = (r.mode||'').toLowerCase();
+        if (mode==='tube'){ if (line.includes('central')) svc='central'; else if (line.includes('jubilee')) svc='jubilee'; }
+        else if (mode==='elizabeth-line') svc='elizabeth';
+        else if (mode==='overground' || line.includes('mildmay')) svc='mildmay';
+        else if (mode==='dlr') svc='dlr';
+
+        let expected = null;
+        if (r.expected) expected = new Date(r.expected);
+        else if (Number.isFinite(r.etaMin)) expected = new Date(serverNow.getTime() + r.etaMin*60000);
+        else return;
+
+        let dest = cleanDest(r.to) || '—';
+
+        // If this row is from DLR Stratford International stop, show sublabel
+        const prefix = (stopId === DLR_STRATFORD_INTL) ? "Stratford Int’l" : null;
+
+        out.push({ svc, to: dest, plat: r.platform || '—', expected, dir: directionOf(dest), prefix });
+      });
+    });
+
+    const now = new Date();
+    return out.filter(x =>
+    x.expected &&
+    x.expected.getTime() > now.getTime() &&
+    x.expected.getTime() <= now.getTime() + 60*60*1000
+    );
+  }
+
+  // Direction heuristics
+  const WEST_SOUTH = [
+    'paddington','heathrow','reading','maidenhead','stanmore','wembley','ealing','white city','west ruislip',
+    'bank','tower gateway','richmond','clapham','willesden','gospel oak','highbury & islington','highbury and islington',
+    'liverpool street','st pancras'
+  ];
+  const EAST_NORTH = [
+    'shenfield','abbey wood','ilford','romford','brentwood','bury','epping','hainault','woodford','loughton','newbury park',
+    'woolwich','beckton','lewisham','east ham','barking','canary wharf','stratford international','grays','southend',
+    'colchester','ipswich','ashford','ebbsfleet'
+  ];
+  function isWestSouth(dest){ const d=(dest||'').toLowerCase(); return WEST_SOUTH.some(k=>d.includes(k)); }
+  function isEastNorth(dest){ const d=(dest||'').toLowerCase(); return EAST_NORTH.some(k=>d.includes(k)); }
+  function directionOf(dest){ if (isWestSouth(dest)) return 'W'; if (isEastNorth(dest)) return 'E'; return 'E'; }
+
+  function renderBoard(payload, {autoscale=false} = {}){
+    lastPayload = payload;
+    const when = new Date((payload.ts||Math.floor(Date.now()/1000))*1000);
+    updatedEl.textContent = `Updated ${when.toLocaleTimeString()}`;
+
+    const rows = normalise(payload).filter(r => selected.has(r.svc));
+    const west=[], east=[]; rows.forEach(r => (r.dir==='W'?west:east).push(r));
+    west.sort((a,b)=>a.expected-b.expected); east.sort((a,b)=>a.expected-b.expected);
+
+    colWest.innerHTML=''; colEast.innerHTML='';
+    if (west.length===0) colWest.innerHTML = `<div class="empty">No services</div>`;
+    if (east.length===0) colEast.innerHTML = `<div class="empty">No services</div>`;
+
+    function mkRow(r){
+      const div=document.createElement('div'); div.className='row';
+
+      const eta=document.createElement('div'); eta.className='eta ok';
+      eta.innerHTML = `<div class="big">--:--</div><div class="small">${fmt12hNoSec(r.expected)}</div>`;
+      eta.dataset.expected = r.expected.getTime();
+
+      const to=document.createElement('div'); to.className='to';
+      const leftCol = document.createElement('div'); leftCol.className = 'chipcol';
+      leftCol.innerHTML = `<span class="badge ${r.svc}">${labelForSvc(r.svc)}</span>` + (r.prefix ? `<div class="sublabel">${escapeHTML(r.prefix)}</div>` : '');
+      const destEl = document.createElement('span'); destEl.className = 'dest'; destEl.textContent = r.to;
+
+      to.appendChild(leftCol);
+      to.appendChild(destEl);
+
+      const plat=document.createElement('div'); plat.className='plat';
+      const needsPrefix = (r.svc==='ga'||r.svc==='c2c'||r.svc==='hs1');
+      plat.textContent = r.plat ? (needsPrefix ? `Platform ${r.plat}` : r.plat) : '—';
+
+      div.appendChild(eta); div.appendChild(to); div.appendChild(plat);
+      return div;
+    }
+    west.slice(0,60).forEach(r=>colWest.appendChild(mkRow(r)));
+    east.slice(0,60).forEach(r=>colEast.appendChild(mkRow(r)));
+
+    tickETAs(true);
+    if (autoscale) {
+      // Wait for layout so measurements are correct
+      requestAnimationFrame(() => requestAnimationFrame(autoScrollLists));
+    }
+  }
+
+  function labelForSvc(id){ const s=SERVICES.find(x=>x.id===id); return s ? s.label : id.toUpperCase(); }
+  function hhmmToNearestFutureDate(hhmm, ref){
+    if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+    const [H,M] = hhmm.split(':').map(Number);
+    const d = new Date(ref.getTime()); d.setSeconds(0,0); d.setHours(H, M, 0, 0);
+    if (d.getTime() <= ref.getTime()) d.setDate(d.getDate()+1);
+    return d;
+  }
+  function escapeHTML(s){ return (''+s).replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+  // Remove-at-zero + live ETA colours
+  function tickETAs(initial=false){
+    const now = Date.now();
+    document.querySelectorAll('.row').forEach(row=>{
+      const etaEl = row.querySelector('.eta'); if(!etaEl) return;
+      const exp = Number(etaEl.dataset.expected||0);
+      const diff = Math.max(0, exp - now);
+      const s = Math.floor(diff/1000);
+      if (!initial && s <= 0) { row.remove(); return; } // prune when it hits zero (post-initial)
+      const m = Math.floor(s/60), sec = s%60;
+      const big = etaEl.querySelector('.big'); if (big) big.textContent = `${String(m).padStart(1,'0')}:${String(sec).padStart(2,'0')}`;
+      etaEl.classList.remove('ok','warn','bad');
+      if (m < 6) etaEl.classList.add('bad'); else if (m < 9) etaEl.classList.add('warn'); else etaEl.classList.add('ok');
+    });
+  }
+  setInterval(()=>tickETAs(false), TICK_INTERVAL_MS);
+
+  // Auto-scroll each list so first <9 min item is at top (red/yellow zone).
+  function autoScrollLists(){
+    [colWest, colEast].forEach(list=>{
+        // Only direct .row children of the list
+        const rows = list.querySelectorAll(':scope > .row');
+        if (!rows.length) return;
+
+        const now = Date.now();
+        let target = null;
+        for (const r of rows) {
+        const exp = Number(r.querySelector('.eta')?.dataset.expected || 0);
+        const m = Math.floor(Math.max(0, exp - now) / 60000);
+        if (m < 9) { target = r; break; }
+        }
+        if (!target) target = rows[0];
+
+        // Compute target top relative to the scroll container
+        const top = target.getBoundingClientRect().top
+                - list.getBoundingClientRect().top
+                + list.scrollTop;
+
+        list.scrollTo({ top, behavior: 'auto' });
+    });
+  }
+
+
+  // Poll backend
+  async function refresh(){
+    try{
+      const res = await fetch(`${API_BASE}/board`, {cache:"no-store"});
+      if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = await res.json();
+      renderBoard(data, {autoscale:true});
+    }catch(e){
+      updatedEl.textContent = `Error: ${e.message}`;
+      colWest.innerHTML = `<div class="empty">Error loading board.</div>`;
+      colEast.innerHTML = `<div class="empty">Error loading board.</div>`;
+    }
+  }
+  refresh(); setInterval(refresh, FETCH_INTERVAL_MS);
+</script>
+</body>
+</html>
