@@ -12,28 +12,36 @@
     --ok:#20c05b; --warn:#f2c94c; --bad:#ff6b6b;
   }
   *{box-sizing:border-box}
-  /* Page locked; content area flexes to fill viewport */
   html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;display:flex;flex-direction:column;overflow:hidden}
-  header{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;flex-direction:column;gap:8px}
-  .clock{font-size:80px;font-weight:800;letter-spacing:0.5px}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    display:flex;flex-direction:column;overflow:hidden
+  }
+
+  /* Header layout: clock left, title+updated right; filters below */
+  header{padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;flex-direction:column;gap:12px}
+  .headrow{display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
+  .clock{font-size:120px;font-weight:800;letter-spacing:.5px;line-height:1}
   .clock .sec { font-size:.5em; font-weight:600; opacity:.9; }
   .clock .ampm{ font-size:.4em; font-weight:700; margin-left:6px; opacity:.85; }
-  .title{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
-  .title h1{margin:0;font-size:18px;font-weight:600}
-  .stamp{font-size:13px;color:var(--muted)}
+
+  .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;min-width:0;text-align:right}
+  .headmeta h1{margin:0;font-size:20px;font-weight:700;line-height:1.2}
+  .stamp{font-size:13px;color:var(--muted);margin-top:6px}
   .filters{display:flex;flex-wrap:wrap;gap:8px}
 
   .wrap{padding:16px;display:flex;flex:1;overflow:hidden}
-  .cols{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(320px,1fr));width:100%}
+  .cols{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(260px,1fr));width:100%}
   .panel{background:var(--panel);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 8px;font-size:16px}
   .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
 
-  /* Row layout tighter: ETA 90px, middle 1fr, Platform 84px */
+  /* Row layout: ETA 70px, middle 1fr, Platform 70px */
   .row{
-    border:1px solid var(--rule);border-radius:12px;padding:8px 10px;display:grid;
-    grid-template-columns: 70px 1fr 70px;gap:8px;align-items:center;background:#111523
+    border:1px solid var(--rule);border-radius:12px;padding:10px 12px;display:grid;
+    grid-template-columns:70px 1fr 70px;gap:10px;align-items:center;background:#111523;
+    min-height:78px;
   }
 
   .eta{display:flex;flex-direction:column;line-height:1}
@@ -43,11 +51,10 @@
   .eta.warn .big{color:var(--warn)}
   .eta.bad  .big{color:var(--bad)}
 
-  /* Two-column destination area: left is chip + (optional) sublabel; right is dest text */
-  .to{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;line-height:1.2}
+  /* Force stacked: chip/sublabel on top, destination underneath */
+  .to{display:flex !important; flex-direction:column !important; align-items:flex-start; gap:6px; line-height:1.2; width:100%}
   .chipcol{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
   .sublabel{font-size:11px;line-height:1;color:var(--muted)}
-
   .badge{font-size:12px;padding:3px 8px;border-radius:7px;font-weight:800;color:#fff;display:inline-block;white-space:nowrap}
   .badge.central{background:var(--central)}
   .badge.jubilee{background:var(--jubilee);color:#111}
@@ -57,7 +64,8 @@
   .badge.ga{background:var(--ga)}
   .badge.c2c{background:var(--c2c)}
   .badge.hs1{background:var(--hs1)}
-  .dest{overflow-wrap:anywhere}
+
+  .dest{overflow-wrap:anywhere;font-size:14px;font-weight:600;display:block;align-self:stretch}
 
   .plat{justify-self:end;font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
   .empty{color:var(--muted);font-size:14px;padding:8px 0}
@@ -78,15 +86,22 @@
   .chip.c2c{background:var(--c2c);color:#fff}
   .chip.hs1{background:var(--hs1);color:#fff}
 
-  @media (max-width:820px){ .cols{grid-template-columns:1fr} .clock{font-size:56px} }
+  @media (max-width:760px){
+    .headrow{flex-direction:column;align-items:flex-start}
+    .headmeta{align-items:flex-start;text-align:left}
+    .clock{font-size:72px}
+    .cols{grid-template-columns:1fr}
+  }
 </style>
 </head>
 <body>
 <header>
-  <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
-  <div class="title">
-    <h1>Stratford & Stratford International — Live Arrivals/Departures</h1>
-    <div class="stamp" id="updated">Updated —</div>
+  <div class="headrow">
+    <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
+    <div class="headmeta">
+      <h1>Stratford &amp; Stratford International — Live Arrivals/Departures</h1>
+      <div class="stamp" id="updated">Updated —</div>
+    </div>
   </div>
   <div class="filters" id="filters"></div>
 </header>
@@ -139,9 +154,10 @@
     let h = now.getHours(); const ampm = h >= 12 ? 'pm' : 'am';
     h = h % 12; if (h === 0) h = 12;
     const m = pad(now.getMinutes()), s = pad(now.getSeconds());
-    document.getElementById('clock').innerHTML = `${h}:${m}<span class="sec">:${s}</span><span class="ampm"> ${ampm}</span>`;
+    document.getElementById('clock').innerHTML =
+      `${h}:${m}<span class="sec">:${s}</span><span class="ampm"> ${ampm}</span>`;
   }
-  setInterval(tickClock, 1000); tickClock();
+  setInterval(tickClock, TICK_INTERVAL_MS); tickClock();
 
   // FILTER BAR
   const filtersEl = document.getElementById('filters');
@@ -158,7 +174,7 @@
           if (selected.has(s.id)) { selected.delete(s.id); if (selected.size===0) SERVICES.forEach(x=>selected.add(x.id)); }
           else selected.add(s.id);
         }
-        renderFilters(); renderBoard(lastPayload, {autoscale:true});
+        renderFilters(); renderBoard(lastPayload);
       };
       filtersEl.appendChild(b);
     });
@@ -171,7 +187,6 @@
   const updatedEl = document.getElementById('updated');
   let lastPayload = null;
 
-  // Optional: remove "London " for well-known terminals only
   function cleanDest(name){
     if(!name) return '—';
     let d = name;
@@ -204,7 +219,6 @@
 
         let dest = cleanDest(r.to) || '—';
 
-        // If this row is from Stratford International (CRS SFA), show a small sublabel
         const prefix = (crs === CRS_SFA) ? "Stratford Int’l" : null;
 
         out.push({ svc, to: dest, plat: r.plat || '—', expected, dir: directionOf(dest), prefix });
@@ -229,7 +243,6 @@
 
         let dest = cleanDest(r.to) || '—';
 
-        // If this row is from DLR Stratford International stop, show sublabel
         const prefix = (stopId === DLR_STRATFORD_INTL) ? "Stratford Int’l" : null;
 
         out.push({ svc, to: dest, plat: r.platform || '—', expected, dir: directionOf(dest), prefix });
@@ -238,13 +251,12 @@
 
     const now = new Date();
     return out.filter(x =>
-    x.expected &&
-    x.expected.getTime() > now.getTime() &&
-    x.expected.getTime() <= now.getTime() + 60*60*1000
+      x.expected &&
+      x.expected.getTime() > now.getTime() &&
+      x.expected.getTime() <= now.getTime() + 60*60*1000
     );
   }
 
-  // Direction heuristics
   const WEST_SOUTH = [
     'paddington','heathrow','reading','maidenhead','stanmore','wembley','ealing','white city','west ruislip',
     'bank','tower gateway','richmond','clapham','willesden','gospel oak','highbury & islington','highbury and islington',
@@ -259,7 +271,7 @@
   function isEastNorth(dest){ const d=(dest||'').toLowerCase(); return EAST_NORTH.some(k=>d.includes(k)); }
   function directionOf(dest){ if (isWestSouth(dest)) return 'W'; if (isEastNorth(dest)) return 'E'; return 'E'; }
 
-  function renderBoard(payload, {autoscale=false} = {}){
+  function renderBoard(payload){
     lastPayload = payload;
     const when = new Date((payload.ts||Math.floor(Date.now()/1000))*1000);
     updatedEl.textContent = `Updated ${when.toLocaleTimeString()}`;
@@ -279,12 +291,13 @@
       eta.innerHTML = `<div class="big">--:--</div><div class="small">${fmt12hNoSec(r.expected)}</div>`;
       eta.dataset.expected = r.expected.getTime();
 
+      // Stacked: chip/sublabel then destination underneath
       const to=document.createElement('div'); to.className='to';
-      const leftCol = document.createElement('div'); leftCol.className = 'chipcol';
-      leftCol.innerHTML = `<span class="badge ${r.svc}">${labelForSvc(r.svc)}</span>` + (r.prefix ? `<div class="sublabel">${escapeHTML(r.prefix)}</div>` : '');
-      const destEl = document.createElement('span'); destEl.className = 'dest'; destEl.textContent = r.to;
-
-      to.appendChild(leftCol);
+      const chipWrap = document.createElement('div'); chipWrap.className = 'chipcol';
+      chipWrap.innerHTML = `<span class="badge ${r.svc}">${labelForSvc(r.svc)}</span>` +
+                           (r.prefix ? `<div class="sublabel">${escapeHTML(r.prefix)}</div>` : '');
+      const destEl = document.createElement('div'); destEl.className = 'dest'; destEl.textContent = r.to;
+      to.appendChild(chipWrap);
       to.appendChild(destEl);
 
       const plat=document.createElement('div'); plat.className='plat';
@@ -298,10 +311,6 @@
     east.slice(0,60).forEach(r=>colEast.appendChild(mkRow(r)));
 
     tickETAs(true);
-    if (autoscale) {
-      // Wait for layout so measurements are correct
-      requestAnimationFrame(() => requestAnimationFrame(autoScrollLists));
-    }
   }
 
   function labelForSvc(id){ const s=SERVICES.find(x=>x.id===id); return s ? s.label : id.toUpperCase(); }
@@ -322,7 +331,7 @@
       const exp = Number(etaEl.dataset.expected||0);
       const diff = Math.max(0, exp - now);
       const s = Math.floor(diff/1000);
-      if (!initial && s <= 0) { row.remove(); return; } // prune when it hits zero (post-initial)
+      if (!initial && s <= 0) { row.remove(); return; }
       const m = Math.floor(s/60), sec = s%60;
       const big = etaEl.querySelector('.big'); if (big) big.textContent = `${String(m).padStart(1,'0')}:${String(sec).padStart(2,'0')}`;
       etaEl.classList.remove('ok','warn','bad');
@@ -331,39 +340,13 @@
   }
   setInterval(()=>tickETAs(false), TICK_INTERVAL_MS);
 
-  // Auto-scroll each list so first <9 min item is at top (red/yellow zone).
-  function autoScrollLists(){
-    [colWest, colEast].forEach(list=>{
-        // Only direct .row children of the list
-        const rows = list.querySelectorAll(':scope > .row');
-        if (!rows.length) return;
-
-        const now = Date.now();
-        let target = null;
-        for (const r of rows) {
-        const exp = Number(r.querySelector('.eta')?.dataset.expected || 0);
-        const m = Math.floor(Math.max(0, exp - now) / 60000);
-        if (m < 9) { target = r; break; }
-        }
-        if (!target) target = rows[0];
-
-        // Compute target top relative to the scroll container
-        const top = target.getBoundingClientRect().top
-                - list.getBoundingClientRect().top
-                + list.scrollTop;
-
-        list.scrollTo({ top, behavior: 'auto' });
-    });
-  }
-
-
   // Poll backend
   async function refresh(){
     try{
       const res = await fetch(`${API_BASE}/board`, {cache:"no-store"});
       if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = await res.json();
-      renderBoard(data, {autoscale:true});
+      renderBoard(data);
     }catch(e){
       updatedEl.textContent = `Error: ${e.message}`;
       colWest.innerHTML = `<div class="empty">Error loading board.</div>`;
