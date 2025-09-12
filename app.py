@@ -16,6 +16,8 @@ TFL_STOPPOINTS = [s.strip() for s in os.getenv("TFL_STOPPOINTS", "").split(",") 
 DARWIN_TOKEN = os.getenv("DARWIN_TOKEN", "").strip()
 DARWIN_STATIONS = [s.strip().upper() for s in os.getenv("DARWIN_STATIONS", "").split(",") if s.strip()]
 
+JUBILEE_JSON_URL = "https://nr.whoosh.media/stations/get/SRA"
+
 if not TFL_APP_KEY or not TFL_STOPPOINTS:
     raise RuntimeError("Missing TFL_APP_KEY or TFL_STOPPOINTS in environment")
 
@@ -24,7 +26,7 @@ _cache: Dict[str, Dict[str, Any]] = {}
 _cache_lock = asyncio.Lock()
 TTL_TFL = 25
 TTL_DARWIN = 25
-TTL_JUBILEE = 50  # scraped page cache
+TTL_JUBILEE = 5  # scraped page cache
 
 # Known IDs
 DLR_STRATFORD_INTL = "940GZZDLSIT"  # Stratford International (DLR) StopPoint
@@ -163,86 +165,69 @@ async def fetch_darwin_board(client: httpx.AsyncClient, crs: str) -> dict:
     return {"crs": crs, "rows": rows}
 
 # ---------- Jubilee scraper (Whoosh page) ----------
-JUBILEE_URL = "https://nr.whoosh.media/app/stations/SRA/tube#"
 
 def _round_down_to_minute(ts: float) -> int:
-    # Return integer epoch seconds with seconds truncated
     return int(ts // 60 * 60)
 
-def _parse_eta_to_minutes(txt: str) -> Optional[int]:
-    t = (txt or "").strip().lower().replace("\xa0", " ")
-    if t == "now":
-        return 0
-    m = re.search(r"(\d+)\s*mins?", t)
-    if m:
-        return int(m.group(1))
-    # Some pages show "1 min"
-    m = re.search(r"(\d+)\s*min\b", t)
-    if m:
-        return int(m.group(1))
-    return None
-
 async def fetch_jubilee() -> List[dict]:
-    key = "scrape_jubilee"
+    """
+    Fetch Jubilee line departures (as departures, not arrivals) from Whoosh JSON.
+    Returns a list of rows: {svc, to, plat, etaMin, expected}
+    where `expected` is epoch seconds, truncated to the minute.
+    """
+    key = "jubilee_json"
     cached = cache_get(key, TTL_JUBILEE)
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient() as client:
-        r = await client.get(JUBILEE_URL, timeout=20.0)
+    headers = {
+        # a mild UA to avoid any odd variants/caching layers
+        "User-Agent": "stratfordboard/1.0 (+httpx)",
+        "Accept": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0, connect=4.0), headers=headers) as client:
+        r = await client.get(JUBILEE_JSON_URL)
         r.raise_for_status()
-        html = r.text
+        data = r.json()
 
-    soup = BeautifulSoup(html, "html.parser")
+    # Navigate to TFL list safely
+    arr_out = (data or {}).get("arrOutput") or {}
+    inter = arr_out.get("Interchange") or {}
+    tfl_list = inter.get("TFL") or []
 
-    # Find the tube departures table section by its header row:
-    # Expect headers like: Time | Destination | Line | Platform
-    header = None
-    for div in soup.find_all("div"):
-        txt = div.get_text(strip=True)
-        if txt == "Time":
-            parent = div.parent
-            if parent and parent.get_text(" | ", strip=True) == "Time | Destination | Line | Platform":
-                header = parent
-                break
-
+    now = int(time.time())
     rows: List[dict] = []
-    if header is None:
-        await cache_set(key, rows)
-        return rows
+    for item in tfl_list:
+        try:
+            if (item.get("operator") or "").strip().lower() != "jubilee":
+                continue
 
-    # Iterate sibling rows until the next section
-    now = time.time()
-    sib = header.find_next_sibling()
-    while sib and sib.name == "div":
-        text = sib.get_text(" | ", strip=True)
-        # Expect shape: "{eta} | {destination} | {line} | {platform}"
-        parts = [p.strip() for p in text.split("|")]
-        if len(parts) < 4:
-            break
-        eta_txt, dest_txt, line_txt, plat_txt = parts[:4]
+            dest = (item.get("destination") or "").strip() or "—"
+            plat = (item.get("platform") or "").strip() or "—"
 
-        # Only keep Jubilee line rows
-        if line_txt.lower() != "jubilee":
-            sib = sib.find_next_sibling()
+            # They provide epoch seconds for both std/etd. Prefer etd if present; else std.
+            ts = item.get("etd") or item.get("std")
+            if not isinstance(ts, int):
+                continue
+
+            expected = _round_down_to_minute(ts)
+            # Compute etaMin from server 'now'
+            eta_min = max(0, (expected - now) // 60)
+
+            rows.append({
+                "svc": "jubilee",
+                "to": dest,
+                "plat": plat,
+                "etaMin": int(eta_min),
+                "expected": int(expected),  # epoch seconds, minute-precision
+            })
+        except Exception:
+            # be tolerant to any odd row
             continue
 
-        eta_min = _parse_eta_to_minutes(eta_txt)
-        if eta_min is None:
-            sib = sib.find_next_sibling()
-            continue
-
-        expected = _round_down_to_minute(now + eta_min * 60)
-
-        rows.append({
-            "svc": "jubilee",
-            "to": dest_txt or "—",
-            "plat": plat_txt or "—",
-            "etaMin": eta_min,
-            "expected": expected,  # epoch seconds, rounded down to minute
-        })
-
-        sib = sib.find_next_sibling()
+    # Sort soonest first and keep a sensible cap
+    rows.sort(key=lambda x: x["expected"])
+    rows = rows[:60]
 
     await cache_set(key, rows)
     return rows
