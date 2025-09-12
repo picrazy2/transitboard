@@ -3,4 +3,4 @@ uvicorn[standard]
 httpx
 python-dotenv
 xmltodict
-beautifulsoup
+beautifulsoup4
