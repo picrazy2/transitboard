@@ -7,7 +7,8 @@ Writes:
                           used to estimate live bus positions (see src/vehicles.ts)
   public/stokey/geo.json  map geometry: bus routes, Weaver line, stops, home
 
-Bus geometry comes from TfL (~27 m between vertices, road-following).
+Nothing is clipped: routes and stops run to the ends of their lines so the map
+can be panned. Bus geometry comes from TfL (~27 m between vertices, road-following).
 Rail geometry comes from OpenStreetMap (~16 m); TfL's rail lineStrings are
 straight chords between stations (~1200 m) and look wrong on a map.
 
@@ -23,10 +24,12 @@ CHARING_CROSS = (51.5074, -0.1278)  # the conventional centre of London
 WALK_LIMIT_S = 600               # 10 minutes
 SEARCH_RADIUS_M = 900            # safe superset: 600 s at Valhalla's 5.1 km/h is 850 m
 RAIL_NAPTAN = "910GSTKNWNG"      # Stoke Newington Rail Station (Weaver), CRS SKW
+RAIL_LINE_ID = "weaver"
 RAIL_IN_DIRECTION = "inbound"    # verified: Weaver inbound = London Liverpool Street
 RAIL_IN_DESTINATION = "910GLIVST"  # ArrivalDepartures carries no direction, only destination
-WEAVER_OSM_REL = 9105028         # "Weaver Line: Liverpool Street -> Enfield Town"
-BBOX = (51.5476, -0.0955, 51.5746, -0.0525)  # ~1.5 km around home
+# Both Weaver branches that call at Stoke Newington (Enfield Town, Cheshunt).
+WEAVER_OSM_RELS = (9105028, 9105027)
+MAP_HOME_ZOOM_PAD = 0.18         # initial framing only; the map pans freely
 
 UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -97,21 +100,6 @@ def walk_times(targets):
                  {"Content-Type": "application/json"})
     return [t["time"] for t in r["sources_to_targets"][0]]
 
-
-def clip(coords):
-    """Split a [lon,lat] path into the runs that fall inside BBOX."""
-    s, w, n, e = BBOX
-    inside = lambda p: w <= p[0] <= e and s <= p[1] <= n
-    runs, cur = [], []
-    for i, p in enumerate(coords):
-        near = inside(p) or (i and inside(coords[i - 1])) or (i + 1 < len(coords) and inside(coords[i + 1]))
-        if near:
-            cur.append(p)
-        elif cur:
-            runs.append(cur); cur = []
-    if cur:
-        runs.append(cur)
-    return [r for r in runs if len(r) >= 2]
 
 
 # ---------- 1. bus stops within a 10 minute walk ----------
@@ -192,8 +180,7 @@ print(f"  {len(near)} stops -> {len(board)} on the board, covering all {len(cove
 (ROOT / "src").mkdir(exist_ok=True)
 (ROOT / "src" / "stokey-stops.json").write_text(json.dumps({
     "home": {"lat": HOME[0], "lon": HOME[1]},
-    "bbox": {"s": BBOX[0], "w": BBOX[1], "n": BBOX[2], "e": BBOX[3]},
-    "rail": {"naptan": RAIL_NAPTAN, "line": "Weaver", "lineId": "weaver",
+    "rail": {"naptan": RAIL_NAPTAN, "line": "Weaver", "lineId": RAIL_LINE_ID,
              "inDirection": RAIL_IN_DIRECTION, "inDestinationNaptan": RAIL_IN_DESTINATION},
     "terminus": terminus,
     "london": london,
@@ -201,36 +188,84 @@ print(f"  {len(near)} stops -> {len(board)} on the board, covering all {len(cove
 }, indent=2) + "\n")
 
 # ---------- 4. map geometry ----------
+# Nothing is clipped: the map opens framed on the flat, but you can pan out to
+# either end of any route.
+rnd = lambda path: [[round(x, 5), round(y, 5)] for x, y in path]
+
 print("bus route geometry (TfL) ...", flush=True)
 features = []
 for ln in BUS_LINES:
     for d in ("inbound", "outbound"):
         for s in sequence(ln, d).get("lineStrings") or []:
             for path in json.loads(s):
-                for run in clip(path):
-                    features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": run},
-                                     "properties": {"kind": "bus", "line": ln, "dir": d, "night": ln.startswith("N")}})
+                if len(path) < 2:
+                    continue
+                features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": rnd(path)},
+                                 "properties": {"kind": "bus", "line": ln, "dir": d, "night": ln.startswith("N")}})
 
 print("rail geometry (OpenStreetMap) ...", flush=True)
-q = f"[out:json][timeout:90];rel({WEAVER_OSM_REL});way(r);out geom;"
-ways = get_json("https://overpass-api.de/api/interpreter",
-                urllib.parse.urlencode({"data": q}).encode(),
-                {"Content-Type": "application/x-www-form-urlencoded"})["elements"]
-for w in ways:
+# Both branches that call at Stoke Newington. They share track most of the way,
+# so ways are deduplicated by id.
+seen_ways, rail_ways = set(), []
+for rel in WEAVER_OSM_RELS:
+    q = f"[out:json][timeout:90];rel({rel});way(r);out geom;"
+    for w in get_json("https://overpass-api.de/api/interpreter",
+                      urllib.parse.urlencode({"data": q}).encode(),
+                      {"Content-Type": "application/x-www-form-urlencoded"})["elements"]:
+        if w["id"] not in seen_ways:
+            seen_ways.add(w["id"])
+            rail_ways.append(w)
+for w in rail_ways:
     path = [[n["lon"], n["lat"]] for n in w.get("geometry", [])]
-    for run in clip(path):
-        features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": run},
+    if len(path) >= 2:
+        features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": rnd(path)},
                          "properties": {"kind": "rail", "line": "Weaver"}})
+print(f"  {len(rail_ways)} ways across {len(WEAVER_OSM_RELS)} branches")
 
-for s in near:
-    features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [s["lon"], s["lat"]]},
-                     "properties": {"kind": "stop", "id": s["id"], "name": s["name"], "letter": s["letter"],
-                                    "walk_min": s["walk_min"], "lines": s["lines"],
-                                    "onBoard": s["id"] in primary, "towards": s["towards"]}})
+# Every stop on every route we show, so panning down the line still has stops on
+# it. The ones within a 10 min walk carry their walk time; the board's 7 are
+# flagged onBoard and are the only ones the map labels.
+walkable = {s["id"]: s for s in near}
+all_stops = {}
+for ln in BUS_LINES:
+    for d in ("inbound", "outbound"):
+        blocks = sequence(ln, d).get("stopPointSequences") or []
+        for sp in (blocks[0].get("stopPoint") or []) if blocks else []:
+            sid = sp.get("id")
+            if not sid:
+                continue
+            e = all_stops.setdefault(sid, {"lat": sp["lat"], "lon": sp["lon"],
+                                           "name": sp.get("name", ""), "letter": sp.get("stopLetter") or "",
+                                           "lines": set()})
+            e["lines"].add(ln)
 
-rail_stop = tfl(f"/StopPoint/{RAIL_NAPTAN}")
-features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [rail_stop["lon"], rail_stop["lat"]]},
-                 "properties": {"kind": "station", "name": "Stoke Newington", "line": "Weaver"}})
+for sid, s in all_stops.items():
+    w = walkable.get(sid)
+    props = {"kind": "stop", "id": sid, "name": w["name"] if w else s["name"],
+             "letter": s["letter"], "lines": sorted(s["lines"]),
+             "onBoard": sid in primary, "near": bool(w)}
+    if w:
+        props["walk_min"] = w["walk_min"]
+        props["towards"] = w["towards"]
+    features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
+                     "properties": props})
+print(f"  {len(all_stops)} bus stops on the map, {len(walkable)} within a 10 min walk, {len(primary)} on the board")
+
+# Every Weaver station gets a dot; only the one with departures gets a label.
+# Rectory Road is a 7.7 min walk but every train calls at Stoke Newington first.
+weaver_stops = tfl(f"/Line/{RAIL_LINE_ID}/StopPoints")
+station_walk = walk_times([(s["lat"], s["lon"]) for s in weaver_stops])
+for s, w in zip(weaver_stops, station_walk):
+    props = {"kind": "station", "line": "Weaver", "id": s["naptanId"],
+             "name": s["commonName"].replace(" Rail Station", ""),
+             "onBoard": s["naptanId"] == RAIL_NAPTAN, "near": w <= WALK_LIMIT_S}
+    if w <= WALK_LIMIT_S:
+        props["walk_min"] = round(w / 60, 1)
+    features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
+                     "properties": props})
+print(f"  {len(weaver_stops)} Weaver stations, "
+      f"{sum(1 for w in station_walk if w <= WALK_LIMIT_S)} within a 10 min walk")
+
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
 
@@ -275,7 +310,6 @@ print(f"  {len(routes)} route-directions, {rj.stat().st_size // 1024} KB")
 
 out = ROOT / "public" / "stokey" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps({"type": "FeatureCollection", "bbox": [BBOX[1], BBOX[0], BBOX[3], BBOX[2]],
-                           "features": features}, separators=(",", ":")) + "\n")
+out.write_text(json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":")) + "\n")
 print(f"\nwrote src/stokey-stops.json ({len(board)} stops)")
 print(f"wrote public/stokey/geo.json ({len(features)} features, {out.stat().st_size // 1024} KB)")

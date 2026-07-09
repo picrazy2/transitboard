@@ -21,7 +21,11 @@ interface Route {
 
 const ROUTES = routes as unknown as Record<string, Route>;
 const LONDON = data.london as Record<string, "in" | "out">;
-const BOX = data.bbox;
+const HOME: [number, number] = [data.home.lon, data.home.lat];
+
+// The map pans, so pins are not clipped to a window. This only rejects a
+// position the estimator could not plausibly have produced for a bus due here.
+const MAX_PIN_KM = 12;
 
 const FALLBACK_SPEED = 5.5; // m/s, ~20 km/h: an urban bus including dwell time
 const MIN_SPEED = 1.5;
@@ -90,8 +94,8 @@ function pointAt(key: string, s: number) {
   };
 }
 
-const inBox = (lat: number, lon: number) =>
-  lat >= BOX.s && lat <= BOX.n && lon >= BOX.w && lon <= BOX.e;
+const plausible = (lat: number, lon: number) =>
+  metres([lon, lat], HOME) / 1000 <= MAX_PIN_KM;
 
 /** One pin per (line, direction): the next bus due at our stop for that row. */
 export async function busPins(
@@ -142,7 +146,7 @@ export async function busPins(
     const floor = i0 > 0 ? c[route.idx[i0 - 1]] : 0;
     const s = Math.min(s0, Math.max(floor, s0 - p0.timeToStation * speed));
     const at = pointAt(key, s);
-    if (!inBox(at.lat, at.lon)) continue;
+    if (!plausible(at.lat, at.lon)) continue;
 
     pins.push({
       line: p0.lineName,

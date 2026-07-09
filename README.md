@@ -92,8 +92,19 @@ directly: `inbound` is Liverpool Street, `outbound` is Enfield Town / Cheshunt.
 
 `StopPoint/{naptan}/ArrivalDepartures` returns `scheduledTimeOfDeparture`,
 `estimatedTimeOfDeparture` and `departureStatus`. It works for National-Rail-style
-modes, so the Weaver gets a real delay and real cancellations. Buses get nothing
-from it.
+modes, so the Weaver gets a real delay and real cancellations. A late train
+strikes its scheduled time and prints the expected one in red; an on-time train
+prints its scheduled time in green. Delay is floored, not rounded: a 45-second
+difference is not "1 min late", and rounding it up would strike a time and
+replace it with itself.
+
+Not every Weaver row is live. The feed runs ~110 minutes ahead, but a platform is
+only assigned about 35 minutes out; beyond that the rows are timetable, with
+`estimated == scheduled`. Bus rows, by contrast, are always live — each carries a
+`vehicleId` (the real registration), and a route simply vanishes for a minute
+when no vehicle is being tracked.
+
+Buses get nothing from `ArrivalDepartures`.
 
 There is no honest bus delay to show:
 
@@ -108,6 +119,23 @@ There is no honest bus delay to show:
 
 So bus rows show only ETAs. Three of them at a glance ("1 · 12 · 14") reveals
 bunching far more truthfully than a fabricated delay figure would.
+
+## Interacting with the board
+
+- **Chips** (header) remove a whole line from the board and the map. With every
+  line shown there is no room per departure, so rows are grouped per route with
+  the next three ETAs. As soon as chips narrow the board it switches to one row
+  per vehicle with clock times, like the Stratford board. At least one line
+  always stays on.
+- **Tapping a row, or a labelled stop on the map**, dims everything else rather
+  than removing it. Tap again, or tap the map background, to clear.
+- Both reset themselves after an hour with no interaction — it is a wallboard,
+  and it should not still be filtered the next morning.
+- The map opens framed on the seven board stops, the station and home, but pans
+  and zooms freely: routes and stops run the full length of every line. Only the
+  board's own stops are labelled; every other stop is a dot with a popup.
+  Rectory Road is a 7.7 min walk, but every train calls at Stoke Newington
+  first, so it gets a dot and no row.
 
 ## Live bus pins
 

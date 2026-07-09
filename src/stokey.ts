@@ -104,8 +104,10 @@ async function rail(env: Env): Promise<RailRow[]> {
       const sched = r.scheduledTimeOfDeparture ?? null;
       const est = r.estimatedTimeOfDeparture ?? null;
       const status = r.departureStatus ?? "";
+      // Floor, not round: a 30-second difference is not "1 min late", and
+      // rounding it up strikes through a time and replaces it with itself.
       const delayMin = sched && est
-        ? Math.round((Date.parse(est) - Date.parse(sched)) / 60000)
+        ? Math.max(0, Math.floor((Date.parse(est) - Date.parse(sched)) / 60000))
         : null;
       const eta = mmssToMin(r.minutesAndSecondsToDeparture)
         ?? (est ? Math.max(0, Math.round((Date.parse(est) - Date.now()) / 60000)) : null);
