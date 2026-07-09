@@ -3,9 +3,18 @@
     "lat": 51.5611161,
     "lon": -0.0739865
   },
+  "bbox": {
+    "s": 51.5476,
+    "w": -0.0955,
+    "n": 51.5746,
+    "e": -0.0525
+  },
   "rail": {
     "naptan": "910GSTKNWNG",
-    "line": "Weaver"
+    "line": "Weaver",
+    "lineId": "weaver",
+    "inDirection": "inbound",
+    "inDestinationNaptan": "910GLIVST"
   },
   "terminus": {
     "106|inbound": "Finsbury Park Interchange",
@@ -28,6 +37,28 @@
     "76|outbound": "Lower Marsh",
     "N73|inbound": "Great Titchfield St / Oxford Circus Stn",
     "N73|outbound": "Walthamstow Bus Station"
+  },
+  "london": {
+    "106|inbound": "out",
+    "106|outbound": "in",
+    "149|inbound": "out",
+    "149|outbound": "in",
+    "243|inbound": "out",
+    "243|outbound": "in",
+    "276|inbound": "out",
+    "276|outbound": "out",
+    "393|inbound": "out",
+    "393|outbound": "in",
+    "476|inbound": "out",
+    "476|outbound": "in",
+    "67|inbound": "out",
+    "67|outbound": "in",
+    "73|inbound": "in",
+    "73|outbound": "out",
+    "76|inbound": "out",
+    "76|outbound": "in",
+    "N73|inbound": "in",
+    "N73|outbound": "out"
   },
   "stops": [
     {

@@ -47,7 +47,7 @@
   .hour .rain{color:#5aa9ff}
 
   .wrap{padding:12px;display:flex;flex:1;min-height:0}
-  .cols{display:grid;gap:12px;width:100%;grid-template-columns:0.95fr 1.4fr 1.05fr}
+  .cols{display:grid;gap:12px;width:100%;grid-template-columns:1fr 1fr 1.05fr}
   @media (max-aspect-ratio:1/1){.cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr}#mapPanel{grid-column:1/-1;min-height:340px}}
   .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -58,19 +58,21 @@
 
   .row{border:1px solid var(--rule);border-radius:12px;padding:8px 11px;background:var(--row);
        display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center}
-  .badge{min-width:48px;height:31px;border-radius:8px;display:grid;place-items:center;
+  .badge{min-width:45px;height:31px;border-radius:8px;display:grid;place-items:center;
          font-weight:800;font-size:16px;color:#fff;background:var(--bus);font-variant-numeric:tabular-nums}
   .badge.night{background:var(--night)}
-  /* The rail panel only ever shows one line, so its rows drop the badge and
-     use a colour bar instead — the destination needs every pixel. */
-  .row.rail{grid-template-columns:1fr auto;border-left:4px solid var(--weaver);padding-left:12px}
+  .badge.rail{background:var(--weaver);min-width:60px;font-size:12px;letter-spacing:.02em}
   .mid{min-width:0}
-  .to{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .from{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .etas{display:flex;gap:8px;align-items:baseline;font-variant-numeric:tabular-nums}
-  .etas .n{font-size:22px;font-weight:800}
+  .late{color:var(--warn);font-weight:700}
+  .cancelled{color:var(--bad);font-weight:700}
+  .row.off{opacity:.55}
+  .row.off .etas .n{text-decoration:line-through;color:var(--bad)}
+  .to{font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .from{font-size:10.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .etas{display:flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+  .etas .n{font-size:21px;font-weight:800}
   .etas .n.due{color:var(--ok)}
-  .etas .rest{font-size:14px;color:var(--muted)}
+  .etas .rest{font-size:13px;color:var(--muted)}
   .etas .unit{font-size:12px;color:var(--muted);margin-left:2px}
 
   #mapPanel{padding:0;overflow:hidden;position:relative}
@@ -103,14 +105,15 @@
 <div class="wrap">
   <div class="cols">
     <section class="panel">
-      <h2>Weaver line <span class="count" id="railCount"></span></h2>
-      <div class="panelsub">Stoke Newington station &middot; 6 min walk</div>
-      <div class="list" id="railList"><div class="empty">Loading&hellip;</div></div>
+      <h2>Into London <span class="count" id="inCount"></span></h2>
+      <div class="panelsub">Towards the centre &middot; Weaver and bus</div>
+      <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
     <section class="panel">
-      <h2>Buses <span class="count" id="busCount"></span></h2>
-      <div class="list" id="busList"><div class="empty">Loading&hellip;</div></div>
+      <h2>Out of London <span class="count" id="outCount"></span></h2>
+      <div class="panelsub">Away from the centre &middot; Weaver and bus</div>
+      <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
     <section class="panel" id="mapPanel">
@@ -120,6 +123,7 @@
         <div><span class="swatch" style="background:var(--bus)"></span> Bus routes</div>
         <div><span class="dot" style="border-color:#fff"></span> Stop on board</div>
         <div><span class="dot" style="border-color:#6c7484"></span> Other stop &le;10 min</div>
+        <div><span style="color:#ff5a4d;font-size:11px">&#9650;</span> Next bus <i>(estimated)</i></div>
       </div>
     </section>
   </div>
@@ -134,9 +138,14 @@ const HOME = [51.5611161, -0.0739865];
 
 const walkMins = m => Math.max(1, Math.round(m));
 
-// "Northwold Road / Stoke Newington Common" is a fine sign but a poor label;
-// the first segment is the bit that identifies the stop.
-const shortStop = s => String(s ?? "").split("/")[0].trim();
+// "Northwold Road / Stoke Newington Common" is a fine sign but a poor label: the
+// first segment identifies the stop, and every stop here is in Stoke Newington
+// so the prefix is dead weight.
+function shortStop(s){
+  const first = String(s ?? "").split("/")[0].trim();
+  const trimmed = first.replace(/^Stoke Newington\s+/i, "");
+  return trimmed || first;
+}
 
 // ---------- clock ----------
 const pad = n => String(n).padStart(2, "0");
@@ -196,6 +205,7 @@ const plat = p => (p && p !== "—") ? esc(p.replace(/^Platform\s+/i, "Plat ")) 
 // always the station: "Great Titchfield St / Oxford Circus Stn" -> "Oxford Circus Stn".
 function shortDest(name){
   const norm = s => s
+    .replace(/,\s*/g, " ")          // TfL writes "Tottenham Hale, Bus Station"
     .replace(/\s+/g, " ").trim()
     .replace(/\s+Rail Station$/i, "")
     .replace(/\s+Bus Station$/i, " Bus Stn")
@@ -206,46 +216,66 @@ function shortDest(name){
   return parts.find(p => /\bStn\b/.test(p)) ?? parts[0];
 }
 
-function renderRail(rows){
-  railCount.textContent = rows.length ? `${rows.length} departures` : "";
-  if(!rows.length){ railList.innerHTML = '<div class="empty">No Weaver departures right now.</div>'; return; }
-  // one row per destination, next few ETAs
-  const groups = new Map();
-  for(const r of rows){
-    if(!groups.has(r.to)) groups.set(r.to, []);
-    groups.get(r.to).push(r);
+// Rail and bus share a column, split by whether they head into London or out of
+// it, and interleave by ETA — the question a board answers is "what do I catch
+// next", not "what mode is it".
+const railGroups = (rows, dir) => {
+  const m = new Map();
+  for(const r of rows.filter(r => r.london === dir)){
+    if(!m.has(r.to)) m.set(r.to, {rail:true, line:"Weaver", to:r.to, plat:r.plat,
+                                  delayMin:r.delayMin, cancelled:r.cancelled, etas:[]});
+    m.get(r.to).etas.push(r.etaMin);
   }
-  railList.innerHTML = [...groups.entries()]
-    .sort((a,b) => a[1][0].etaMin - b[1][0].etaMin)
-    .map(([to, rs]) => `
-      <div class="row rail">
-        <div class="mid">
-          <div class="to">${esc(shortDest(to))}</div>
-          ${plat(rs[0].plat) ? `<div class="from">${plat(rs[0].plat)}</div>` : ""}
-        </div>
-        <div class="etas">${etaHTML(rs.slice(0,3).map(r => r.etaMin))}</div>
-      </div>`).join("");
+  return [...m.values()];
+};
+
+// Only the Weaver has a schedule to be late against. TfL exposes no scheduled
+// time for buses, and there is no supported way to join a live bus to a
+// timetabled trip — so a bus row never claims to know its delay.
+function statusHTML(g){
+  if(!g.rail) return "";
+  if(g.cancelled) return ` · <span class="cancelled">Cancelled</span>`;
+  if(g.delayMin >= 1) return ` · <span class="late">${g.delayMin} min late</span>`;
+  return "";  // TfL flags trains "Delayed" while still showing 0 min; don't cry wolf
 }
 
-function renderBuses(rows){
-  const groups = new Map();
-  for(const r of rows){
+const busGroups = (rows, dir) => {
+  const m = new Map();
+  for(const r of rows.filter(r => r.london === dir)){
     const k = `${r.line}|${r.dir}`;
-    if(!groups.has(k)) groups.set(k, {line:r.line, to:r.towards || r.to, stop:r.stop, letter:r.letter, walk:r.walkMin, etas:[]});
-    groups.get(k).etas.push(r.etaMin);
+    if(!m.has(k)) m.set(k, {rail:false, line:r.line, to:r.to, stop:r.stop, letter:r.letter, walk:r.walkMin, etas:[]});
+    m.get(k).etas.push(r.etaMin);
   }
-  const list = [...groups.values()].sort((a,b) => a.etas[0] - b.etas[0]);
-  busCount.textContent = list.length ? `${list.length} routes · ${new Set(list.map(g=>g.line)).size} lines` : "";
-  if(!list.length){ busList.innerHTML = '<div class="empty">No buses due.</div>'; return; }
-  busList.innerHTML = list.map(g => `
-    <div class="row">
-      <div class="badge ${g.line.startsWith("N") ? "night" : ""}">${esc(g.line)}</div>
+  return [...m.values()];
+};
+
+const rowHTML = g => {
+  const badge = g.rail
+    ? `<div class="badge rail">Weaver</div>`
+    : `<div class="badge ${g.line.startsWith("N") ? "night" : ""}">${esc(g.line)}</div>`;
+  // Only one station on this board, and the badge already names the line, so
+  // lead with the platform — it is the part that changes.
+  const sub = g.rail
+    ? `${plat(g.plat) ? plat(g.plat) + " · " : ""}6 min walk${statusHTML(g)}`
+    : `${esc(shortStop(g.stop))}${g.letter ? " (" + esc(g.letter) + ")" : ""} · ${walkMins(g.walk)} min walk`;
+  return `
+    <div class="row ${g.cancelled ? "off" : ""}">
+      ${badge}
       <div class="mid">
         <div class="to">${esc(shortDest(g.to))}</div>
-        <div class="from">${esc(shortStop(g.stop))}${g.letter ? " (" + esc(g.letter) + ")" : ""} · ${walkMins(g.walk)} min walk</div>
+        <div class="from">${sub}</div>
       </div>
       <div class="etas">${etaHTML(g.etas.slice(0,3))}</div>
-    </div>`).join("");
+    </div>`;
+};
+
+function renderDirection(dir, listEl, countEl, rail, buses){
+  const groups = [...railGroups(rail, dir), ...busGroups(buses, dir)]
+    .sort((a,b) => a.etas[0] - b.etas[0]);
+  countEl.textContent = groups.length ? `${groups.length} routes` : "";
+  listEl.innerHTML = groups.length
+    ? groups.map(rowHTML).join("")
+    : '<div class="empty">Nothing due.</div>';
 }
 
 // ---------- map ----------
@@ -291,9 +321,39 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
     `<div style="width:17px;height:17px;background:#20c05b;border:3px solid #0f1115;border-radius:50%;
                  box-shadow:0 0 0 2px #20c05b"></div>`})}).bindPopup("<b>Home</b><br>149 Stoke Newington High St").addTo(map);
 
-  map.fitBounds(L.latLngBounds(of("stop").map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]))
-    .extend([lat, lon]), {padding:[26,26]});
+  // Frame only what the board actually uses — the 7 stops it departs from, the
+  // station and home — plus a little breathing room. The other walkable stops
+  // and the route tails are allowed to run off the edge.
+  const onBoard = of("stop").filter(f => f.properties.onBoard)
+    .concat(of("station"))
+    .map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+  map.fitBounds(L.latLngBounds(onBoard).extend([lat, lon]).pad(0.18), {maxZoom: 16});
 }).catch(e => console.error("geo.json", e));
+
+// ---------- live buses ----------
+// Positions are estimated (TfL publishes no bus coordinates); see src/vehicles.ts.
+const pinLayer = L.layerGroup().addTo(map);
+function renderPins(pins){
+  pinLayer.clearLayers();
+  for(const v of pins){
+    const night = v.line.startsWith("N");
+    const icon = L.divIcon({className:"", iconSize:[26,26], iconAnchor:[13,13], html:
+      `<div style="width:26px;height:26px;position:relative">
+         <div style="position:absolute;inset:0;transform:rotate(${v.bearing}deg)">
+           <div style="width:0;height:0;margin:0 auto;border:5px solid transparent;
+                       border-bottom:9px solid ${night ? "#5b6ed6" : "#ff5a4d"}"></div>
+         </div>
+         <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-40%);
+                     background:${night ? "#1b2a6b" : "#e1251b"};color:#fff;font:800 9px/1 system-ui;
+                     padding:2px 3px;border-radius:3px;border:1px solid #0f1115">${esc(v.line)}</div>
+       </div>`});
+    L.marker([v.lat, v.lon], {icon, zIndexOffset:1000})
+      .bindPopup(`<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
+        ${v.etaMin === 0 ? "Due" : v.etaMin + " min"} at ${esc(shortStop(v.stop))}<br>
+        <span style="color:#9aa3b2">estimated position · ${esc(v.vehicleId)}</span>`)
+      .addTo(pinLayer);
+  }
+}
 
 // ---------- polling ----------
 let lastOk = 0;
@@ -303,8 +363,9 @@ async function refresh(){
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
     renderWeather(d.weather);
-    renderRail(d.rail ?? []);
-    renderBuses(d.buses ?? []);
+    renderDirection("in",  inList,  inCount,  d.rail ?? [], d.buses ?? []);
+    renderDirection("out", outList, outCount, d.rail ?? [], d.buses ?? []);
+    renderPins(d.vehicles ?? []);
     lastOk = Date.now();
     stamp.className = "stamp";
     stamp.textContent = `Updated ${new Date(d.ts * 1000).toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;

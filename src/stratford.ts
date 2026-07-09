@@ -54,8 +54,10 @@ async function darwinBoard(crs: string, env: Env) {
 
   const services = data.trainServices ?? data.GetStationBoardResult?.trainServices ?? [];
   const rows = services.slice(0, 150).map((svc: any) => {
-    let dests = svc.destination ?? [];
-    if (!Array.isArray(dests) && dests.location) dests = [].concat(dests.location);
+    // Darwin returns destination either as an array or as {location: ...}.
+    // Anything else degrades to "—" rather than throwing and blanking the board.
+    const raw = svc.destination;
+    const dests: any[] = Array.isArray(raw) ? raw : raw?.location ? [].concat(raw.location) : [];
     const to = dests.map((d: any) => d?.locationName ?? "").filter(Boolean).join(", ") || "—";
     return { to, plat: svc.platform || "—", sched: svc.std || "—", est: svc.etd || "—", operator: svc.operator || "" };
   });

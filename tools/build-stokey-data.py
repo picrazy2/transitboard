@@ -3,6 +3,8 @@
 
 Writes:
   src/stokey-stops.json   stop list + the (line, direction) pairs each stop is nearest for
+  src/stokey-routes.json  per route-direction: polyline + where each stop sits on it,
+                          used to estimate live bus positions (see src/vehicles.ts)
   public/stokey/geo.json  map geometry: bus routes, Weaver line, stops, home
 
 Bus geometry comes from TfL (~27 m between vertices, road-following).
@@ -14,12 +16,15 @@ around home reaches route 488, but no 488 stop is actually within a 10 min walk.
 
 Usage: python3 tools/build-stokey-data.py
 """
-import json, math, pathlib, sys, urllib.request, urllib.parse
+import json, math, pathlib, sys, time, urllib.error, urllib.parse, urllib.request
 
 HOME = (51.5611161, -0.0739865)  # 149 Stoke Newington High St, N16 0NY
+CHARING_CROSS = (51.5074, -0.1278)  # the conventional centre of London
 WALK_LIMIT_S = 600               # 10 minutes
 SEARCH_RADIUS_M = 900            # safe superset: 600 s at Valhalla's 5.1 km/h is 850 m
-RAIL_NAPTAN = "910GSTKNWNG"      # Stoke Newington Rail Station (Weaver)
+RAIL_NAPTAN = "910GSTKNWNG"      # Stoke Newington Rail Station (Weaver), CRS SKW
+RAIL_IN_DIRECTION = "inbound"    # verified: Weaver inbound = London Liverpool Street
+RAIL_IN_DESTINATION = "910GLIVST"  # ArrivalDepartures carries no direction, only destination
 WEAVER_OSM_REL = 9105028         # "Weaver Line: Liverpool Street -> Enfield Town"
 BBOX = (51.5476, -0.0955, 51.5746, -0.0525)  # ~1.5 km around home
 
@@ -27,14 +32,58 @@ UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def get_json(url, data=None, headers=None):
-    req = urllib.request.Request(url, data=data, headers={**UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=90) as r:
-        return json.load(r)
+# TfL's inbound/outbound says nothing about London: the 67's *inbound* runs to
+# Wood Green (out) while the 149's *outbound* runs to London Bridge (in). So we
+# classify per line: of its two termini, the one nearer Charing Cross is "in".
+# A plain distance threshold would not do — both of the 106's termini are nearer
+# the centre than we are.
+#
+# That rule is meaningless for orbital routes, which never approach the centre.
+# Those are named here explicitly.
+MANUAL_DIRECTION = {
+    # 276 runs Stoke Newington Common <-> Newham Hospital, entirely east of us.
+    "276|inbound": "out",   # -> Gateway Surgical Centre, Newham
+    "276|outbound": "out",  # -> Stoke Newington Common, terminates 400 m away
+}
+
+
+def haversine_km(a, b):
+    R, p = 6371.0, math.pi / 180
+    return 2 * R * math.asin(math.sqrt(
+        math.sin((b[0] - a[0]) * p / 2) ** 2
+        + math.cos(a[0] * p) * math.cos(b[0] * p) * math.sin((b[1] - a[1]) * p / 2) ** 2))
+
+
+def get_json(url, data=None, headers=None, attempts=4):
+    """Overpass and TfL both throttle; a plain 504 should not lose 3 minutes of work."""
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, data=data, headers={**UA, **(headers or {})})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return json.load(r)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+            code = getattr(e, "code", None)
+            retryable = code in (429, 502, 503, 504) or code is None
+            if attempt == attempts - 1 or not retryable:
+                raise
+            wait = 3 * (attempt + 1)
+            print(f"  retry {attempt + 1}/{attempts - 1} after {code or type(e).__name__}, waiting {wait}s", flush=True)
+            time.sleep(wait)
 
 
 def tfl(path, **params):
     return get_json(f"https://api.tfl.gov.uk{path}?{urllib.parse.urlencode(params)}")
+
+
+_seq_cache = {}
+
+
+def sequence(line, direction):
+    """Route sequence for a line+direction. Fetched once; used three times."""
+    key = (line, direction)
+    if key not in _seq_cache:
+        _seq_cache[key] = tfl(f"/Line/{line}/Route/Sequence/{direction}", serviceTypes="Regular")
+    return _seq_cache[key]
 
 
 def walk_times(targets):
@@ -92,18 +141,35 @@ print(f"  {len(near)}/{len(stops)} within {WALK_LIMIT_S // 60} min"
 # ---------- 2. which direction does each line run at each stop ----------
 BUS_LINES = sorted({l for s in near for l in s["lines"]})
 print(f"resolving directions for {len(BUS_LINES)} lines ...", flush=True)
-stop_dirs, terminus = {}, {}
+stop_dirs, terminus, term_km = {}, {}, {}
 for ln in BUS_LINES:
     for d in ("inbound", "outbound"):
-        seq = tfl(f"/Line/{ln}/Route/Sequence/{d}", serviceTypes="Regular")
+        seq = sequence(ln, d)
         for block in seq.get("stopPointSequences") or []:
             sp = block.get("stopPoint") or []
-            if sp:
-                terminus.setdefault(f"{ln}|{d}", sp[-1].get("name", "?"))
+            if sp and f"{ln}|{d}" not in terminus:
+                terminus[f"{ln}|{d}"] = sp[-1].get("name", "?")
+                term_km[f"{ln}|{d}"] = haversine_km((sp[-1]["lat"], sp[-1]["lon"]), CHARING_CROSS)
             for p in sp:
                 nid = p.get("id") or p.get("stationId")
                 if nid:
                     stop_dirs.setdefault(nid, {}).setdefault(ln, set()).add(d)
+
+# ---------- 2b. into London, or out of it? ----------
+london = {}
+for ln in BUS_LINES:
+    pair = {d: f"{ln}|{d}" for d in ("inbound", "outbound")}
+    if all(p in term_km for p in pair.values()):
+        nearer = min(pair.values(), key=lambda p: term_km[p])
+        for p in pair.values():
+            london[p] = "in" if p == nearer else "out"
+london.update({p: v for p, v in MANUAL_DIRECTION.items() if p in terminus})
+
+home_km = haversine_km(HOME, CHARING_CROSS)
+print(f"  into/out of London (home is {home_km:.1f} km from Charing Cross):")
+for p in sorted(london, key=lambda p: (london[p], p)):
+    flag = " [manual]" if p in MANUAL_DIRECTION else ""
+    print(f"    {london[p]:<3} {p:<14} {terminus[p][:32]:<33} {term_km[p]:5.1f} km{flag}")
 
 for s in near:
     s["pairs"] = sorted(f"{l}|{d}" for l in s["lines"] for d in stop_dirs.get(s["id"], {}).get(l, ()))
@@ -126,8 +192,11 @@ print(f"  {len(near)} stops -> {len(board)} on the board, covering all {len(cove
 (ROOT / "src").mkdir(exist_ok=True)
 (ROOT / "src" / "stokey-stops.json").write_text(json.dumps({
     "home": {"lat": HOME[0], "lon": HOME[1]},
-    "rail": {"naptan": RAIL_NAPTAN, "line": "Weaver"},
+    "bbox": {"s": BBOX[0], "w": BBOX[1], "n": BBOX[2], "e": BBOX[3]},
+    "rail": {"naptan": RAIL_NAPTAN, "line": "Weaver", "lineId": "weaver",
+             "inDirection": RAIL_IN_DIRECTION, "inDestinationNaptan": RAIL_IN_DESTINATION},
     "terminus": terminus,
+    "london": london,
     "stops": [{k: s[k] for k in ("id", "name", "letter", "lat", "lon", "walk_min", "primary")} for s in board],
 }, indent=2) + "\n")
 
@@ -136,7 +205,7 @@ print("bus route geometry (TfL) ...", flush=True)
 features = []
 for ln in BUS_LINES:
     for d in ("inbound", "outbound"):
-        for s in tfl(f"/Line/{ln}/Route/Sequence/{d}", serviceTypes="Regular").get("lineStrings") or []:
+        for s in sequence(ln, d).get("lineStrings") or []:
             for path in json.loads(s):
                 for run in clip(path):
                     features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": run},
@@ -164,6 +233,45 @@ features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates":
                  "properties": {"kind": "station", "name": "Stoke Newington", "line": "Weaver"}})
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
+
+# ---------- 5. route polylines + stop offsets, for estimating live bus positions ----------
+# TfL publishes no bus coordinates (`currentLocation` is always empty), so
+# src/vehicles.ts back-projects a bus from its next stop along the route. That
+# needs the full, unclipped polyline and each stop's vertex on it.
+print("route polylines for vehicle positions ...", flush=True)
+routes = {}
+for ln in BUS_LINES:
+    for d in ("inbound", "outbound"):
+        seq = sequence(ln, d)
+        paths = [p for s in (seq.get("lineStrings") or []) for p in json.loads(s)]
+        poly = max(paths, key=len) if paths else []
+        blocks = seq.get("stopPointSequences") or []
+        sp = (blocks[0].get("stopPoint") or []) if blocks else []
+        if len(poly) < 2 or len(sp) < 2:
+            print(f"  !! {ln}|{d}: no usable geometry, skipping")
+            continue
+
+        # Walk forward only, so stop offsets stay monotonic along the route even
+        # where the polyline doubles back on itself.
+        idx, cursor = [], 0
+        for st in sp:
+            best, best_d = cursor, None
+            for i in range(cursor, len(poly)):
+                dd = (poly[i][0] - st["lon"]) ** 2 + (poly[i][1] - st["lat"]) ** 2
+                if best_d is None or dd < best_d:
+                    best_d, best = dd, i
+            idx.append(best)
+            cursor = best
+        routes[f"{ln}|{d}"] = {
+            "poly": [[round(x, 5), round(y, 5)] for x, y in poly],
+            "stops": [s["id"] for s in sp],
+            "idx": idx,
+        }
+
+(ROOT / "src" / "stokey-routes.json").write_text(
+    json.dumps(routes, separators=(",", ":")) + "\n")
+rj = ROOT / "src" / "stokey-routes.json"
+print(f"  {len(routes)} route-directions, {rj.stat().st_size // 1024} KB")
 
 out = ROOT / "public" / "stokey" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)

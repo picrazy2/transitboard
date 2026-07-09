@@ -46,9 +46,13 @@ Set in the Cloudflare Pages dashboard (Settings → Environment variables), or v
 | `TFL_APP_KEY` | yes | both boards |
 | `DARWIN_TOKEN` | no | Stratford's National Rail rows only |
 
+The working `DARWIN_TOKEN` is the one set in the old Render service's dashboard,
+not the one in the old repo's `.env`, which is stale and returns
+`Invalid ApiKey`. Copy it across from Render before retiring that service.
+
 Without `DARWIN_TOKEN` — or with an expired one — `/api/board/stratford` returns
-`rail: []` and the board simply shows no National Rail departures. It does not
-error. Get a key from the [Rail Data Marketplace](https://raildata.org.uk).
+`rail: []` and the board shows no National Rail departures. It does not error.
+New keys come from the [Rail Data Marketplace](https://raildata.org.uk).
 
 ## Regenerating the Stoke Newington data
 
@@ -72,6 +76,52 @@ it does what it does:
   **Rail geometry comes from OpenStreetMap** (~16 m); TfL's rail `lineStrings`
   are straight chords between stations (~1200 m apart) and look wrong drawn on
   a map.
+- **"Into London" is computed, not taken from TfL.** TfL's `inbound`/`outbound`
+  has nothing to do with the centre — the 67's *inbound* runs to Wood Green
+  while the 149's *outbound* runs to London Bridge. So for each line we compare
+  its two termini and call the one nearer Charing Cross "in". A simple distance
+  threshold would not work: both of the 106's termini are nearer the centre than
+  the flat is. Orbital routes that never approach the centre are listed in
+  `MANUAL_DIRECTION` — currently just the 276, which runs Stoke Newington
+  Common to Newham Hospital and goes "out" in both directions.
+
+Weaver is the one case where TfL's own direction is trustworthy and used
+directly: `inbound` is Liverpool Street, `outbound` is Enfield Town / Cheshunt.
+
+## Delays, and why only the Weaver has one
+
+`StopPoint/{naptan}/ArrivalDepartures` returns `scheduledTimeOfDeparture`,
+`estimatedTimeOfDeparture` and `departureStatus`. It works for National-Rail-style
+modes, so the Weaver gets a real delay and real cancellations. Buses get nothing
+from it.
+
+There is no honest bus delay to show:
+
+- TfL's bus predictions carry no scheduled time, and TfL staff have confirmed the
+  `vehicleId` in a prediction does not correspond to anything in the timetable.
+  So a live bus cannot be joined to a scheduled trip.
+- `Line/{id}/Timetable/{stopId}` does publish scheduled times, but every daytime
+  route here runs a **7–12 minute headway**. TfL regulates such routes on excess
+  wait time, not punctuality. Matching a prediction to the nearest scheduled slot
+  would routinely flip sign: on a 7-minute headway a bus 6 minutes late is
+  indistinguishable from the next bus 1 minute early.
+
+So bus rows show only ETAs. Three of them at a glance ("1 · 12 · 14") reveals
+bunching far more truthfully than a fabricated delay figure would.
+
+## Live bus pins
+
+TfL publishes no bus coordinates: `currentLocation` is always empty and the
+dedicated bus-location API was shelved in 2021. The only sanctioned live source
+is **BODS SIRI-VM, operator `TFLO`**, which needs its own (free) API key.
+
+Until then `src/vehicles.ts` estimates. For the next bus on each board row it
+reads `/Vehicle/{ids}/Arrivals`, which gives that bus's predicted arrival at
+every stop still ahead of it. It derives the bus's current speed from the gap to
+the stop after next, then walks backwards along the route polyline by
+`time × speed`, never going back past the stop it has already left. Accurate to
+about a block; pins are labelled *estimated*. Roughly a quarter of pins saturate
+at the previous stop, which is why two buses sometimes share a point.
 
 ## History
 

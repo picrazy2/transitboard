@@ -35,6 +35,19 @@ export interface Prediction {
   expectedArrival?: string;
   direction?: string;
   naptanId?: string;
+  stationName?: string;
+  vehicleId?: string;
+}
+
+/** Only National-Rail-style modes expose this; buses do not. */
+export interface ArrivalDeparture {
+  destinationName?: string;
+  destinationNaptanId?: string;
+  platformName?: string;
+  scheduledTimeOfDeparture?: string;
+  estimatedTimeOfDeparture?: string;
+  minutesAndSecondsToDeparture?: string;
+  departureStatus?: string; // "OnTime" | "Delayed" | "Cancelled"
 }
 
 export async function arrivals(stopId: string, env: Env): Promise<Prediction[]> {
