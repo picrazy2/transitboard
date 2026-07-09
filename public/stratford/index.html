@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Stratford Board">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="tube.png">
 <style>
   :root{
     --bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22;
@@ -234,7 +234,7 @@
 
 <script>
   // === CONFIG ===
-  const API_BASE = "https://stratfordboard.onrender.com";
+  const API_BASE = "/api";   // same-origin Cloudflare Pages Function
   const FETCH_INTERVAL_MS = 60000;
   const TICK_INTERVAL_MS  = 1000;
 
@@ -517,7 +517,7 @@
   // Poll backend
   async function refresh(){
     try{
-      const res = await fetch(`${API_BASE}/board`, {cache:"no-store"});
+      const res = await fetch(`${API_BASE}/board/stratford`, {cache:"no-store"});
       if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = await res.json();
       renderBoard(data);
@@ -565,8 +565,8 @@
       </li>
     </ul>
     <p>
-      Updated once every 60 seconds by the FastAPI backend, which calls the above APIs and returns to the vanilla JavaScript frontend.  
-      FastAPI server hosted on <a href="https://render.com" target="_blank">Render</a>.  
+      Updated once every 60 seconds by a Cloudflare Pages Function, which calls the above APIs and returns to the vanilla JavaScript frontend.
+      Hosted on <a href="https://pages.cloudflare.com" target="_blank">Cloudflare Pages</a>.
       Development assisted by <b>ChatGPT 5</b>.
     </p>
   </div>

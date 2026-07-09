@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stoke Newington Board</title>
+<link rel="manifest" href="/stokey/manifest.webmanifest">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/assets/icon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root{
+    --bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22;--row:#111523;
+    --weaver:#823a62;--bus:#e1251b;--night:#1b2a6b;
+    --ok:#20c05b;--warn:#f2c94c;--bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;
+    display:flex;flex-direction:column;min-height:100dvh;
+    padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
+    padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
+  }
+
+  header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
+  .clock{font-size:clamp(52px,6.4vw,96px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
+  .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
+  .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
+  .station{margin:0;font-size:18px;font-weight:800}
+  .stamp{font-size:13px;color:var(--muted);margin-top:6px}
+  .stamp.stale{color:var(--warn)}
+  .stamp.err{color:var(--bad)}
+
+  .wx{display:flex;align-items:center;gap:14px;margin-top:8px}
+  .wx .now{display:flex;align-items:baseline;gap:8px}
+  .wx .temp{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .wx .icon{font-size:30px;line-height:1}
+  .wx .meta{font-size:13px;color:var(--muted);text-align:right;line-height:1.35}
+  .hours{display:flex;gap:10px;border-left:1px solid var(--rule);padding-left:14px}
+  .hour{text-align:center;font-size:12px;color:var(--muted);line-height:1.5}
+  .hour b{display:block;color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
+  .hour .rain{color:#5aa9ff}
+
+  .wrap{padding:12px;display:flex;flex:1;min-height:0}
+  .cols{display:grid;gap:12px;width:100%;grid-template-columns:0.95fr 1.4fr 1.05fr}
+  @media (max-aspect-ratio:1/1){.cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr}#mapPanel{grid-column:1/-1;min-height:340px}}
+  .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
+  .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
+  .panelsub{font-size:11px;color:var(--muted);margin:-6px 0 9px}
+  .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
+  .empty{color:var(--muted);font-size:14px;padding:16px 4px}
+
+  .row{border:1px solid var(--rule);border-radius:12px;padding:8px 11px;background:var(--row);
+       display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center}
+  .badge{min-width:48px;height:31px;border-radius:8px;display:grid;place-items:center;
+         font-weight:800;font-size:16px;color:#fff;background:var(--bus);font-variant-numeric:tabular-nums}
+  .badge.night{background:var(--night)}
+  /* The rail panel only ever shows one line, so its rows drop the badge and
+     use a colour bar instead — the destination needs every pixel. */
+  .row.rail{grid-template-columns:1fr auto;border-left:4px solid var(--weaver);padding-left:12px}
+  .mid{min-width:0}
+  .to{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .from{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .etas{display:flex;gap:8px;align-items:baseline;font-variant-numeric:tabular-nums}
+  .etas .n{font-size:22px;font-weight:800}
+  .etas .n.due{color:var(--ok)}
+  .etas .rest{font-size:14px;color:var(--muted)}
+  .etas .unit{font-size:12px;color:var(--muted);margin-left:2px}
+
+  #mapPanel{padding:0;overflow:hidden;position:relative}
+  #map{flex:1;min-height:0;background:#0b0d11;border-radius:14px}
+  .leaflet-container{background:#0b0d11}
+  .maplegend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(15,17,21,.86);
+             border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
+             display:flex;flex-direction:column;gap:5px;backdrop-filter:blur(4px)}
+  .maplegend div{display:flex;align-items:center;gap:7px;color:var(--muted)}
+  .swatch{width:16px;height:3px;border-radius:2px}
+  .dot{width:9px;height:9px;border-radius:50%;border:2px solid #fff;background:#0f1115}
+  .stoplabel{font:800 10px system-ui;color:#0f1115}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1b2030;color:var(--ink)}
+  .leaflet-popup-content{margin:9px 12px;font-size:13px;line-height:1.5}
+  .leaflet-popup-content b{font-size:14px}
+  .leaflet-control-attribution{background:rgba(15,17,21,.75)!important;color:#6c7484!important}
+  .leaflet-control-attribution a{color:#8a93a5!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="clock" id="clock">--:--<span class="sec">:--</span></div>
+  <div class="headmeta">
+    <h1 class="station">Stoke Newington &middot; 149 High Street</h1>
+    <div class="wx" id="wx"></div>
+    <div class="stamp" id="stamp">Loading&hellip;</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="cols">
+    <section class="panel">
+      <h2>Weaver line <span class="count" id="railCount"></span></h2>
+      <div class="panelsub">Stoke Newington station &middot; 6 min walk</div>
+      <div class="list" id="railList"><div class="empty">Loading&hellip;</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Buses <span class="count" id="busCount"></span></h2>
+      <div class="list" id="busList"><div class="empty">Loading&hellip;</div></div>
+    </section>
+
+    <section class="panel" id="mapPanel">
+      <div id="map"></div>
+      <div class="maplegend">
+        <div><span class="swatch" style="background:var(--weaver);height:4px"></span> Weaver line</div>
+        <div><span class="swatch" style="background:var(--bus)"></span> Bus routes</div>
+        <div><span class="dot" style="border-color:#fff"></span> Stop on board</div>
+        <div><span class="dot" style="border-color:#6c7484"></span> Other stop &le;10 min</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const API = "/api/board/stokey";
+const REFRESH_MS = 60000;
+const HOME = [51.5611161, -0.0739865];
+
+const walkMins = m => Math.max(1, Math.round(m));
+
+// "Northwold Road / Stoke Newington Common" is a fine sign but a poor label;
+// the first segment is the bit that identifies the stop.
+const shortStop = s => String(s ?? "").split("/")[0].trim();
+
+// ---------- clock ----------
+const pad = n => String(n).padStart(2, "0");
+function tickClock(){
+  const d = new Date();
+  clock.innerHTML = `${pad(d.getHours())}:${pad(d.getMinutes())}<span class="sec">:${pad(d.getSeconds())}</span>`;
+}
+setInterval(tickClock, 1000); tickClock();
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// ---------- weather ----------
+// WMO code -> [emoji day, emoji night, label]
+const WMO = {
+  0:["☀️","🌙","Clear"], 1:["🌤️","🌙","Mostly clear"], 2:["⛅","☁️","Partly cloudy"], 3:["☁️","☁️","Overcast"],
+  45:["🌫️","🌫️","Fog"], 48:["🌫️","🌫️","Rime fog"],
+  51:["🌦️","🌦️","Light drizzle"], 53:["🌦️","🌦️","Drizzle"], 55:["🌦️","🌦️","Heavy drizzle"],
+  56:["🌧️","🌧️","Freezing drizzle"], 57:["🌧️","🌧️","Freezing drizzle"],
+  61:["🌦️","🌦️","Light rain"], 63:["🌧️","🌧️","Rain"], 65:["🌧️","🌧️","Heavy rain"],
+  66:["🌧️","🌧️","Freezing rain"], 67:["🌧️","🌧️","Freezing rain"],
+  71:["🌨️","🌨️","Light snow"], 73:["🌨️","🌨️","Snow"], 75:["❄️","❄️","Heavy snow"], 77:["❄️","❄️","Snow grains"],
+  80:["🌦️","🌦️","Showers"], 81:["🌧️","🌧️","Showers"], 82:["⛈️","⛈️","Violent showers"],
+  85:["🌨️","🌨️","Snow showers"], 86:["❄️","❄️","Snow showers"],
+  95:["⛈️","⛈️","Thunderstorm"], 96:["⛈️","⛈️","Thunder, hail"], 99:["⛈️","⛈️","Thunder, hail"],
+};
+const hhmm = epoch => new Date(epoch * 1000).toLocaleTimeString("en-GB",
+  {hour:"2-digit", minute:"2-digit", timeZone:"Europe/London"});
+
+function renderWeather(w){
+  if(!w){ wx.innerHTML = ""; return; }
+  const [day, night, label] = WMO[w.code] ?? ["🌡️","🌡️","—"];
+  const hours = w.next.slice(0, 4).map(h => `
+    <div class="hour">${hhmm(h.at).slice(0,2)}<b>${Math.round(h.tempC)}°</b>
+      <span class="rain">${h.rainPct != null ? h.rainPct + "%" : "—"}</span></div>`).join("");
+  wx.innerHTML = `
+    <div class="now">
+      <span class="icon">${w.isDay ? day : night}</span>
+      <span class="temp">${Math.round(w.tempC)}°</span>
+    </div>
+    <div class="meta">${esc(label)}<br>feels ${Math.round(w.feelsC)}° &middot; ${Math.round(w.maxC)}°/${Math.round(w.minC)}°</div>
+    <div class="hours">${hours}</div>`;
+}
+
+// ---------- departures ----------
+const etaHTML = list => {
+  const [first, ...rest] = list;
+  const n = first === 0 ? "Due" : first;
+  return `<span class="n ${first === 0 ? "due" : ""}">${n}</span>${first === 0 ? "" : '<span class="unit">min</span>'}
+          ${rest.length ? `<span class="rest">${rest.join(" · ")}</span>` : ""}`;
+};
+
+// "Platform 1" overflows the narrow rail column; "Plat 1" fits.
+const plat = p => (p && p !== "—") ? esc(p.replace(/^Platform\s+/i, "Plat ")) : "";
+
+// TfL terminus names are written for a 40-char sign, not a board column.
+// Where a name is two places joined by "/", the recognisable one is almost
+// always the station: "Great Titchfield St / Oxford Circus Stn" -> "Oxford Circus Stn".
+function shortDest(name){
+  const norm = s => s
+    .replace(/\s+/g, " ").trim()
+    .replace(/\s+Rail Station$/i, "")
+    .replace(/\s+Bus Station$/i, " Bus Stn")
+    .replace(/\s+Station$/i, " Stn");
+  const s = norm(String(name ?? "—"));
+  if(s.length <= 24 || !s.includes("/")) return s;
+  const parts = s.split("/").map(norm);
+  return parts.find(p => /\bStn\b/.test(p)) ?? parts[0];
+}
+
+function renderRail(rows){
+  railCount.textContent = rows.length ? `${rows.length} departures` : "";
+  if(!rows.length){ railList.innerHTML = '<div class="empty">No Weaver departures right now.</div>'; return; }
+  // one row per destination, next few ETAs
+  const groups = new Map();
+  for(const r of rows){
+    if(!groups.has(r.to)) groups.set(r.to, []);
+    groups.get(r.to).push(r);
+  }
+  railList.innerHTML = [...groups.entries()]
+    .sort((a,b) => a[1][0].etaMin - b[1][0].etaMin)
+    .map(([to, rs]) => `
+      <div class="row rail">
+        <div class="mid">
+          <div class="to">${esc(shortDest(to))}</div>
+          ${plat(rs[0].plat) ? `<div class="from">${plat(rs[0].plat)}</div>` : ""}
+        </div>
+        <div class="etas">${etaHTML(rs.slice(0,3).map(r => r.etaMin))}</div>
+      </div>`).join("");
+}
+
+function renderBuses(rows){
+  const groups = new Map();
+  for(const r of rows){
+    const k = `${r.line}|${r.dir}`;
+    if(!groups.has(k)) groups.set(k, {line:r.line, to:r.towards || r.to, stop:r.stop, letter:r.letter, walk:r.walkMin, etas:[]});
+    groups.get(k).etas.push(r.etaMin);
+  }
+  const list = [...groups.values()].sort((a,b) => a.etas[0] - b.etas[0]);
+  busCount.textContent = list.length ? `${list.length} routes · ${new Set(list.map(g=>g.line)).size} lines` : "";
+  if(!list.length){ busList.innerHTML = '<div class="empty">No buses due.</div>'; return; }
+  busList.innerHTML = list.map(g => `
+    <div class="row">
+      <div class="badge ${g.line.startsWith("N") ? "night" : ""}">${esc(g.line)}</div>
+      <div class="mid">
+        <div class="to">${esc(shortDest(g.to))}</div>
+        <div class="from">${esc(shortStop(g.stop))}${g.letter ? " (" + esc(g.letter) + ")" : ""} · ${walkMins(g.walk)} min walk</div>
+      </div>
+      <div class="etas">${etaHTML(g.etas.slice(0,3))}</div>
+    </div>`).join("");
+}
+
+// ---------- map ----------
+const map = L.map("map", {zoomControl:false, attributionControl:true, dragging:false, scrollWheelZoom:false,
+                          doubleClickZoom:false, boxZoom:false, keyboard:false, touchZoom:false});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  subdomains:"abcd", maxZoom:19,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+}).addTo(map);
+map.setView(HOME, 15);
+
+fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
+  const of = kind => geo.features.filter(f => f.properties.kind === kind);
+
+  L.geoJSON(of("bus"), {style: f => ({
+    color: f.properties.night ? "#5b6ed6" : "#e1251b",
+    weight: 2, opacity: f.properties.night ? .45 : .6,
+    dashArray: f.properties.night ? "3 5" : null,
+  })}).addTo(map);
+
+  L.geoJSON(of("rail"), {style:{color:"#823a62", weight:5, opacity:.95}}).addTo(map);
+
+  for(const f of of("stop")){
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    const on = p.onBoard;
+    L.circleMarker([lat, lon], {
+      radius: on ? 7 : 4, color: on ? "#fff" : "#6c7484", weight: 2,
+      fillColor: "#0f1115", fillOpacity: 1,
+    }).bindPopup(`<b>${esc(p.name)}</b>${p.letter ? " (" + esc(p.letter) + ")" : ""}<br>
+      ${p.walk_min} min walk · ${esc(p.lines.join(", "))}<br>
+      <span style="color:#9aa3b2">towards ${esc(p.towards || "—")}</span>`).addTo(map);
+  }
+
+  for(const f of of("station")){
+    const [lon, lat] = f.geometry.coordinates;
+    L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[15,15], html:
+      `<div style="width:15px;height:15px;background:#823a62;border:2.5px solid #fff;border-radius:3px"></div>`})})
+      .bindPopup("<b>Stoke Newington</b><br>Weaver line · 6 min walk").addTo(map);
+  }
+
+  const [lon, lat] = of("home")[0].geometry.coordinates;
+  L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[17,17], html:
+    `<div style="width:17px;height:17px;background:#20c05b;border:3px solid #0f1115;border-radius:50%;
+                 box-shadow:0 0 0 2px #20c05b"></div>`})}).bindPopup("<b>Home</b><br>149 Stoke Newington High St").addTo(map);
+
+  map.fitBounds(L.latLngBounds(of("stop").map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]))
+    .extend([lat, lon]), {padding:[26,26]});
+}).catch(e => console.error("geo.json", e));
+
+// ---------- polling ----------
+let lastOk = 0;
+async function refresh(){
+  try{
+    const res = await fetch(API, {cache:"no-store"});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    renderWeather(d.weather);
+    renderRail(d.rail ?? []);
+    renderBuses(d.buses ?? []);
+    lastOk = Date.now();
+    stamp.className = "stamp";
+    stamp.textContent = `Updated ${new Date(d.ts * 1000).toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
+  }catch(e){
+    const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
+    stamp.className = "stamp " + (lastOk ? "stale" : "err");
+    stamp.textContent = lastOk ? `Stale — last update ${age}s ago` : `Cannot reach board API (${e.message})`;
+  }
+}
+refresh();
+setInterval(refresh, REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if(!document.hidden) refresh(); });
+</script>
+</body>
+</html>

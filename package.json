@@ -1,0 +1,16 @@
+{
+  "name": "transitboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler pages deploy",
+    "data": "python3 tools/build-stokey-data.py"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.99.0"
+  }
+}

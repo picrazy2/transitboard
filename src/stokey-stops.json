@@ -1,0 +1,124 @@
+{
+  "home": {
+    "lat": 51.5611161,
+    "lon": -0.0739865
+  },
+  "rail": {
+    "naptan": "910GSTKNWNG",
+    "line": "Weaver"
+  },
+  "terminus": {
+    "106|inbound": "Finsbury Park Interchange",
+    "106|outbound": "Cavell Street",
+    "149|inbound": "Edmonton Green Bus Station",
+    "149|outbound": "London Bridge Bus Station",
+    "243|inbound": "Wood Green Station",
+    "243|outbound": "Waterloo Station / Mepham Street",
+    "276|inbound": "Gateway Surgical Centre",
+    "276|outbound": "Stoke Newington Common",
+    "393|inbound": "Lea Bridge Roundabout",
+    "393|outbound": "Chalk Farm Road / Morrisons",
+    "476|inbound": "Northumberland Park",
+    "476|outbound": "King's Cross Station   / York Way",
+    "67|inbound": "Wood Green Station",
+    "67|outbound": "Forest Road",
+    "73|inbound": "Great Titchfield St / Oxford Circus Stn",
+    "73|outbound": "Stoke Newington Common",
+    "76|inbound": "Tottenham Hale Bus Station",
+    "76|outbound": "Lower Marsh",
+    "N73|inbound": "Great Titchfield St / Oxford Circus Stn",
+    "N73|outbound": "Walthamstow Bus Station"
+  },
+  "stops": [
+    {
+      "id": "490006282S",
+      "name": "Brooke Road",
+      "letter": "S",
+      "lat": 51.56044,
+      "lon": -0.07406,
+      "walk_min": 0.9,
+      "primary": [
+        "149|inbound",
+        "243|inbound",
+        "276|outbound",
+        "67|inbound",
+        "76|inbound"
+      ]
+    },
+    {
+      "id": "490004452U",
+      "name": "Stoke Newington High Street",
+      "letter": "U",
+      "lat": 51.56065,
+      "lon": -0.07344,
+      "walk_min": 1.2,
+      "primary": [
+        "393|outbound",
+        "476|outbound",
+        "73|inbound",
+        "N73|inbound"
+      ]
+    },
+    {
+      "id": "490004452T",
+      "name": "Stoke Newington High St / Brooke Road",
+      "letter": "T",
+      "lat": 51.56053,
+      "lon": -0.07274,
+      "walk_min": 1.7,
+      "primary": [
+        "106|inbound"
+      ]
+    },
+    {
+      "id": "490005312N",
+      "name": "Stoke Newington High St / Garnham Street",
+      "letter": "F",
+      "lat": 51.56233,
+      "lon": -0.07369,
+      "walk_min": 1.9,
+      "primary": [
+        "393|inbound",
+        "73|outbound"
+      ]
+    },
+    {
+      "id": "490014699W",
+      "name": "William Patten School",
+      "letter": "W",
+      "lat": 51.56208,
+      "lon": -0.07458,
+      "walk_min": 2.0,
+      "primary": [
+        "476|inbound",
+        "N73|outbound"
+      ]
+    },
+    {
+      "id": "490010427D",
+      "name": "Northwold Road / Stoke Newington Common",
+      "letter": "D",
+      "lat": 51.56297,
+      "lon": -0.07187,
+      "walk_min": 4.2,
+      "primary": [
+        "106|outbound",
+        "149|outbound",
+        "243|outbound",
+        "67|outbound",
+        "76|outbound"
+      ]
+    },
+    {
+      "id": "490015168L",
+      "name": "Rectory Road / Brooke Road",
+      "letter": "L",
+      "lat": 51.55977,
+      "lon": -0.0701,
+      "walk_min": 4.4,
+      "primary": [
+        "276|inbound"
+      ]
+    }
+  ]
+}

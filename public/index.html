@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Transit Boards</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/assets/icon.png">
+<style>
+  :root{--bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22}
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;
+    min-height:100dvh;display:flex;flex-direction:column;justify-content:center;
+    padding:max(24px,env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom));
+  }
+  header{text-align:center;margin-bottom:40px}
+  h1{margin:0;font-size:clamp(28px,5vw,44px);font-weight:800;letter-spacing:-.02em}
+  .sub{margin-top:10px;color:var(--muted);font-size:16px}
+  .boards{
+    display:grid;gap:20px;width:100%;max-width:860px;margin:0 auto;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  }
+  a.board{
+    display:flex;flex-direction:column;gap:6px;text-decoration:none;color:inherit;
+    background:var(--panel);border:1px solid var(--rule);border-radius:18px;
+    padding:28px 26px;min-height:190px;justify-content:flex-end;
+    transition:transform .15s ease,border-color .15s ease;
+  }
+  a.board:hover,a.board:focus-visible{transform:translateY(-3px);border-color:#3a4356;outline:none}
+  .name{font-size:30px;font-weight:800;letter-spacing:-.01em}
+  .desc{color:var(--muted);font-size:15px;line-height:1.45}
+  .modes{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .pill{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;color:#fff}
+  footer{margin-top:44px;text-align:center;color:var(--muted);font-size:13px}
+  footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Transit Boards</h1>
+    <div class="sub">Live departures. Pick a board.</div>
+  </header>
+
+  <main class="boards">
+    <a class="board" href="/stokey/">
+      <div class="name">Stoke Newington</div>
+      <div class="desc">Weaver line, 10 buses, weather and a neighbourhood map.</div>
+      <div class="modes">
+        <span class="pill" style="background:#823a62">Weaver</span>
+        <span class="pill" style="background:#e1251b">Bus</span>
+        <span class="pill" style="background:#2b6cb0">Weather</span>
+      </div>
+    </a>
+
+    <a class="board" href="/stratford/">
+      <div class="name">Stratford</div>
+      <div class="desc">Central, Jubilee, Elizabeth, Mildmay, DLR and National Rail.</div>
+      <div class="modes">
+        <span class="pill" style="background:#e32017">Central</span>
+        <span class="pill" style="background:#a0a5a9;color:#111">Jubilee</span>
+        <span class="pill" style="background:#6950a1">Elizabeth</span>
+        <span class="pill" style="background:#00afad;color:#062">DLR</span>
+      </div>
+    </a>
+  </main>
+
+  <footer>
+    Data from <a href="https://api.tfl.gov.uk" target="_blank" rel="noopener">TfL</a>,
+    <a href="https://raildata.org.uk" target="_blank" rel="noopener">Rail Data Marketplace</a> and
+    <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>.
+  </footer>
+</body>
+</html>

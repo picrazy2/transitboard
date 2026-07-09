@@ -1,0 +1,9 @@
+name = "transitboard"
+compatibility_date = "2025-01-09"
+pages_build_output_dir = "public"
+
+# Secrets (set in the Cloudflare dashboard, or `wrangler pages secret put NAME`):
+#   TFL_APP_KEY   — required, both boards
+#   DARWIN_TOKEN  — optional, Stratford National Rail rows; omit and /rail is []
+#
+# For local dev put them in .dev.vars (gitignored).
