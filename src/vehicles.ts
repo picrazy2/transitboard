@@ -90,7 +90,9 @@ function pointAt(key: string, s: number) {
   return {
     lon: a[0] + (b[0] - a[0]) * t,
     lat: a[1] + (b[1] - a[1]) * t,
-    bearing: bearing(a, b),
+    // Rounded: two identical vertices yield a bearing like 1.7e-15, which
+    // serialises into CSS as "rotate(1.7e-15deg)".
+    bearing: Math.round(bearing(a, b) * 10) / 10,
   };
 }
 

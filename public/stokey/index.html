@@ -31,7 +31,6 @@
   .clock{font-size:clamp(52px,6.4vw,96px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
   .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
   .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
-  .station{margin:0;font-size:18px;font-weight:800}
   .stamp{font-size:13px;color:var(--muted);margin-top:6px}
   .stamp.stale{color:var(--warn)}
   .stamp.err{color:var(--bad)}
@@ -109,7 +108,7 @@
              border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
              display:flex;flex-direction:column;gap:5px;backdrop-filter:blur(4px)}
   .maplegend div{display:flex;align-items:center;gap:7px;color:var(--muted)}
-  .swatch{width:16px;height:3px;border-radius:2px}
+  .swatch{width:16px;height:3.5px;border-radius:2px}
   .dot{width:9px;height:9px;border-radius:50%;border:2px solid #fff;background:#0f1115}
   .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1b2030;color:var(--ink)}
   .leaflet-popup-content{margin:9px 12px;font-size:13px;line-height:1.5}
@@ -122,7 +121,6 @@
 <header>
   <div class="clock" id="clock">--:--<span class="sec">:--</span></div>
   <div class="headmeta">
-    <h1 class="station">Stoke Newington &middot; 149 High Street</h1>
     <div class="wx" id="wx"></div>
     <div class="stamp" id="stamp">Loading&hellip;</div>
   </div>
@@ -438,7 +436,7 @@ function renderAll(){
 // Routes and stops run the full length of each line, so the board opens framed
 // on the flat but you can pan out to any terminus.
 const map = L.map("map", {zoomControl:true, attributionControl:true});
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   subdomains:"abcd", maxZoom:19,
   attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
 }).addTo(map);
@@ -447,6 +445,7 @@ map.setView(HOME, 15);
 const busLines = new Map();   // "bus|73|inbound" -> [polyline]
 const railLines = [];
 const stopMarkers = [];       // {id, marker, lines, onBoard}
+let homeMarker = null;
 let homeBounds = null;
 
 fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
@@ -456,8 +455,8 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
     const p = f.properties, key = `bus|${p.line}|${p.dir}`;
     const line = L.geoJSON(f, {style:{
       color: p.night ? "#5b6ed6" : "#e1251b",
-      weight: 2, opacity: p.night ? .45 : .6,
-      dashArray: p.night ? "3 5" : null,
+      weight: p.night ? 2.5 : 3.5, opacity: p.night ? .45 : .6,
+      dashArray: p.night ? "3 6" : null,
     }}).addTo(map);
     if(!busLines.has(key)) busLines.set(key, []);
     busLines.get(key).push(line);
@@ -501,7 +500,7 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   }
 
   const [lon, lat] = of("home")[0].geometry.coordinates;
-  L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[17,17], html:
+  homeMarker = L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[17,17], html:
     `<div style="width:17px;height:17px;background:#20c05b;border:3px solid #0f1115;border-radius:50%;
                  box-shadow:0 0 0 2px #20c05b"></div>`})}).bindPopup("<b>Home</b><br>149 Stoke Newington High St").addTo(map);
 
@@ -519,6 +518,8 @@ recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds,
 
 // ---------- live buses ----------
 // Positions are estimated (TfL publishes no bus coordinates); see src/vehicles.ts.
+const BUS_GLYPH = `<svg viewBox="0 0 24 24" width="10" height="10" fill="#fff" aria-hidden="true"><path d="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4S4 2.5 4 6v10Zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM18 11H6V6h12v5Z"/></svg>`;
+
 const pinLayer = L.layerGroup().addTo(map);
 function renderPins(pins){
   pinLayer.clearLayers();
@@ -526,46 +527,76 @@ function renderPins(pins){
     const key = `bus|${v.line}|${v.dir}`;
     const night = v.line.startsWith("N");
     const dim = FS.active && !FS.keys.has(key);
+    const bg = night ? "#1b2a6b" : "#e1251b";
+    const arrow = night ? "#5b6ed6" : "#ff5a4d";
     const eta = v.etaMin === 0 ? "Due" : `${v.etaMin}m`;
-    const icon = L.divIcon({className:"", iconSize:[54,26], iconAnchor:[13,13], html:
-      `<div style="width:54px;height:26px;position:relative;opacity:${dim ? .28 : 1}">
-         <div style="position:absolute;left:0;top:0;width:26px;height:26px;transform:rotate(${v.bearing}deg)">
+    // The bus sits at the anchor (40,40). A 34px box centred there is rotated by
+    // the bearing, swinging its triangle round to the side the bus is heading.
+    // The label floats above so it never covers the arrow.
+    const icon = L.divIcon({className:"", iconSize:[80,56], iconAnchor:[40,40], html:
+      `<div style="width:80px;height:56px;position:relative;opacity:${dim ? .28 : 1}">
+         <div class="pin-arrow" data-bearing="${v.bearing}"
+              style="position:absolute;left:23px;top:23px;width:34px;height:34px;transform:rotate(${v.bearing}deg)">
            <div style="width:0;height:0;margin:0 auto;border:5px solid transparent;
-                       border-bottom:9px solid ${night ? "#5b6ed6" : "#ff5a4d"}"></div>
+                       border-bottom:9px solid ${arrow}"></div>
          </div>
-         <div style="position:absolute;left:13px;top:50%;transform:translate(-50%,-40%);white-space:nowrap;
-                     background:${night ? "#1b2a6b" : "#e1251b"};color:#fff;font:800 9px/1 system-ui;
-                     padding:2px 3px;border-radius:3px;border:1px solid #0f1115">${esc(v.line)}
-           <span style="font-weight:600;opacity:.9">${esc(eta)}</span></div>
+         <div style="position:absolute;left:36px;top:36px;width:8px;height:8px;border-radius:50%;
+                     background:${bg};border:1.5px solid #0f1115"></div>
+         <div style="position:absolute;left:40px;top:0;transform:translateX(-50%);white-space:nowrap;
+                     display:flex;align-items:center;gap:2.5px;
+                     background:${bg};color:#fff;font:800 9px/1 system-ui;
+                     padding:2.5px 4px;border-radius:4px;border:1px solid #0f1115">
+           ${BUS_GLYPH}<span>${esc(v.line)}</span>
+           <span style="font-weight:600;opacity:.85">${esc(eta)}</span>
+         </div>
        </div>`});
     L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : 1000})
       .bindPopup(`<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
         ${v.etaMin === 0 ? "Due" : v.etaMin + " min"} at ${esc(shortStop(v.stop))}<br>
-        <span style="color:#9aa3b2">estimated position · ${esc(v.vehicleId)}</span>`)
+        <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`)
       .addTo(pinLayer);
   }
 }
 
+const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
+const compass = brg => COMPASS[Math.round((brg % 360) / 45) % 8];
+
 function applyMapFilter(){
+  // When something is focused, everything else on the map recedes — including
+  // the basemap and home — so the one route you tapped is what you see.
+  const focused = FS.active;
+
   for(const [key, lines] of busLines){
     const line = key.split("|")[1];
     const hidden = !selected.has(line);
-    const dim = FS.active && !FS.keys.has(key);
-    for(const l of lines) l.setStyle({opacity: hidden ? 0 : dim ? .12 : (line.startsWith("N") ? .45 : .6)});
+    const night = line.startsWith("N");
+    const dim = focused && !FS.keys.has(key);
+    const base = night ? .45 : .6;
+    for(const l of lines) l.setStyle({
+      opacity: hidden ? 0 : dim ? .08 : focused ? .95 : base,
+      weight: !hidden && focused && !dim ? (night ? 3.5 : 4.5) : (night ? 2.5 : 3.5),
+    });
   }
+
   const railHidden = !selected.has("Weaver");
-  const railDim = FS.active && ![...FS.keys].some(k => k.startsWith("rail|"));
-  for(const l of railLines) l.setStyle({opacity: railHidden ? 0 : railDim ? .15 : .95});
+  const railDim = focused && ![...FS.keys].some(k => k.startsWith("rail|"));
+  for(const l of railLines) l.setStyle({
+    opacity: railHidden ? 0 : railDim ? .08 : .95,
+    weight: !railHidden && focused && !railDim ? 6 : 5,
+  });
 
   for(const s of stopMarkers){
     const serves = s.lines.some(l => selected.has(l));
-    const dim = !serves || (FS.active && !FS.stops.has(s.id));
-    const o = dim ? .25 : 1;
+    const dim = !serves || (focused && !FS.stops.has(s.id));
+    const o = dim ? .15 : 1;
     if(s.marker.setOpacity) s.marker.setOpacity(o);
     else s.marker.setStyle({opacity:o, fillOpacity:o});
     const tip = s.marker.getTooltip && s.marker.getTooltip();
     if(tip && tip.getElement()) tip.getElement().style.opacity = o;
   }
+
+  tiles.setOpacity(focused ? .4 : 1);
+  if(homeMarker) homeMarker.setOpacity(focused ? .35 : 1);
 }
 
 // ---------- polling ----------
