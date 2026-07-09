@@ -131,8 +131,9 @@ bunching far more truthfully than a fabricated delay figure would.
   per vehicle with clock times.
 - **Tapping a row, or a labelled stop on the map**, dims everything else rather
   than removing it: the other routes, stops, pins, the Weaver line, home, and
-  the basemap tiles all recede, and the focused route thickens. Tap again, or
-  tap the map background, to clear.
+  the basemap tiles all fall away to near-invisible (see `DIM` in the page),
+  and the focused route thickens and brightens. Tap again, or tap the map
+  background, to clear.
 - Both reset themselves after an hour with no interaction — it is a wallboard,
   and it should not still be filtered the next morning.
 - The map opens framed on the seven board stops, the station and home, but pans
