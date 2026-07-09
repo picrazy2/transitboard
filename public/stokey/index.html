@@ -374,12 +374,21 @@ function renderFilters(){
   }).join("");
 }
 
+// Same behaviour as the Stratford board: from "everything shown", the first tap
+// isolates that line rather than hiding it — one tap to see just the 73. After
+// that a tap toggles, and clearing the last one shows everything again.
 filters.addEventListener("click", e => {
   const b = e.target.closest(".chip");
   if(!b) return;
   const id = b.dataset.line;
-  // Never let the board go completely empty.
-  if(selected.has(id) && selected.size > 1) selected.delete(id); else selected.add(id);
+  if(selected.size === SERVICES.length){
+    selected = new Set([id]);
+  }else if(selected.has(id)){
+    selected.delete(id);
+    if(selected.size === 0) selected = new Set(SERVICES);
+  }else{
+    selected.add(id);
+  }
   if(focus && !focusStillVisible()) focus = null;
   renderFilters();   // the chip's own on/off state lives in this markup
   renderAll();

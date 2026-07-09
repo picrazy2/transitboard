@@ -122,11 +122,13 @@ bunching far more truthfully than a fabricated delay figure would.
 
 ## Interacting with the board
 
-- **Chips** (header) remove a whole line from the board and the map. With every
-  line shown there is no room per departure, so rows are grouped per route with
-  the next three ETAs. As soon as chips narrow the board it switches to one row
-  per vehicle with clock times, like the Stratford board. At least one line
-  always stays on.
+- **Chips** (header) narrow the board and the map to a set of lines, using the
+  same state machine as the Stratford board: from "everything shown" the first
+  tap *isolates* that line, after which taps toggle, and clearing the last
+  selected line restores everything. The board can never end up empty.
+  With every line shown there is no room per departure, so rows are grouped per
+  route with the next three ETAs; the moment chips narrow it, rows become one
+  per vehicle with clock times.
 - **Tapping a row, or a labelled stop on the map**, dims everything else rather
   than removing it. Tap again, or tap the map background, to clear.
 - Both reset themselves after an hour with no interaction — it is a wallboard,
