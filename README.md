@@ -145,6 +145,10 @@ bunching far more truthfully than a fabricated delay figure would.
   route with the next three ETAs; the moment chips narrow it, rows become one
   per vehicle with clock times.
 - **Only**, in a column header, focuses a whole direction.
+- The default (Weaver) table falls back to All when there are no trains — the
+  small hours or engineering — since an empty column helps no one, and reverts on
+  its own when a train reappears. In All mode, if either direction thins below
+  five rows the two columns stack into one, giving the map the width.
 - Tapping a row focuses its whole route while the table groups by route. Once the
   table lists one row per vehicle, a row *is* a vehicle: it focuses that one bus,
   frames it, dims every other row in **both** tables, and leaves the layout alone

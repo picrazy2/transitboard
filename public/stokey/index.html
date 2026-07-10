@@ -30,6 +30,7 @@
   header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
   .clock{font-size:clamp(52px,6.4vw,96px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
   .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
+  .clock .ampm{font-size:.32em;font-weight:700;opacity:.85;margin-left:4px}
   .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
   .stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
   .stamp.stale{color:var(--warn)}
@@ -189,7 +190,7 @@
 </head>
 <body>
 <header>
-  <div class="clock" id="clock">--:--<span class="sec">:--</span></div>
+  <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
   <div class="headmeta">
     <div class="wx" id="wx"></div>
   </div>
@@ -260,7 +261,11 @@ function shortStop(s){
 const pad = n => String(n).padStart(2, "0");
 function tickClock(){
   const d = new Date();
-  clock.innerHTML = `${pad(d.getHours())}:${pad(d.getMinutes())}<span class="sec">:${pad(d.getSeconds())}</span>`;
+  let h = d.getHours(); const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12 || 12;
+  clock.innerHTML = `${h}:${pad(d.getMinutes())}`
+    + `<span class="sec">:${pad(d.getSeconds())}</span>`
+    + `<span class="ampm"> ${ampm}</span>`;
 }
 setInterval(tickClock, 1000); tickClock();
 
@@ -474,13 +479,21 @@ let tableAll = false;
 
 const mapNarrowed = () => selected.size !== SERVICES.length;
 
+// Default shows the Weaver alone, but when there are no trains — the small hours,
+// or engineering — an empty column is useless, so it falls back to All. Computed,
+// not stored, so it reverts on its own the moment a train reappears.
+function effectiveTableAll(){
+  if(tableAll) return true;
+  return !(board && board.rail && board.rail.length);
+}
+
 function tableLines(){
   if(mapNarrowed()) return selected;
   // Tapping a stop asks "what can I catch from here". That question has no
   // Default/All to it — the stop's own rows are the answer, whatever line they
   // are on. Same override a chip would give.
   if(focus && focus.kind === "stop") return new Set(SERVICES);
-  return new Set(tableAll ? SERVICES : DEFAULT_LINES);
+  return new Set(effectiveTableAll() ? SERVICES : DEFAULT_LINES);
 }
 
 const tableNarrowed = () => tableLines().size !== SERVICES.length;
@@ -526,11 +539,12 @@ function renderFilters(){
   // switch has nothing to say — it greys out rather than vanishing, which would
   // shuffle the chips sideways.
   const dead = mapNarrowed();
+  const eff = effectiveTableAll();
   const seg =
     `<div class="seg ${dead ? "dead" : ""}" ${dead ? 'aria-disabled="true"' : ""} role="group"
           title="${dead ? "Only meaningful when every line is selected" : "What the table lists"}">
-       <button data-table="0" class="${!tableAll ? "on" : ""}" aria-pressed="${!tableAll}">Default</button>
-       <button data-table="1" class="${tableAll ? "on" : ""}" aria-pressed="${tableAll}">All</button>
+       <button data-table="0" class="${!eff ? "on" : ""}" aria-pressed="${!eff}">Default</button>
+       <button data-table="1" class="${eff ? "on" : ""}" aria-pressed="${eff}">All</button>
      </div><span class="chipsep"></span>`;
   filters.innerHTML = seg + SERVICES.map(id => {
     const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
@@ -662,10 +676,25 @@ function focusedSide(){
 }
 
 let layoutClass = "";
+// Rows a direction currently shows, after chip/table filtering — the same set
+// renderDirection will draw.
+function directionCount(dir){
+  return [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)]
+    .filter(shown).length;
+}
+const SPARSE_COLUMN = 5;   // below this, two side-by-side columns waste the space
+
 function applyLayout(){
   const side = focusedSide();
   const stopFocus = focus && focus.kind === "stop";
-  const next = side ? `solo-${side}` : (stopFocus || expanded()) ? "stacked" : "";
+  let next;
+  if(side) next = `solo-${side}`;
+  else if(stopFocus || expanded()) next = "stacked";
+  // Two full columns earn their width only when both are full. Once either
+  // direction thins out — late evening, night — stack them and give the map the
+  // room instead.
+  else if(directionCount("in") < SPARSE_COLUMN || directionCount("out") < SPARSE_COLUMN) next = "stacked";
+  else next = "";
   if(next === layoutClass) return;
   cols.classList.remove("solo-in", "solo-out", "stacked");
   if(next) cols.classList.add(next);
@@ -679,12 +708,22 @@ function applyLayout(){
   })();
 }
 
+function syncToggle(){
+  const eff = effectiveTableAll();
+  for(const b of document.querySelectorAll(".seg button")){
+    const on = (b.dataset.table === "1") === eff;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+  }
+}
+
 function renderAll(){
   if(!board) return;
   FS = focusSets();
   for(const b of document.querySelectorAll(".only")){
     b.setAttribute("aria-pressed", String(!!focus && focus.kind === "dir" && focus.dir === b.dataset.dir));
   }
+  syncToggle();
   applyLayout();
   renderDirection("in",  inList,  inCount);
   renderDirection("out", outList, outCount);
