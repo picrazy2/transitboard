@@ -60,7 +60,6 @@
   .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
   .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
-  .panelsub{font-size:11px;color:var(--muted);margin:-6px 0 9px}
   .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
   .empty{color:var(--muted);font-size:14px;padding:16px 4px}
 
@@ -131,13 +130,11 @@
   <div class="cols">
     <section class="panel">
       <h2>Into London <span class="count" id="inCount"></span></h2>
-      <div class="panelsub">Towards the centre &middot; station is a 6 min walk</div>
       <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
     <section class="panel">
       <h2>Out of London <span class="count" id="outCount"></span></h2>
-      <div class="panelsub">Away from the centre &middot; station is a 6 min walk</div>
       <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
     </section>
 

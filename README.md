@@ -140,7 +140,9 @@ bunching far more truthfully than a fabricated delay figure would.
   and zooms freely: routes and stops run the full length of every line. Only the
   board's own stops are labelled; every other stop is a dot with a popup.
   Rectory Road is a 7.7 min walk, but every train calls at Stoke Newington
-  first, so it gets a dot and no row.
+  first, so it gets a dot and no row. Bus rows name their stop and its walk
+  time; Weaver rows show only the platform and time, since there is one station
+  and it is a 6 min walk.
 
 ## Live bus pins
 
