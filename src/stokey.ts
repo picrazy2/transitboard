@@ -87,7 +87,7 @@ const nextBuses = (rows: BusRow[]): PinInput[] => {
     if (!first.has(k)) first.set(k, r);
   }
   return [...first.entries()].map(([key, r]) => ({
-    vehicleId: r.vehicleId, etaMin: r.etaMin, to: r.to, stop: r.stop,
+    vehicleId: r.vehicleId, etaMin: r.etaMin, expected: r.expected, to: r.to, stop: r.stop,
     key, mode: "bus" as const, london: r.london,
   }));
 };
@@ -110,6 +110,7 @@ async function nextTrains(env: Env): Promise<PinInput[]> {
     first.set(key, {
       vehicleId: p.vehicleId,
       etaMin: etaMin(p),
+      expected: p.expectedArrival ?? null,
       to,
       stop: "Stoke Newington",
       key,

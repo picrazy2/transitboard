@@ -55,20 +55,33 @@
   .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
 
   .wrap{padding:12px;display:flex;flex:1;min-height:0}
+  /* The track list keeps three columns in every state so the widths can be
+     interpolated; a dropped panel collapses to 0fr and fades, rather than
+     disappearing, which display:none would make unanimatable. */
   .cols{display:grid;gap:12px;width:100%;
         grid-template-columns:1.15fr 1.15fr 0.95fr;
-        grid-template-areas:"in out map"}
+        grid-template-rows:1fr;
+        grid-template-areas:"in out map";
+        transition:grid-template-columns .34s cubic-bezier(.4,0,.2,1),
+                   grid-template-rows .34s cubic-bezier(.4,0,.2,1)}
   #inPanel{grid-area:in} #outPanel{grid-area:out} #mapPanel{grid-area:map}
 
   /* Focus one row and the other direction has nothing to say — drop it and give
      the space to the map. Narrow by chip and both directions still matter, so
      stack them in one column instead. */
-  .cols.solo-in {grid-template-columns:1.15fr 2.1fr;grid-template-areas:"in map"}
-  .cols.solo-out{grid-template-columns:1.15fr 2.1fr;grid-template-areas:"out map"}
+  .cols.solo-in {grid-template-columns:1.15fr 0fr 2.1fr}
+  .cols.solo-out{grid-template-columns:0fr 1.15fr 2.1fr}
+  .cols.stacked{grid-template-columns:1.15fr 0fr 2.1fr;grid-template-rows:1fr 1fr;
+                grid-template-areas:"in . map" "out . map"}
+
+  .panel{min-width:0;transition:opacity .22s ease,padding .34s cubic-bezier(.4,0,.2,1)}
   .cols.solo-in  #outPanel,
-  .cols.solo-out #inPanel{display:none}
-  .cols.stacked{grid-template-columns:1.15fr 2.1fr;grid-template-rows:1fr 1fr;
-                grid-template-areas:"in map" "out map"}
+  .cols.solo-out #inPanel{opacity:0;pointer-events:none;overflow:hidden;
+                          padding-left:0;padding-right:0;border:0}
+
+  @media (prefers-reduced-motion:reduce){
+    .cols,.panel{transition:none}
+  }
 
   @media (max-aspect-ratio:1/1){
     .cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;
@@ -78,6 +91,9 @@
   .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
   .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
+  .panel h2 .only{margin-left:auto;font:700 10.5px/1 system-ui;color:var(--muted);cursor:pointer;
+                  background:transparent;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+  .panel h2 .only[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
   .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
   .empty{color:var(--muted);font-size:14px;padding:16px 4px}
 
@@ -159,12 +175,14 @@
 <div class="wrap">
   <div class="cols" id="cols">
     <section class="panel" id="inPanel">
-      <h2>Into London <span class="count" id="inCount"></span></h2>
+      <h2>Into London <span class="count" id="inCount"></span>
+        <button class="only" data-dir="in" title="Show only this direction">Only</button></h2>
       <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
     <section class="panel" id="outPanel">
-      <h2>Out of London <span class="count" id="outCount"></span></h2>
+      <h2>Out of London <span class="count" id="outCount"></span>
+        <button class="only" data-dir="out" title="Show only this direction">Only</button></h2>
       <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
@@ -275,7 +293,18 @@ const etaHTML = (first, rest, exp, walkS) => {
 /** Can you still walk to the stop in time? Re-evaluated every second. */
 const reachable = (secs, walkS) => secs >= walkS;
 
+/** Whole minutes remaining, floored, so "11:03" on a row reads "11m" on its pin. */
+function pinEta(iso, fallbackMin){
+  if(fallbackMin == null && !iso) return "";
+  if(!iso) return fallbackMin === 0 ? "Due" : `${fallbackMin}m`;
+  const secs = Math.round((Date.parse(iso) - Date.now()) / 1000);
+  return secs <= 0 ? "Due" : `${Math.floor(secs / 60)}m`;
+}
+
 function tickETAs(){
+  for(const el of document.querySelectorAll(".pineta")){
+    el.textContent = pinEta(el.dataset.exp || null, el.dataset.min === "" ? null : +el.dataset.min);
+  }
   for(const el of document.querySelectorAll(".etas .n[data-exp]")){
     const c = countdown(el.dataset.exp || null, +el.dataset.min);
     el.textContent = c.text;
@@ -319,10 +348,10 @@ const railGroups = (rows, dir) => {
   const of = rows.filter(r => r.london === dir);
   // Once a line has been filtered down there is room to give every train its
   // own row, the way the Stratford board does it.
-  if(expanded()) return of.map(r => ({...railRow(r), etas:[r.etaMin], one:true}));
+  if(expanded()) return of.map(r => ({...railRow(r), london:dir, etas:[r.etaMin], one:true}));
   const m = new Map();
   for(const r of of){
-    if(!m.has(r.to)) m.set(r.to, railRow(r));
+    if(!m.has(r.to)) m.set(r.to, {...railRow(r), london:dir});
     m.get(r.to).etas.push(r.etaMin);
   }
   return [...m.values()];
@@ -350,11 +379,11 @@ const busRow = r => ({rail:false, line:r.line, to:r.to, stop:r.stop, letter:r.le
 
 const busGroups = (rows, dir) => {
   const of = rows.filter(r => r.london === dir);
-  if(expanded()) return of.map(r => ({...busRow(r), etas:[r.etaMin], one:true}));
+  if(expanded()) return of.map(r => ({...busRow(r), london:dir, etas:[r.etaMin], one:true}));
   const m = new Map();
   for(const r of of){
     const k = `bus|${r.line}|${r.dir}`;
-    if(!m.has(k)) m.set(k, busRow(r));
+    if(!m.has(k)) m.set(k, {...busRow(r), london:dir});
     m.get(k).etas.push(r.etaMin);
   }
   return [...m.values()];
@@ -417,7 +446,9 @@ function focusSets(){
   if(!focus || !board) return {keys, stops, active:false};
   const groups = allGroups().filter(shown);
   for(const g of groups){
-    const hit = focus.kind === "route" ? g.key === focus.key : g.stopId === focus.id;
+    const hit = focus.kind === "route" ? g.key === focus.key
+              : focus.kind === "dir"   ? g.london === focus.dir
+              :                          g.stopId === focus.id;
     if(hit){ keys.add(g.key); stops.add(g.stopId); }
   }
   return {keys, stops, active:true};
@@ -461,7 +492,9 @@ filters.addEventListener("click", e => {
 
 function focusStillVisible(){
   return allGroups().filter(shown).some(g =>
-    focus.kind === "route" ? g.key === focus.key : g.stopId === focus.id);
+    focus.kind === "route" ? g.key === focus.key
+    : focus.kind === "dir" ? g.london === focus.dir
+    : g.stopId === focus.id);
 }
 
 function onRowClick(e){
@@ -473,6 +506,14 @@ function onRowClick(e){
 }
 inList.addEventListener("click", onRowClick);
 outList.addEventListener("click", onRowClick);
+
+function focusDir(dir){
+  focus = (focus && focus.kind === "dir" && focus.dir === dir) ? null : {kind:"dir", dir};
+  renderAll();
+}
+for(const b of document.querySelectorAll(".only")){
+  b.addEventListener("click", e => { e.stopPropagation(); focusDir(b.dataset.dir); });
+}
 
 function focusStop(id){
   focus = (focus && focus.kind === "stop" && focus.id === id) ? null : {kind:"stop", id};
@@ -497,6 +538,7 @@ function renderDirection(dir, listEl, countEl){
 /** Which column holds the focused row. Null for a stop, which serves both
     directions and so has rows in each. */
 function focusedSide(){
+  if(focus && focus.kind === "dir") return focus.dir;
   if(!focus || focus.kind !== "route" || !board) return null;
   for(const dir of ["in", "out"]){
     const groups = [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)];
@@ -513,13 +555,21 @@ function applyLayout(){
   cols.classList.remove("solo-in", "solo-out", "stacked");
   if(next) cols.classList.add(next);
   layoutClass = next;
-  // The map's box just changed size; Leaflet caches it.
-  requestAnimationFrame(() => map.invalidateSize());
+  // Leaflet caches its container size, so it must be told throughout the
+  // transition, not just once at the end.
+  const until = Date.now() + 420;
+  (function follow(){
+    map.invalidateSize({animate:false});
+    if(Date.now() < until) requestAnimationFrame(follow);
+  })();
 }
 
 function renderAll(){
   if(!board) return;
   FS = focusSets();
+  for(const b of document.querySelectorAll(".only")){
+    b.setAttribute("aria-pressed", String(!!focus && focus.kind === "dir" && focus.dir === b.dataset.dir));
+  }
   applyLayout();
   renderDirection("in",  inList,  inCount);
   renderDirection("out", outList, outCount);
@@ -614,6 +664,12 @@ const isFull = () => mapPanel.classList.contains("full");
  */
 function activePairs(){
   if(focus && focus.kind === "route" && focus.key.startsWith("bus|")) return [focus.key.slice(4)];
+  if(focus && focus.kind === "dir"){
+    // every bus route-direction heading that way, from the board's own rows
+    return [...new Set((board?.buses ?? [])
+      .filter(r => r.london === focus.dir)
+      .map(r => `${r.line}|${r.dir}`))].filter(pr => onMap(pr.split("|")[0]));
+  }
   if(expanded() || isFull()){
     return Object.keys(ROUTE_STOPS).filter(pr => onMap(pr.split("|")[0]));
   }
@@ -766,7 +822,9 @@ function renderPins(){
     const arrow = gone ? "#8a90a0" : rail ? "#c184a9" : night ? "#5b6ed6" : "#ff5a4d";
     const glyph = rail ? TRAIN_GLYPH_SM : BUS_GLYPH;
     const label = rail ? shortDest(v.to) : v.line;
-    const eta = v.etaMin == null ? "" : v.etaMin === 0 ? "Due" : `${v.etaMin}m`;
+    // Count down from the same timestamp the row uses. A frozen etaMin drifts up
+    // to a full refresh behind, and rounding it disagreed with the row's m:ss.
+    const eta = pinEta(v.expected, v.etaMin);
     // The bus sits at the anchor (45,42): a round pin carrying the bus glyph.
     // A 40px box centred on it is rotated by the bearing, swinging its triangle
     // round to the side the bus is heading. The banner floats clear above both.
@@ -777,7 +835,8 @@ function renderPins(){
          <div style="position:absolute;left:50px;top:0;transform:translateX(-50%);white-space:nowrap;
                      background:${bg};color:#fff;font:800 9.5px/1 system-ui;
                      padding:3px 5px;border-radius:4px;border:1px solid #0f1115">
-           ${esc(label)}${eta ? ` <span style="font-weight:600;opacity:.85">${esc(eta)}</span>` : ""}
+           ${esc(label)}${eta ? ` <span class="pineta" data-exp="${v.expected ?? ""}" data-min="${v.etaMin ?? ""}"
+                 style="font-weight:600;opacity:.85">${esc(eta)}</span>` : ""}
          </div>
          <div style="position:absolute;left:37px;top:39px;width:26px;height:26px;border-radius:50%;
                      background:${bg};border:2px solid #0f1115;box-shadow:0 0 0 1.5px ${arrow};
@@ -790,7 +849,7 @@ function renderPins(){
          </div>
        </div>`});
     const when = v.etaMin == null ? "already past your stop"
-      : `${v.etaMin === 0 ? "Due" : v.etaMin + " min"} at ${esc(shortStop(v.stop ?? "your stop"))}`;
+      : `${eta === "Due" ? "Due" : eta.replace("m", " min")} at ${esc(shortStop(v.stop ?? "your stop"))}`;
     L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000})
       .bindPopup(`<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
         ${when}<br>
@@ -850,6 +909,29 @@ function applyMapFilter(){
 
   tiles.setOpacity(focused ? DIM.tiles : 1);
   if(homeMarker) homeMarker.setOpacity(focused ? DIM.home : 1);
+  fitFocus();
+}
+
+// Focusing a row should frame the thing you asked about: the stop you would walk
+// to, and the next vehicle heading for it. Refit only when the focus changes, or
+// when the pin first arrives — never on each 60 s refresh, which would yank the
+// map out from under a pan.
+let lastFit = null;
+function fitFocus(){
+  if(!focus || focus.kind !== "route"){ lastFit = null; return; }
+  const stop = stopMarkers.find(s => FS.stops.has(s.id));
+  if(!stop) return;
+  const pin = allPins()
+    .filter(v => v.key === focus.key && v.serving !== false && v.etaMin != null)
+    .sort((a,b) => a.etaMin - b.etaMin)[0];
+  const sig = `${focus.key}|${pin ? "pin" : "none"}`;
+  if(sig === lastFit) return;
+  lastFit = sig;
+
+  const pts = [stop.marker.getLatLng()];
+  if(pin) pts.push(L.latLng(pin.lat, pin.lon));
+  const b = L.latLngBounds(pts);
+  map.fitBounds(pts.length > 1 ? b.pad(0.35) : b.pad(0.002), {maxZoom: 16, animate: true});
 }
 
 /** Name the first and last stop of each route in view; the board's own stops

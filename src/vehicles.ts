@@ -44,6 +44,8 @@ export interface Pin {
   lon: number;
   bearing: number;
   etaMin: number; // at *our* stop, not its next stop
+  /** When it reaches our stop. The pin counts down from this, as the rows do. */
+  expected: string | null;
   stop: string;
   vehicleId: string;
   estimated: true;
@@ -53,6 +55,7 @@ export interface Pin {
 export interface PinInput {
   vehicleId: string;
   etaMin: number;
+  expected: string | null;
   to: string;
   stop: string;
   key: string;
@@ -218,6 +221,7 @@ export async function lineVehicles(env: Env, lines: string[]): Promise<FleetPin[
       bearing: at.bearing,
       serving: !!due,
       etaMin: due ? Math.max(0, Math.round(due.timeToStation / 60)) : null,
+      expected: due?.expectedArrival ?? null,
       vehicleId,
       estimated: true,
     });
@@ -294,6 +298,7 @@ export async function vehiclePins(env: Env, next: PinInput[]): Promise<Pin[]> {
       lon: at.lon,
       bearing: at.bearing,
       etaMin: row.etaMin,
+      expected: row.expected,
       stop: row.stop,
       vehicleId: row.vehicleId,
       estimated: true,

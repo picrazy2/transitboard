@@ -152,7 +152,12 @@ bunching far more truthfully than a fabricated delay figure would.
 `expectedArrival` is a full timestamp, not a rounded minute, so the board counts
 down in seconds (`0:41`, `12:07`) and re-renders every second. Rows are sorted on
 that timestamp, never on `etaMin`: a bus 58 s away and one 86 s away both round
-to `1`, and sorting by the rounded value ordered them by luck. Rail estimates are
+to `1`, and sorting by the rounded value ordered them by luck.
+
+Map pins count down from the same timestamp, floored to whole minutes, so a row
+reading `11:03` has a pin reading `11m`. They used to carry the rounded `etaMin`
+frozen at fetch time, which drifted up to a refresh behind the row and rounded
+the wrong way. Rail estimates are
 only minute-precise upstream, so those tick to `:00`.
 
 A row turns amber and grows a warning triangle when its countdown drops below
@@ -186,9 +191,12 @@ Saturday-night journey should not make Monday 01:00 look served.
 
 ## Narrowing the map
 
-Focus a row and the opposite column slides away; narrow by chip and the two
-columns stack. Either way the map roughly doubles in width, and it becomes *about*
-one or more route-directions:
+Focus a row — or press **Only** in a column header to take a whole direction —
+and the opposite column slides away; narrow by chip and the two columns stack.
+The transitions are animated by interpolating the grid tracks, so a dropped panel
+collapses to `0fr` and fades rather than vanishing. Either way the map roughly
+doubles in width, recentres on the focused stop and the next vehicle heading for
+it, and becomes *about* one or more route-directions:
 
 - every stop on those routes lights up, with their termini labelled
 - one-way arrows survive only on roads those routes actually drive
