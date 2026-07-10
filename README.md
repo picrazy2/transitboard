@@ -169,6 +169,12 @@ bunching far more truthfully than a fabricated delay figure would.
   wallboard, and it should not still be filtered the next morning.
 - Tapping a stop stacks the columns and shows *only* its rows. Note that a stop
   is only ever the nearest for one direction, so one half of the stack collapses.
+  A stop focus overrides Default/All — "what can I catch from here" has no
+  Default to it, so a bus stop lists its buses even while the table is on the
+  Weaver.
+- Tapping a vehicle on the map is the same act as tapping its row: it selects
+  that line and focuses that one vehicle. A vehicle that has already gone past
+  has no row, so it only selects the line.
 - A route calls at stops the board never uses. With the 76 up, Rectory Road (L)
   is drawn like any other stop the 76 passes — small, grey, unlabelled — because
   you would catch the 76 at Northwold Road. It gets its ring and label back under

@@ -473,8 +473,16 @@ let selected = new Set(SERVICES);
 let tableAll = false;
 
 const mapNarrowed = () => selected.size !== SERVICES.length;
-const tableLines = () => mapNarrowed() ? selected
-                       : new Set(tableAll ? SERVICES : DEFAULT_LINES);
+
+function tableLines(){
+  if(mapNarrowed()) return selected;
+  // Tapping a stop asks "what can I catch from here". That question has no
+  // Default/All to it — the stop's own rows are the answer, whatever line they
+  // are on. Same override a chip would give.
+  if(focus && focus.kind === "stop") return new Set(SERVICES);
+  return new Set(tableAll ? SERVICES : DEFAULT_LINES);
+}
+
 const tableNarrowed = () => tableLines().size !== SERVICES.length;
 
 // With every line shown there are ~20 routes and no room per departure, so rows
@@ -584,6 +592,29 @@ function onRowClick(e){
 }
 inList.addEventListener("click", onRowClick);
 outList.addEventListener("click", onRowClick);
+
+/**
+ * Tapping a vehicle on the map is the same act as tapping its row: select its
+ * line, and focus that one vehicle. A vehicle that has already gone past has no
+ * row to focus, so it only selects the line.
+ */
+function focusPin(v){
+  const same = focus && focus.kind === "vehicle" && focus.id === v.vehicleId;
+  if(same){
+    focus = null;
+    selected = new Set(SERVICES);
+    tableAll = false;
+  }else{
+    selected = new Set([v.line]);
+    tableAll = false;
+    focus = v.serving === false ? null : {kind:"vehicle", id:v.vehicleId, key:v.key};
+    // A vehicle can be on the map without being on the board — beyond the rows
+    // we list, or already gone. Do not leave every row dimmed with none lit.
+    if(focus && !focusStillVisible()) focus = null;
+  }
+  renderFilters();
+  renderAll();
+}
 
 function focusDir(dir){
   focus = (focus && focus.kind === "dir" && focus.dir === dir) ? null : {kind:"dir", dir};
@@ -977,10 +1008,12 @@ function renderPins(){
        </div>`});
     const when = v.etaMin == null ? "already past your stop"
       : `${eta === "Due" ? "Due" : eta.replace("m", " min")} at ${esc(shortStop(v.stop ?? "your stop"))}`;
-    const marker = L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000}).addTo(pinLayer);
+    const marker = L.marker([v.lat, v.lon],
+      {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000, vehicleId: v.vehicleId}).addTo(pinLayer);
     infoOn(marker, `<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
         ${when}<br>
         <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`);
+    marker.on("click", () => focusPin(v));
   }
 }
 
