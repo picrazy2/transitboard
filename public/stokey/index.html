@@ -55,8 +55,15 @@
   .chip{font:800 12px/1 system-ui;color:#fff;border:1px solid transparent;border-radius:999px;
         padding:6px 11px;cursor:pointer;opacity:.32;background:#e1251b;transition:opacity .12s ease}
   .chip.weaver{background:var(--weaver)} .chip.night{background:var(--night)}
-  .chip.all{background:transparent;border-color:var(--rule);color:var(--muted);opacity:1}
-  .chip.all.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  /* A two-state switch, not a chip: it never leaves the row, so the chips never
+     shuffle sideways. */
+  .seg{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px}
+  .seg button{font:700 11px/1 system-ui;color:var(--muted);background:transparent;border:0;cursor:pointer;
+              padding:5px 10px;border-radius:999px;transition:background .16s ease,color .16s ease}
+  .seg button.on{background:var(--ink);color:var(--bg)}
+  .seg.dead{opacity:.38}
+  .seg.dead button{cursor:default}
+  .chipsep{width:1px;align-self:stretch;background:var(--rule);margin:0 5px}
   .chip.on{opacity:1}
   .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
 
@@ -224,7 +231,7 @@
         <div><span class="dot" style="border-color:#6c7484"></span> Other stop on these lines</div>
         <div><span style="color:#ff5a4d;font-size:11px">&#9650;</span> Next bus <i>(estimated)</i></div>
         <div><span style="color:#c184a9;font-size:11px">&#9650;</span> Next train <i>(estimated)</i></div>
-        <div><span style="color:#8a90a0;font-size:11px">&#9650;</span> Already past your stop</div>
+        <div><span style="color:#8a90a0;font-size:11px">&#9650;</span> Already past your stop <i>(full screen)</i></div>
         <div><span style="color:#ff8f85;font-size:9px">&#9650;</span> One-way road</div>
       </div>
     </section>
@@ -401,7 +408,7 @@ function statusHTML(g){
 
 const busRow = r => ({rail:false, line:r.line, to:r.to, stop:r.stop, letter:r.letter,
                       walk:r.walkMin, key:`bus|${r.line}|${r.dir}`, stopId:r.stopId,
-                      expected:r.expected, etas:[]});
+                      expected:r.expected, vehicleId:r.vehicleId, etas:[]});
 
 const busGroups = (rows, dir) => {
   const of = rows.filter(r => r.london === dir);
@@ -439,7 +446,8 @@ const rowHTML = g => {
   const miss = !reachable(countdown(g.expected, g.etas[0]).secs, walkS);
   return `
     <div class="row ${g.cancelled ? "off" : ""} ${miss ? "unreachable" : ""} ${focusMatchesRow(g) ? "" : "dim"}"
-         data-key="${esc(g.key)}" data-stop="${esc(g.stopId ?? "")}">
+         data-key="${esc(g.key)}" data-stop="${esc(g.stopId ?? "")}"
+         ${g.one && g.vehicleId ? `data-veh="${esc(g.vehicleId)}"` : ""}>
       ${badge}
       <div class="mid">
         <div class="to">${esc(shortDest(g.to))}</div>
@@ -454,41 +462,49 @@ const rowHTML = g => {
 //   chips  — remove whole lines from the board and the map
 //   focus  — tap a row or a map stop to dim everything else, without removing it
 const SERVICES = ["Weaver", "67", "73", "76", "106", "149", "243", "276", "393", "476", "N73"];
-// The Weaver is the departure you cannot substitute; the buses you already know.
-// So the board opens on the trains alone, one column, with the map taking the
-// rest — and the chips are there when you want a particular bus.
+
+// `selected` is what the MAP draws, and every chip starts on. The table is
+// narrower: with all chips lit there are two useful tables — the Weaver alone
+// (the departure you cannot substitute) or everything — and `tableAll` chooses.
+// Deselect anything and that choice evaporates: the table is simply the
+// selection, so the toggle has nothing left to say and hides itself.
 const DEFAULT_LINES = ["Weaver"];
-let selected = new Set(DEFAULT_LINES);
-// Until a chip is touched, `selected` describes the *table* only: the map still
-// draws every line that is running. Pick a line and the map narrows with you.
-let userChose = false;
+let selected = new Set(SERVICES);
+let tableAll = false;
+
+const mapNarrowed = () => selected.size !== SERVICES.length;
+const tableLines = () => mapNarrowed() ? selected
+                       : new Set(tableAll ? SERVICES : DEFAULT_LINES);
+const tableNarrowed = () => tableLines().size !== SERVICES.length;
 
 // With every line shown there are ~20 routes and no room per departure, so rows
-// are grouped per route with the next three ETAs. Once chips narrow the board,
-// give each vehicle its own row instead — the Stratford layout.
-function expanded(){ return selected.size !== SERVICES.length; }
+// are grouped per route with the next three ETAs. Once the table narrows, give
+// each vehicle its own row instead — the Stratford layout.
+function expanded(){ return tableNarrowed(); }
 let focus = null;          // {kind:"route", key} | {kind:"stop", id} | null
 let board = null;          // last payload
 
 const lineOf = g => g.rail ? "Weaver" : g.line;
-const shown = g => selected.has(lineOf(g));
+const shown = g => tableLines().has(lineOf(g));
 
 /** Which routes and stops the current focus resolves to. Recomputed per render. */
 function focusSets(){
   const keys = new Set(), stops = new Set();
-  if(!focus || !board) return {keys, stops, active:false};
+  if(!focus || !board) return {keys, stops, veh:null, active:false};
   const groups = allGroups().filter(shown);
   for(const g of groups){
-    const hit = focus.kind === "route" ? g.key === focus.key
-              : focus.kind === "dir"   ? g.london === focus.dir
-              :                          g.stopId === focus.id;
+    const hit = focus.kind === "vehicle" ? g.vehicleId === focus.id
+              : focus.kind === "route"   ? g.key === focus.key
+              : focus.kind === "dir"     ? g.london === focus.dir
+              :                            g.stopId === focus.id;
     if(hit){ keys.add(g.key); stops.add(g.stopId); }
   }
-  return {keys, stops, active:true};
+  return {keys, stops, veh: focus.kind === "vehicle" ? focus.id : null, active:true};
 }
 let FS = {keys:new Set(), stops:new Set(), active:false};
 
-const focusMatchesRow = g => !FS.active || FS.keys.has(g.key);
+const focusMatchesRow = g =>
+  !FS.active ? true : FS.veh ? g.vehicleId === FS.veh : FS.keys.has(g.key);
 
 function allGroups(){
   if(!board) return [];
@@ -497,36 +513,45 @@ function allGroups(){
 }
 
 function renderFilters(){
-  const all = selected.size === SERVICES.length;
-  filters.innerHTML =
-    `<button class="chip all ${all ? "on" : ""}" data-all="1" title="Show every line">All</button>`
-    + SERVICES.map(id => {
-        const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
-        return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}">${esc(id)}</button>`;
-      }).join("");
+  // The Default/All switch chooses what the *table* shows while every chip is
+  // lit. Narrow the selection and the table can only be that selection, so the
+  // switch has nothing to say — it greys out rather than vanishing, which would
+  // shuffle the chips sideways.
+  const dead = mapNarrowed();
+  const seg =
+    `<div class="seg ${dead ? "dead" : ""}" ${dead ? 'aria-disabled="true"' : ""} role="group"
+          title="${dead ? "Only meaningful when every line is selected" : "What the table lists"}">
+       <button data-table="0" class="${!tableAll ? "on" : ""}" aria-pressed="${!tableAll}">Default</button>
+       <button data-table="1" class="${tableAll ? "on" : ""}" aria-pressed="${tableAll}">All</button>
+     </div><span class="chipsep"></span>`;
+  filters.innerHTML = seg + SERVICES.map(id => {
+    const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
+    return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}">${esc(id)}</button>`;
+  }).join("");
 }
 
 // Same behaviour as the Stratford board: from "everything shown", the first tap
 // isolates that line rather than hiding it — one tap to see just the 73. After
 // that a tap toggles, and clearing the last one shows everything again.
 filters.addEventListener("click", e => {
-  const b = e.target.closest(".chip");
-  if(!b) return;
-  userChose = true;
-  if(b.dataset.all){
-    selected = new Set(SERVICES);
+  const seg = e.target.closest(".seg button");
+  if(seg){
+    if(seg.parentElement.classList.contains("dead")) return;
+    tableAll = seg.dataset.table === "1";   // the switch touches the table, never the map
     focus = null;
     renderFilters();
     renderAll();
     return;
   }
+  const b = e.target.closest(".chip");
+  if(!b) return;
   const id = b.dataset.line;
-  if(selected.size === SERVICES.length){
-    selected = new Set([id]);
+  if(!mapNarrowed()){
+    selected = new Set([id]);  // from all-lit, the first tap isolates
   }else if(selected.has(id)){
     selected.delete(id);
-    // Clearing the last one returns to the default, not to everything.
-    if(selected.size === 0) selected = new Set(DEFAULT_LINES);
+    // Clearing the last one returns to every chip lit, i.e. the default.
+    if(selected.size === 0){ selected = new Set(SERVICES); tableAll = false; }
   }else{
     selected.add(id);
   }
@@ -537,16 +562,24 @@ filters.addEventListener("click", e => {
 
 function focusStillVisible(){
   return allGroups().filter(shown).some(g =>
-    focus.kind === "route" ? g.key === focus.key
-    : focus.kind === "dir" ? g.london === focus.dir
+    focus.kind === "vehicle" ? g.vehicleId === focus.id
+    : focus.kind === "route" ? g.key === focus.key
+    : focus.kind === "dir"   ? g.london === focus.dir
     : g.stopId === focus.id);
 }
 
 function onRowClick(e){
   const row = e.target.closest(".row");
   if(!row) return;
-  const key = row.dataset.key;
-  focus = (focus && focus.kind === "route" && focus.key === key) ? null : {kind:"route", key};
+  const key = row.dataset.key, veh = row.dataset.veh;
+  // Once the table lists one row per vehicle, a row *is* a vehicle. Focusing the
+  // whole route there would be the same as pressing Only, which is a different
+  // button.
+  if(veh){
+    focus = (focus && focus.kind === "vehicle" && focus.id === veh) ? null : {kind:"vehicle", id:veh, key};
+  }else{
+    focus = (focus && focus.kind === "route" && focus.key === key) ? null : {kind:"route", key};
+  }
   renderAll();
 }
 inList.addEventListener("click", onRowClick);
@@ -589,7 +622,7 @@ function renderDirection(dir, listEl, countEl){
     directions and so has rows in each. */
 function focusedSide(){
   if(focus && focus.kind === "dir") return focus.dir;
-  if(!focus || focus.kind !== "route" || !board) return null;
+  if(!focus || focus.kind !== "route" || !board) return null;   // vehicle/stop keep the stack
   for(const dir of ["in", "out"]){
     const groups = [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)];
     if(groups.some(g => g.key === focus.key)) return dir;
@@ -706,10 +739,9 @@ function operating(line, now = new Date()){
   return iv.some(([a, b]) => m >= a - OPERATING_SLACK && m <= b + OPERATING_SLACK);
 }
 
-// A chip overrides the timetable: ask for the night bus at noon and you get it.
-const onMap = line => userChose
-  ? selected.has(line) && (expanded() || operating(line))
-  : operating(line);
+// Selecting a line overrides the timetable: ask for the night bus at noon and
+// you get it. With every chip lit, the timetable decides.
+const onMap = line => selected.has(line) && (mapNarrowed() || operating(line));
 
 const isFull = () => mapPanel.classList.contains("full");
 
@@ -719,9 +751,10 @@ const isFull = () => mapPanel.classList.contains("full");
  * showing everything (where lighting 900 stops would say nothing).
  */
 function activePairs(){
-  // Opening on the Weaver is not an act of attention — the map stays as it was.
-  if(!userChose && !focus) return [];
-  if(focus && focus.kind === "route" && focus.key.startsWith("bus|")) return [focus.key.slice(4)];
+  // Every chip lit and nothing focused: the map is not *about* anything.
+  if(!mapNarrowed() && !focus && !isFull()) return [];
+  if(focus && (focus.kind === "route" || focus.kind === "vehicle") && focus.key?.startsWith("bus|"))
+    return [focus.key.slice(4)];
   if(focus && focus.kind === "dir"){
     // every bus route-direction heading that way, from the board's own rows
     return [...new Set((board?.buses ?? [])
@@ -733,10 +766,7 @@ function activePairs(){
       .filter(r => r.stopId === focus.id)
       .map(r => `${r.line}|${r.dir}`))].filter(pr => onMap(pr.split("|")[0]));
   }
-  if(expanded() || isFull()){
-    return Object.keys(ROUTE_STOPS).filter(pr => onMap(pr.split("|")[0]));
-  }
-  return [];
+  return Object.keys(ROUTE_STOPS).filter(pr => onMap(pr.split("|")[0]));
 }
 
 /** Stops called at by the active route-directions, and their termini. */
@@ -897,11 +927,14 @@ function allPins(){
 
 function renderPins(){
   pinLayer.clearLayers();
-  for(const v of allPins().filter(v => onMap(v.line))){
+  // Vehicles that have already gone past are clutter on a small map. They are
+  // context, so they only appear full-screen, where there is room for context.
+  const keep = v => onMap(v.line) && (v.serving !== false || isFull());
+  for(const v of allPins().filter(keep)){
     const rail = v.mode === "rail";
     const night = v.line.startsWith("N");
     // "mine" — this vehicle belongs to whatever the map is currently about.
-    const mine = !FS.active || FS.keys.has(v.key);
+    const mine = !FS.active ? true : FS.veh ? v.vehicleId === FS.veh : FS.keys.has(v.key);
     const gone = v.serving === false;
     const dim = FS.active && !mine;
     const bg = gone ? GONE : rail ? "#823a62" : night ? "#1b2a6b" : "#e1251b";
@@ -1024,13 +1057,19 @@ function applyMapFilter(){
 let lastFit = null;
 function fitFocus(){
   // Nothing narrowed, or merely full-screen: leave the view where it is.
-  if(!focus && !expanded()){ lastFit = null; return; }
+  if(!focus && !mapNarrowed()){ lastFit = null; return; }
   const pairs = activePairs();
 
   const pts = [];
   let sig;
 
-  if(focus && focus.kind === "stop"){
+  if(focus && focus.kind === "vehicle"){
+    const v = allPins().find(v => v.vehicleId === focus.id);
+    const stop = stopMarkers.find(s => FS.stops.has(s.id));
+    if(stop) pts.push(stop.marker.getLatLng());
+    if(v) pts.push(L.latLng(v.lat, v.lon));
+    sig = `veh:${focus.id}|${v ? "pin" : "none"}`;
+  }else if(focus && focus.kind === "stop"){
     const stop = stopMarkers.find(s => s.id === focus.id);
     if(!stop) return;
     pts.push(stop.marker.getLatLng());
@@ -1054,21 +1093,24 @@ function fitFocus(){
     sig = `${focus.key}|${pin ? "pin" : "none"}`;
   }else{
     // Chip filter or a whole direction: every stop the board uses for these
-    // routes, plus the soonest bus in each direction so both ends are on screen.
+    // routes, plus the soonest vehicle each way so both ends are on screen.
+    // Rail counts: filtering to the Weaver must frame its next train each way.
     const keys = new Set(pairs.map(pr => `bus|${pr}`));
     const stopIds = new Set((board.buses ?? [])
       .filter(r => keys.has(`bus|${r.line}|${r.dir}`)).map(r => r.stopId));
-    if(selected.has("Weaver")) stopIds.add(RAIL_STOP);
+    const wantRail = selected.has("Weaver") && (!focus || focus.kind !== "route");
+    if(wantRail) stopIds.add(RAIL_STOP);
     for(const s of stopMarkers) if(stopIds.has(s.id)) pts.push(s.marker.getLatLng());
 
-    let buses = 0;
+    let vehicles = 0;
     for(const dir of ["in", "out"]){
       const v = allPins()
-        .filter(v => keys.has(v.key) && v.london === dir && v.serving !== false && v.etaMin != null)
+        .filter(v => v.london === dir && v.serving !== false && v.etaMin != null
+                  && (keys.has(v.key) || (wantRail && v.mode === "rail")))
         .sort((a,b) => a.etaMin - b.etaMin)[0];
-      if(v){ pts.push(L.latLng(v.lat, v.lon)); buses++; }
+      if(v){ pts.push(L.latLng(v.lat, v.lon)); vehicles++; }
     }
-    sig = `${[...keys].sort().join(",")}|${stopIds.size}|${buses}`;
+    sig = `${[...keys].sort().join(",")}|${wantRail ? "rail" : ""}|${stopIds.size}|${vehicles}`;
   }
 
   if(!pts.length || sig === lastFit) return;
@@ -1123,12 +1165,11 @@ const touched = () => { lastTouch = Date.now(); };
 ["click","touchstart","keydown"].forEach(ev => document.addEventListener(ev, touched, {passive:true}));
 function maybeReset(){
   const idle = Date.now() - lastTouch > RESET_AFTER_MS;
-  const isDefault = !focus && !userChose
-    && selected.size === DEFAULT_LINES.length && DEFAULT_LINES.every(l => selected.has(l));
+  const isDefault = !focus && !mapNarrowed() && !tableAll;
   if(!idle || isDefault) return false;
   focus = null;
-  userChose = false;
-  selected = new Set(DEFAULT_LINES);
+  tableAll = false;
+  selected = new Set(SERVICES);
   renderFilters();
   renderAll();
   if(homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});

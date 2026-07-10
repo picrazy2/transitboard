@@ -125,11 +125,12 @@ bunching far more truthfully than a fabricated delay figure would.
 
 - **The board opens on the Weaver alone**, in a single stacked column, with the
   map taking the rest of the space. The train is the departure you cannot
-  substitute; the buses you already know, and the chips are there when you want a
-  particular one. `All` shows every line.
-  This default is the one state where the chips filter the *table* but not the
-  *map* — every running line stays drawn. Touch any chip and the map narrows with
-  you from then on.
+  substitute; the buses you already know.
+  Every chip starts lit — `selected` is what the **map** draws. What the **table**
+  lists is narrower, and while all chips are lit a `Default | All` switch chooses
+  between the Weaver alone and everything. Deselect any chip and the table can
+  only be that selection, so the switch greys out in place rather than vanishing
+  and shuffling the chips sideways.
 - **Chips** narrow the board and the map to a set of lines, using the same state
   machine as the Stratford board: from "everything shown" the first tap
   *isolates* that line, after which taps toggle, and clearing the last selected
@@ -138,6 +139,12 @@ bunching far more truthfully than a fabricated delay figure would.
   route with the next three ETAs; the moment chips narrow it, rows become one
   per vehicle with clock times.
 - **Only**, in a column header, focuses a whole direction.
+- Tapping a row focuses its whole route while the table groups by route. Once the
+  table lists one row per vehicle, a row *is* a vehicle: it focuses that one bus,
+  frames it, dims every other row in **both** tables, and leaves the layout alone
+  — collapsing a column there would just duplicate `Only`.
+- Vehicles that have already gone past appear only in full screen, where there is
+  room for context.
 - Marker detail opens in a panel pinned to the map's corner rather than a popup
   over whatever you just tapped. There are no zoom buttons: pinch.
 - **Tapping a row, or a labelled stop on the map**, dims everything else rather
