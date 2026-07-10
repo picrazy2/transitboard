@@ -7,12 +7,15 @@
 const FIELDS = {
   current: "temperature_2m,weather_code,is_day",
   hourly: "temperature_2m,weather_code,is_day",
+  daily: "temperature_2m_max,temperature_2m_min",
 };
 
 export interface Weather {
   tempC: number;
   code: number;
   isDay: boolean;
+  maxC: number;
+  minC: number;
   next: { at: number; tempC: number; code: number; isDay: boolean }[];
 }
 
@@ -44,6 +47,8 @@ export async function weather(lat: number, lon: number): Promise<Weather> {
     tempC: d.current.temperature_2m,
     code: d.current.weather_code,
     isDay: !!d.current.is_day,
+    maxC: d.daily.temperature_2m_max[0],
+    minC: d.daily.temperature_2m_min[0],
     next,
   };
 }

@@ -31,15 +31,18 @@
   .clock{font-size:clamp(52px,6.4vw,96px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
   .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
   .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
-  .stamp{font-size:13px;color:var(--muted);margin-top:6px}
+  .stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
   .stamp.stale{color:var(--warn)}
   .stamp.err{color:var(--bad)}
 
   .wx{display:flex;align-items:center;gap:14px;margin-top:8px}
   .wx .now{display:flex;align-items:baseline;gap:8px}
-  .wx .temp{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
-  .wx .icon{font-size:30px;line-height:1}
-  .wx .meta{font-size:13px;color:var(--muted);text-align:right;line-height:1.35}
+  .wx .temp{font-size:52px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .wx .icon{font-size:40px;line-height:1}
+  .wx .meta{font-size:13px;color:var(--muted);text-align:right;line-height:1.4}
+  .wx .hilo{font-variant-numeric:tabular-nums}
+  .wx .hilo .hi{color:#ffb26b;font-weight:700}
+  .wx .hilo .lo{color:#79b8ff;font-weight:700}
   .hours{display:flex;gap:12px;border-left:1px solid var(--rule);padding-left:14px}
   .hour{text-align:center;font-size:12px;color:var(--muted);line-height:1.35}
   .hour .hicon{display:block;font-size:17px;line-height:1.25}
@@ -47,10 +50,13 @@
 
   /* Chips remove a line entirely. Tapping a row or a labelled stop dims the
      rest instead — a focus, not a filter. */
-  .filters{display:flex;flex-wrap:wrap;gap:7px;padding:9px 14px 0}
+  .chiprow{display:flex;align-items:center;gap:12px;padding:9px 14px 0}
+  .filters{display:flex;flex-wrap:wrap;gap:7px;flex:1;min-width:0}
   .chip{font:800 12px/1 system-ui;color:#fff;border:1px solid transparent;border-radius:999px;
         padding:6px 11px;cursor:pointer;opacity:.32;background:#e1251b;transition:opacity .12s ease}
   .chip.weaver{background:var(--weaver)} .chip.night{background:var(--night)}
+  .chip.all{background:transparent;border-color:var(--rule);color:var(--muted);opacity:1}
+  .chip.all.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
   .chip.on{opacity:1}
   .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
 
@@ -73,6 +79,10 @@
   .cols.solo-out{grid-template-columns:0fr 1.15fr 2.1fr}
   .cols.stacked{grid-template-columns:1.15fr 0fr 2.1fr;grid-template-rows:1fr 1fr;
                 grid-template-areas:"in . map" "out . map"}
+  /* A stop is only ever the nearest for one direction, so one half of the stack
+     would otherwise be a card saying "Nothing due". */
+  .cols.stacked .panel.novalue{display:none}
+  .cols.stacked.one-row{grid-template-rows:1fr}
 
   .panel{min-width:0;transition:opacity .22s ease,padding .34s cubic-bezier(.4,0,.2,1)}
   .cols.solo-in  #outPanel,
@@ -137,17 +147,25 @@
                  border:1px solid var(--rule);border-radius:8px;font-size:15px;cursor:pointer;line-height:1}
   .mapctl button[aria-expanded="true"]{background:var(--ink);color:var(--bg)}
   /* The map panel lifts out of the grid rather than using the Fullscreen API,
-     which iOS does not offer for arbitrary elements. */
-  #mapPanel.full{position:fixed;inset:0;z-index:2000;border-radius:0;background:var(--bg)}
+     which iOS does not offer for arbitrary elements. It stops below the clock,
+     weather and chips, which stay useful while the map is large. */
+  #mapPanel.full{position:fixed;left:0;right:0;bottom:0;top:var(--chrome,0px);
+                 z-index:2000;border-radius:0;background:var(--bg)}
   #mapPanel.full #map{border-radius:0}
   .maplabel{background:rgba(15,17,21,.82)!important;border:none!important;box-shadow:none!important;
             color:var(--ink)!important;font:700 10px system-ui;padding:2px 5px!important;
             border-radius:4px;transition:opacity .12s ease}
   .maplabel::before{display:none!important}
   .maplabel.rail{color:#e8c6dd!important}
-  .leaflet-control-zoom{border:none!important}
-  .leaflet-control-zoom a{background:rgba(15,17,21,.86)!important;color:var(--ink)!important;
-                          border:1px solid var(--rule)!important}
+  /* A panel pinned to the map's corner, rather than a popup that covers whatever
+     you just tapped. */
+  .mapinfo[hidden]{display:none}
+  .mapinfo{position:absolute;left:12px;top:12px;z-index:700;max-width:260px;
+           background:rgba(15,17,21,.92);border:1px solid var(--rule);border-radius:10px;
+           padding:10px 12px;font-size:13px;line-height:1.5;backdrop-filter:blur(6px)}
+  .mapinfo b{font-size:14px}
+  .infoclose{position:absolute;right:6px;top:4px;background:none;border:0;color:var(--muted);
+             font-size:17px;line-height:1;cursor:pointer;padding:2px 5px}
   .maplegend[hidden]{display:none}
   .maplegend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(15,17,21,.86);
              border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
@@ -167,10 +185,12 @@
   <div class="clock" id="clock">--:--<span class="sec">:--</span></div>
   <div class="headmeta">
     <div class="wx" id="wx"></div>
-    <div class="stamp" id="stamp">Loading&hellip;</div>
   </div>
 </header>
-<div class="filters" id="filters"></div>
+<div class="chiprow">
+  <div class="filters" id="filters"></div>
+  <div class="stamp" id="stamp">Loading&hellip;</div>
+</div>
 
 <div class="wrap">
   <div class="cols" id="cols">
@@ -192,6 +212,10 @@
         <button id="fullscreen" title="Full screen">&#10530;</button>
         <button id="recentre" title="Back to Stoke Newington">&#9678;</button>
         <button id="legendBtn" title="Legend" aria-expanded="false">i</button>
+      </div>
+      <div class="mapinfo" id="mapinfo" hidden>
+        <button class="infoclose" id="infoclose" title="Close">&times;</button>
+        <div id="infobody"></div>
       </div>
       <div class="maplegend" id="maplegend" hidden>
         <div><span class="swatch" style="background:var(--weaver);height:4px"></span> Weaver line</div>
@@ -266,7 +290,9 @@ function renderWeather(w){
       <span class="icon">${wmoIcon(w.code, w.isDay)}</span>
       <span class="temp">${Math.round(w.tempC)}°</span>
     </div>
-    <div class="meta">${esc(wmoLabel(w.code))}</div>
+    <div class="meta">${esc(wmoLabel(w.code))}
+      ${w.maxC != null ? `<br><span class="hilo"><span class="hi">H ${Math.round(w.maxC)}°</span>
+        &nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>` : ""}</div>
     <div class="hours">${hours}</div>`;
 }
 
@@ -428,7 +454,14 @@ const rowHTML = g => {
 //   chips  — remove whole lines from the board and the map
 //   focus  — tap a row or a map stop to dim everything else, without removing it
 const SERVICES = ["Weaver", "67", "73", "76", "106", "149", "243", "276", "393", "476", "N73"];
-let selected = new Set(SERVICES);
+// The Weaver is the departure you cannot substitute; the buses you already know.
+// So the board opens on the trains alone, one column, with the map taking the
+// rest — and the chips are there when you want a particular bus.
+const DEFAULT_LINES = ["Weaver"];
+let selected = new Set(DEFAULT_LINES);
+// Until a chip is touched, `selected` describes the *table* only: the map still
+// draws every line that is running. Pick a line and the map narrows with you.
+let userChose = false;
 
 // With every line shown there are ~20 routes and no room per departure, so rows
 // are grouped per route with the next three ETAs. Once chips narrow the board,
@@ -464,10 +497,13 @@ function allGroups(){
 }
 
 function renderFilters(){
-  filters.innerHTML = SERVICES.map(id => {
-    const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
-    return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}">${esc(id)}</button>`;
-  }).join("");
+  const all = selected.size === SERVICES.length;
+  filters.innerHTML =
+    `<button class="chip all ${all ? "on" : ""}" data-all="1" title="Show every line">All</button>`
+    + SERVICES.map(id => {
+        const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
+        return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}">${esc(id)}</button>`;
+      }).join("");
 }
 
 // Same behaviour as the Stratford board: from "everything shown", the first tap
@@ -476,12 +512,21 @@ function renderFilters(){
 filters.addEventListener("click", e => {
   const b = e.target.closest(".chip");
   if(!b) return;
+  userChose = true;
+  if(b.dataset.all){
+    selected = new Set(SERVICES);
+    focus = null;
+    renderFilters();
+    renderAll();
+    return;
+  }
   const id = b.dataset.line;
   if(selected.size === SERVICES.length){
     selected = new Set([id]);
   }else if(selected.has(id)){
     selected.delete(id);
-    if(selected.size === 0) selected = new Set(SERVICES);
+    // Clearing the last one returns to the default, not to everything.
+    if(selected.size === 0) selected = new Set(DEFAULT_LINES);
   }else{
     selected.add(id);
   }
@@ -525,14 +570,19 @@ function focusStop(id){
 const departsAt = g => g.expected ? Date.parse(g.expected) : Date.now() + g.etas[0] * 60000;
 
 function renderDirection(dir, listEl, countEl){
+  // Tapping a stop asks "what can I catch from here" — the other stops' rows are
+  // not dimmed, they are gone.
+  const atStop = focus && focus.kind === "stop" ? focus.id : null;
   const groups = [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)]
     .filter(shown)
+    .filter(g => !atStop || g.stopId === atStop)
     .sort((a,b) => departsAt(a) - departsAt(b));
   countEl.textContent = groups.length
     ? `${groups.length} ${expanded() ? "departures" : "routes"}` : "";
   listEl.innerHTML = groups.length
     ? groups.map(rowHTML).join("")
     : '<div class="empty">Nothing due.</div>';
+  listEl.closest(".panel").classList.toggle("novalue", groups.length === 0);
 }
 
 /** Which column holds the focused row. Null for a stop, which serves both
@@ -550,7 +600,8 @@ function focusedSide(){
 let layoutClass = "";
 function applyLayout(){
   const side = focusedSide();
-  const next = side ? `solo-${side}` : expanded() ? "stacked" : "";
+  const stopFocus = focus && focus.kind === "stop";
+  const next = side ? `solo-${side}` : (stopFocus || expanded()) ? "stacked" : "";
   if(next === layoutClass) return;
   cols.classList.remove("solo-in", "solo-out", "stacked");
   if(next) cols.classList.add(next);
@@ -573,6 +624,9 @@ function renderAll(){
   applyLayout();
   renderDirection("in",  inList,  inCount);
   renderDirection("out", outList, outCount);
+  // In the stack, an empty half collapses rather than sitting there empty.
+  cols.classList.toggle("one-row",
+    inPanel.classList.contains("novalue") !== outPanel.classList.contains("novalue"));
   renderPins();
   applyMapFilter();
   syncFleet();
@@ -622,7 +676,7 @@ function linesHTML(p){
 // ---------- map ----------
 // Routes and stops run the full length of each line, so the board opens framed
 // on the flat but you can pan out to any terminus.
-const map = L.map("map", {zoomControl:true, attributionControl:true});
+const map = L.map("map", {zoomControl:false, attributionControl:true});  // pinch to zoom
 const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   subdomains:"abcd", maxZoom:19,
   attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -653,7 +707,9 @@ function operating(line, now = new Date()){
 }
 
 // A chip overrides the timetable: ask for the night bus at noon and you get it.
-const onMap = line => selected.has(line) && (expanded() || operating(line));
+const onMap = line => userChose
+  ? selected.has(line) && (expanded() || operating(line))
+  : operating(line);
 
 const isFull = () => mapPanel.classList.contains("full");
 
@@ -663,11 +719,18 @@ const isFull = () => mapPanel.classList.contains("full");
  * showing everything (where lighting 900 stops would say nothing).
  */
 function activePairs(){
+  // Opening on the Weaver is not an act of attention — the map stays as it was.
+  if(!userChose && !focus) return [];
   if(focus && focus.kind === "route" && focus.key.startsWith("bus|")) return [focus.key.slice(4)];
   if(focus && focus.kind === "dir"){
     // every bus route-direction heading that way, from the board's own rows
     return [...new Set((board?.buses ?? [])
       .filter(r => r.london === focus.dir)
+      .map(r => `${r.line}|${r.dir}`))].filter(pr => onMap(pr.split("|")[0]));
+  }
+  if(focus && focus.kind === "stop"){
+    return [...new Set((board?.buses ?? [])
+      .filter(r => r.stopId === focus.id)
       .map(r => `${r.line}|${r.dir}`))].filter(pr => onMap(pr.split("|")[0]));
   }
   if(expanded() || isFull()){
@@ -725,16 +788,20 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
       radius: on ? 7 : near ? 4 : 2.5,
       color: on ? "#fff" : near ? "#6c7484" : "#4a5162",
       weight: on ? 2 : 1.5, fillColor: "#0f1115", fillOpacity: 1,
-    }).bindPopup(`<b>${esc(p.name)}</b>${p.letter ? " (" + esc(p.letter) + ")" : ""}<br>
+    }).addTo(map);
+    infoOn(m, `<b>${esc(p.name)}</b>${p.letter ? " (" + esc(p.letter) + ")" : ""}<br>
       ${p.walk_min != null ? walkMins(p.walk_min) + " min walk" : "not within a 10 min walk"}<br>
       ${linesHTML(p)}
-      ${p.towards ? `<br><span style="color:#9aa3b2">towards ${esc(p.towards)}</span>` : ""}`).addTo(map);
+      ${p.towards ? `<br><span style="color:#9aa3b2">towards ${esc(p.towards)}</span>` : ""}`);
     if(on){
       m.bindTooltip(`${esc(shortStop(p.name))}${p.letter ? " " + esc(p.letter) : ""}`,
         {permanent:true, direction:"right", offset:[7,0], className:"maplabel"});
       m.on("click", e => { L.DomEvent.stopPropagation(e); focusStop(p.id); });
     }
-    stopMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false, name:p.name});
+    stopMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false, name:p.name,
+                      base:{radius: on ? 7 : near ? 4 : 2.5,
+                            color: on ? "#fff" : near ? "#6c7484" : "#4a5162",
+                            weight: on ? 2 : 1.5}});
   }
 
   for(const f of of("station")){
@@ -744,11 +811,11 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
     const m = L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[size,size], html:
       `<div style="width:${size}px;height:${size}px;background:#823a62;
                    border:${on ? 2.5 : 1.5}px solid ${on ? "#fff" : "#8a6d7c"};border-radius:3px"></div>`})})
-      .bindPopup(`<b>${esc(p.name)}</b><br>Weaver line${p.walk_min != null ? ` · ${walkMins(p.walk_min)} min walk` : ""}`)
       .addTo(map);
+    infoOn(m, `<b>${esc(p.name)}</b><br>Weaver line${p.walk_min != null ? ` · ${walkMins(p.walk_min)} min walk` : ""}`);
     if(on){
       m.bindTooltip(esc(p.name), {permanent:true, direction:"right", offset:[9,0], className:"maplabel rail"});
-      m.on("click", e => { L.DomEvent.stopPropagation(e); focusStop(p.id); });
+      m.on("click", () => focusStop(p.id));
     }
     stopMarkers.push({id:p.id, marker:m, lines:["Weaver"], onBoard:on, rail:true});
   }
@@ -756,7 +823,8 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   const [lon, lat] = of("home")[0].geometry.coordinates;
   homeMarker = L.marker([lat, lon], {icon: L.divIcon({className:"", iconSize:[17,17], html:
     `<div style="width:17px;height:17px;background:#20c05b;border:3px solid #0f1115;border-radius:50%;
-                 box-shadow:0 0 0 2px #20c05b"></div>`})}).bindPopup("<b>Home</b><br>149 Stoke Newington High St").addTo(map);
+                 box-shadow:0 0 0 2px #20c05b"></div>`})}).addTo(map);
+  infoOn(homeMarker, "<b>Home</b><br>149 Stoke Newington High St");
 
   // Open framed on what the board uses: its 7 stops, the station, home.
   homeBounds = L.latLngBounds(
@@ -767,8 +835,21 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   applyMapFilter();
 }).catch(e => console.error("geo.json", e));
 
-map.on("click", () => { if(focus){ focus = null; renderAll(); } });
+map.on("click", () => { hideInfo(); if(focus){ focus = null; renderAll(); } });
 recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds, {maxZoom: 16}));
+
+function showInfo(html){
+  infobody.innerHTML = html;
+  mapinfo.hidden = false;
+}
+const hideInfo = () => { mapinfo.hidden = true; };
+infoclose.addEventListener("click", e => { e.stopPropagation(); hideInfo(); });
+
+/** Tap a marker and its detail appears in the corner panel, not over the map. */
+function infoOn(marker, html){
+  marker.on("click", e => { L.DomEvent.stopPropagation(e); showInfo(typeof html === "function" ? html() : html); });
+  return marker;
+}
 
 legendBtn.addEventListener("click", () => {
   const open = maplegend.hidden;
@@ -777,6 +858,11 @@ legendBtn.addEventListener("click", () => {
 });
 
 fullscreen.addEventListener("click", () => {
+  if(!mapPanel.classList.contains("full")){
+    // Freeze where the chrome ends, before the panel leaves the flow.
+    document.documentElement.style.setProperty(
+      "--chrome", `${Math.round(document.querySelector(".wrap").getBoundingClientRect().top)}px`);
+  }
   const full = mapPanel.classList.toggle("full");
   fullscreen.innerHTML = full ? "&#10531;" : "&#10530;";
   fullscreen.title = full ? "Exit full screen" : "Full screen";
@@ -850,11 +936,10 @@ function renderPins(){
        </div>`});
     const when = v.etaMin == null ? "already past your stop"
       : `${eta === "Due" ? "Due" : eta.replace("m", " min")} at ${esc(shortStop(v.stop ?? "your stop"))}`;
-    L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000})
-      .bindPopup(`<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
+    const marker = L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000}).addTo(pinLayer);
+    infoOn(marker, `<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
         ${when}<br>
-        <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`)
-      .addTo(pinLayer);
+        <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`);
   }
 }
 
@@ -865,6 +950,9 @@ function applyMapFilter(){
   // When something is focused, everything else on the map recedes — including
   // the basemap and home — so the one route you tapped is what you see.
   const focused = FS.active;
+  // Narrowing by chip is also an act of attention: what survives should be at
+  // full strength, not the muted weight used when all ten lines are drawn.
+  const attention = focused || activePairs().length > 0;
 
   for(const [key, lines] of busLines){
     const line = key.split("|")[1];
@@ -873,8 +961,8 @@ function applyMapFilter(){
     const dim = focused && !FS.keys.has(key);
     const base = night ? .45 : .6;
     for(const l of lines) l.setStyle({
-      opacity: hidden ? 0 : dim ? DIM.line : focused ? .95 : base,
-      weight: !hidden && focused && !dim ? (night ? 3.5 : 4.5) : (night ? 2.5 : 3.5),
+      opacity: hidden ? 0 : dim ? DIM.line : attention ? .95 : base,
+      weight: !hidden && attention && !dim ? (night ? 3.5 : 4.5) : (night ? 2.5 : 3.5),
     });
   }
 
@@ -894,16 +982,33 @@ function applyMapFilter(){
   });
 
   const act = activeStops();
+  // Of the stops a route calls at, only some are ones *this board* departs from.
+  // Rectory Road (L) is on the 76's route but the board catches the 76 at
+  // Northwold Road — so it must not keep its big white ring while the 76 is up.
+  const boardStops = act ? new Set((board?.buses ?? [])
+    .filter(r => FS.keys.has(`bus|${r.line}|${r.dir}`) || activePairs().includes(`${r.line}|${r.dir}`))
+    .map(r => r.stopId)) : null;
+  if(act && selected.has("Weaver")) boardStops.add(RAIL_STOP);
+
   for(const s of stopMarkers){
     const serves = s.lines.some(onMap);
     // With a route in view, light every stop it calls at, not just the board's.
     const dim = !serves || (act ? !act.all.has(s.id)
                                 : (focused && !FS.stops.has(s.id)));
     const o = dim ? DIM.stop : 1;
+    const departsHere = !act || boardStops.has(s.id);
     if(s.marker.setOpacity) s.marker.setOpacity(o);
-    else s.marker.setStyle({opacity:o, fillOpacity:o});
+    else{
+      s.marker.setStyle({
+        opacity:o, fillOpacity:o,
+        ...(s.base && !dim && !departsHere
+            ? {radius:4, color:"#6c7484", weight:1.5}   // the route calls, you don't board
+            : s.base ?? {}),
+      });
+    }
     const tip = s.marker.getTooltip && s.marker.getTooltip();
-    if(tip && tip.getElement()) tip.getElement().style.opacity = o;
+    // Only label a stop you would actually walk to.
+    if(tip && tip.getElement()) tip.getElement().style.opacity = (dim || !departsHere) ? 0 : o;
   }
   labelTermini(act);
 
@@ -918,20 +1023,62 @@ function applyMapFilter(){
 // map out from under a pan.
 let lastFit = null;
 function fitFocus(){
-  if(!focus || focus.kind !== "route"){ lastFit = null; return; }
-  const stop = stopMarkers.find(s => FS.stops.has(s.id));
-  if(!stop) return;
-  const pin = allPins()
-    .filter(v => v.key === focus.key && v.serving !== false && v.etaMin != null)
-    .sort((a,b) => a.etaMin - b.etaMin)[0];
-  const sig = `${focus.key}|${pin ? "pin" : "none"}`;
-  if(sig === lastFit) return;
-  lastFit = sig;
+  // Nothing narrowed, or merely full-screen: leave the view where it is.
+  if(!focus && !expanded()){ lastFit = null; return; }
+  const pairs = activePairs();
 
-  const pts = [stop.marker.getLatLng()];
-  if(pin) pts.push(L.latLng(pin.lat, pin.lon));
-  const b = L.latLngBounds(pts);
-  map.fitBounds(pts.length > 1 ? b.pad(0.35) : b.pad(0.002), {maxZoom: 16, animate: true});
+  const pts = [];
+  let sig;
+
+  if(focus && focus.kind === "stop"){
+    const stop = stopMarkers.find(s => s.id === focus.id);
+    if(!stop) return;
+    pts.push(stop.marker.getLatLng());
+    let buses = 0;
+    const keys = new Set(activePairs().map(pr => `bus|${pr}`));
+    for(const dir of ["in", "out"]){
+      const v = allPins()
+        .filter(v => keys.has(v.key) && v.london === dir && v.serving !== false && v.etaMin != null)
+        .sort((a,b) => a.etaMin - b.etaMin)[0];
+      if(v){ pts.push(L.latLng(v.lat, v.lon)); buses++; }
+    }
+    sig = `stop:${focus.id}|${buses}`;
+  }else if(focus && focus.kind === "route"){
+    const stop = stopMarkers.find(s => FS.stops.has(s.id));
+    if(!stop) return;
+    pts.push(stop.marker.getLatLng());
+    const pin = allPins()
+      .filter(v => v.key === focus.key && v.serving !== false && v.etaMin != null)
+      .sort((a,b) => a.etaMin - b.etaMin)[0];
+    if(pin) pts.push(L.latLng(pin.lat, pin.lon));
+    sig = `${focus.key}|${pin ? "pin" : "none"}`;
+  }else{
+    // Chip filter or a whole direction: every stop the board uses for these
+    // routes, plus the soonest bus in each direction so both ends are on screen.
+    const keys = new Set(pairs.map(pr => `bus|${pr}`));
+    const stopIds = new Set((board.buses ?? [])
+      .filter(r => keys.has(`bus|${r.line}|${r.dir}`)).map(r => r.stopId));
+    if(selected.has("Weaver")) stopIds.add(RAIL_STOP);
+    for(const s of stopMarkers) if(stopIds.has(s.id)) pts.push(s.marker.getLatLng());
+
+    let buses = 0;
+    for(const dir of ["in", "out"]){
+      const v = allPins()
+        .filter(v => keys.has(v.key) && v.london === dir && v.serving !== false && v.etaMin != null)
+        .sort((a,b) => a.etaMin - b.etaMin)[0];
+      if(v){ pts.push(L.latLng(v.lat, v.lon)); buses++; }
+    }
+    sig = `${[...keys].sort().join(",")}|${stopIds.size}|${buses}`;
+  }
+
+  if(!pts.length || sig === lastFit) return;
+  lastFit = sig;
+  // One point is not a view. Fall back to the frame the board opens on.
+  if(pts.length < 2){
+    if(homeBounds) map.fitBounds(homeBounds, {maxZoom: 16, animate: true});
+    return;
+  }
+  map.fitBounds(L.latLngBounds(pts).pad(0.3), {maxZoom: 16, animate: true});
 }
 
 /** Name the first and last stop of each route in view; the board's own stops
@@ -976,10 +1123,12 @@ const touched = () => { lastTouch = Date.now(); };
 ["click","touchstart","keydown"].forEach(ev => document.addEventListener(ev, touched, {passive:true}));
 function maybeReset(){
   const idle = Date.now() - lastTouch > RESET_AFTER_MS;
-  const filtered = focus || selected.size !== SERVICES.length;
-  if(!idle || !filtered) return false;
+  const isDefault = !focus && !userChose
+    && selected.size === DEFAULT_LINES.length && DEFAULT_LINES.every(l => selected.has(l));
+  if(!idle || isDefault) return false;
   focus = null;
-  selected = new Set(SERVICES);
+  userChose = false;
+  selected = new Set(DEFAULT_LINES);
   renderFilters();
   renderAll();
   if(homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});

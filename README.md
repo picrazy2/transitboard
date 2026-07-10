@@ -123,20 +123,36 @@ bunching far more truthfully than a fabricated delay figure would.
 
 ## Interacting with the board
 
-- **Chips** (header) narrow the board and the map to a set of lines, using the
-  same state machine as the Stratford board: from "everything shown" the first
-  tap *isolates* that line, after which taps toggle, and clearing the last
-  selected line restores everything. The board can never end up empty.
+- **The board opens on the Weaver alone**, in a single stacked column, with the
+  map taking the rest of the space. The train is the departure you cannot
+  substitute; the buses you already know, and the chips are there when you want a
+  particular one. `All` shows every line.
+  This default is the one state where the chips filter the *table* but not the
+  *map* — every running line stays drawn. Touch any chip and the map narrows with
+  you from then on.
+- **Chips** narrow the board and the map to a set of lines, using the same state
+  machine as the Stratford board: from "everything shown" the first tap
+  *isolates* that line, after which taps toggle, and clearing the last selected
+  line returns to the default. The board can never end up empty.
   With every line shown there is no room per departure, so rows are grouped per
   route with the next three ETAs; the moment chips narrow it, rows become one
   per vehicle with clock times.
+- **Only**, in a column header, focuses a whole direction.
+- Marker detail opens in a panel pinned to the map's corner rather than a popup
+  over whatever you just tapped. There are no zoom buttons: pinch.
 - **Tapping a row, or a labelled stop on the map**, dims everything else rather
   than removing it: the other routes, stops, pins, the Weaver line, home, and
   the basemap tiles all fall away to near-invisible (see `DIM` in the page),
   and the focused route thickens and brightens. Tap again, or tap the map
   background, to clear.
-- Both reset themselves after an hour with no interaction — it is a wallboard,
-  and it should not still be filtered the next morning.
+- Everything resets to that default after an hour with no interaction — it is a
+  wallboard, and it should not still be filtered the next morning.
+- Tapping a stop stacks the columns and shows *only* its rows. Note that a stop
+  is only ever the nearest for one direction, so one half of the stack collapses.
+- A route calls at stops the board never uses. With the 76 up, Rectory Road (L)
+  is drawn like any other stop the 76 passes — small, grey, unlabelled — because
+  you would catch the 76 at Northwold Road. It gets its ring and label back under
+  the 276, which it *is* the nearest stop for.
 - The map opens framed on the seven board stops, the station and home, but pans
   and zooms freely: routes and stops run the full length of every line. Buttons
   give full screen, recentre, and a legend that stays out of the way until asked
