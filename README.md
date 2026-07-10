@@ -145,6 +145,11 @@ bunching far more truthfully than a fabricated delay figure would.
   — collapsing a column there would just duplicate `Only`.
 - Vehicles that have already gone past appear only in full screen, where there is
   room for context.
+- Map fits use a fixed pixel inset (`FIT`), not `bounds.pad(fraction)` — padding
+  by a fraction of the bounds means two stops a block apart get a tight frame
+  while a bus 3 km out drags a kilometre of margin along. The map also runs
+  `zoomSnap: 0.25`; with integer zoom levels `fitBounds` can only land on a power
+  of two, which leaves a screenful of slack that looks like padding but is not.
 - Marker detail opens in a panel pinned to the map's corner rather than a popup
   over whatever you just tapped. There are no zoom buttons: pinch.
 - **Tapping a row, or a labelled stop on the map**, dims everything else rather

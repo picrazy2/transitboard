@@ -709,7 +709,10 @@ function linesHTML(p){
 // ---------- map ----------
 // Routes and stops run the full length of each line, so the board opens framed
 // on the flat but you can pan out to any terminus.
-const map = L.map("map", {zoomControl:false, attributionControl:true});  // pinch to zoom
+// zoomSnap 0.25: with integer zoom levels, fitBounds can only land on a power of
+// two, so a tight pair of points ends up with a screenful of slack that looks
+// like padding but is not.
+const map = L.map("map", {zoomControl:false, attributionControl:true, zoomSnap:0.25});  // pinch to zoom
 const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   subdomains:"abcd", maxZoom:19,
   attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
@@ -860,13 +863,13 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   homeBounds = L.latLngBounds(
     of("stop").filter(f => f.properties.onBoard).concat(of("station").filter(f => f.properties.onBoard))
       .map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]])
-  ).extend([lat, lon]).pad(0.18);
-  map.fitBounds(homeBounds, {maxZoom: 16});
+  ).extend([lat, lon]).pad(0.06);
+  map.fitBounds(homeBounds, FIT);
   applyMapFilter();
 }).catch(e => console.error("geo.json", e));
 
 map.on("click", () => { hideInfo(); if(focus){ focus = null; renderAll(); } });
-recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds, {maxZoom: 16}));
+recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds, FIT));
 
 function showInfo(html){
   infobody.innerHTML = html;
@@ -899,7 +902,7 @@ fullscreen.addEventListener("click", () => {
   // Leaflet caches the container size; it must be told the panel resized.
   requestAnimationFrame(() => {
     map.invalidateSize();
-    if(!full && homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});
+    if(!full && homeBounds) map.fitBounds(homeBounds, FIT);
   });
   renderAll();   // full screen widens what the map is about: fetch the whole fleet
 });
@@ -914,6 +917,11 @@ const TRAIN_GLYPH_SM = TRAIN_GLYPH.replace('width="19" height="19"', 'width="13"
 
 // How far everything that isn't the focused route recedes.
 const DIM = {line: .03, stop: .07, tiles: .2, home: .15, pin: .1};
+
+// A fixed inset in pixels, not a fraction of the bounds: two stops a block apart
+// stay tight, while a bus 3 km out does not drag a kilometre of margin with it.
+// The top inset clears the pin banners, which sit above their anchor.
+const FIT = {paddingTopLeft: [16, 34], paddingBottomRight: [16, 16], maxZoom: 19};
 
 const pinLayer = L.layerGroup().addTo(map);
 const GONE = "#5a6070";   // this one has already gone past our stop
@@ -1117,10 +1125,10 @@ function fitFocus(){
   lastFit = sig;
   // One point is not a view. Fall back to the frame the board opens on.
   if(pts.length < 2){
-    if(homeBounds) map.fitBounds(homeBounds, {maxZoom: 16, animate: true});
+    if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate: true});
     return;
   }
-  map.fitBounds(L.latLngBounds(pts).pad(0.3), {maxZoom: 16, animate: true});
+  map.fitBounds(L.latLngBounds(pts), {...FIT, animate: true});
 }
 
 /** Name the first and last stop of each route in view; the board's own stops
@@ -1172,7 +1180,7 @@ function maybeReset(){
   selected = new Set(SERVICES);
   renderFilters();
   renderAll();
-  if(homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});
+  if(homeBounds) map.fitBounds(homeBounds, FIT);
   return true;
 }
 setInterval(maybeReset, 60000);
