@@ -80,21 +80,32 @@
   .row.off .etas .n{text-decoration:line-through;color:var(--bad)}
   .to{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .from{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  /* Fixed columns so the big number, the unit and the follow-ups line up down
-     the list regardless of "Due" vs "1" vs "12". */
-  .etas{display:grid;grid-template-columns:36px 21px 46px;gap:3px;align-items:baseline;
+  /* Two fixed columns, so "0:41", "12:07" and "Due" all occupy the same cell
+     and line up down the list. */
+  .etas{display:grid;grid-template-columns:58px 46px;gap:6px;align-items:baseline;
         font-variant-numeric:tabular-nums}
-  .etas .n{font-size:21px;font-weight:800;text-align:right}
+  .etas .n{font-size:20px;font-weight:800;text-align:right;letter-spacing:-.01em}
   .etas .n.due{font-size:17px;color:var(--ok)}
-  .etas .unit{font-size:12px;color:var(--muted);text-align:left}
   .etas .rest{font-size:13px;color:var(--muted);text-align:right}
+
+  /* You cannot reach this one on foot before it goes. */
+  .warn{display:none;color:var(--warn)}
+  .row.unreachable .warn{display:inline}
+  .row.unreachable{border-color:#4a3a1c;background:#191509}
+  .row.unreachable .etas .n{color:var(--warn)}
+  .row.unreachable .to{color:#cfc39a}
 
   #mapPanel{padding:0;overflow:hidden;position:relative}
   #map{flex:1;min-height:0;background:#0b0d11;border-radius:14px}
   .leaflet-container{background:#0b0d11}
-  .recentre{position:absolute;right:10px;top:10px;z-index:600;width:32px;height:32px;
-            background:rgba(15,17,21,.86);color:var(--ink);border:1px solid var(--rule);
-            border-radius:8px;font-size:15px;cursor:pointer;line-height:1}
+  .mapctl{position:absolute;right:10px;top:10px;z-index:600;display:flex;flex-direction:column;gap:6px}
+  .mapctl button{width:32px;height:32px;background:rgba(15,17,21,.86);color:var(--ink);
+                 border:1px solid var(--rule);border-radius:8px;font-size:15px;cursor:pointer;line-height:1}
+  .mapctl button[aria-expanded="true"]{background:var(--ink);color:var(--bg)}
+  /* The map panel lifts out of the grid rather than using the Fullscreen API,
+     which iOS does not offer for arbitrary elements. */
+  #mapPanel.full{position:fixed;inset:0;z-index:2000;border-radius:0;background:var(--bg)}
+  #mapPanel.full #map{border-radius:0}
   .maplabel{background:rgba(15,17,21,.82)!important;border:none!important;box-shadow:none!important;
             color:var(--ink)!important;font:700 10px system-ui;padding:2px 5px!important;
             border-radius:4px;transition:opacity .12s ease}
@@ -103,6 +114,7 @@
   .leaflet-control-zoom{border:none!important}
   .leaflet-control-zoom a{background:rgba(15,17,21,.86)!important;color:var(--ink)!important;
                           border:1px solid var(--rule)!important}
+  .maplegend[hidden]{display:none}
   .maplegend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(15,17,21,.86);
              border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
              display:flex;flex-direction:column;gap:5px;backdrop-filter:blur(4px)}
@@ -140,13 +152,18 @@
 
     <section class="panel" id="mapPanel">
       <div id="map"></div>
-      <button class="recentre" id="recentre" title="Back to Stoke Newington">&#9678;</button>
-      <div class="maplegend">
+      <div class="mapctl">
+        <button id="fullscreen" title="Full screen">&#10530;</button>
+        <button id="recentre" title="Back to Stoke Newington">&#9678;</button>
+        <button id="legendBtn" title="Legend" aria-expanded="false">i</button>
+      </div>
+      <div class="maplegend" id="maplegend" hidden>
         <div><span class="swatch" style="background:var(--weaver);height:4px"></span> Weaver line</div>
         <div><span class="swatch" style="background:var(--bus)"></span> Bus routes</div>
         <div><span class="dot" style="border-color:#fff"></span> Stop on board</div>
-        <div><span class="dot" style="border-color:#6c7484"></span> Other stop &le;10 min walk</div>
+        <div><span class="dot" style="border-color:#6c7484"></span> Other stop on these lines</div>
         <div><span style="color:#ff5a4d;font-size:11px">&#9650;</span> Next bus <i>(estimated)</i></div>
+        <div><span style="color:#c184a9;font-size:11px">&#9650;</span> Next train <i>(estimated)</i></div>
       </div>
     </section>
   </div>
@@ -216,13 +233,38 @@ function renderWeather(w){
 }
 
 // ---------- departures ----------
-// Always three cells, even when empty, so the grid columns align down the list.
-const etaHTML = (first, rest) => {
-  const due = first === 0;
-  return `<span class="n ${due ? "due" : ""}">${due ? "Due" : first}</span>`
-       + `<span class="unit">${due ? "" : "min"}</span>`
+// TfL's expectedArrival is a full timestamp, not a rounded minute, so the
+// countdown ticks in seconds like the Stratford board. Rail estimates are only
+// minute-precise upstream, so those simply tick to :00.
+const RAIL_WALK_S = 348;   // 491 m, Valhalla pedestrian
+
+function countdown(iso, fallbackMin){
+  if(!iso) return {text: fallbackMin === 0 ? "Due" : `${fallbackMin} min`, secs: fallbackMin * 60};
+  const secs = Math.round((Date.parse(iso) - Date.now()) / 1000);
+  if(secs <= 0) return {text: "Due", secs: 0};
+  return {text: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`, secs};
+}
+
+const etaHTML = (first, rest, exp, walkS) => {
+  const c = countdown(exp, first);
+  return `<span class="n ${c.secs === 0 ? "due" : ""}" data-exp="${exp ?? ""}" data-min="${first}"
+                data-walk="${walkS}">${c.text}</span>`
        + `<span class="rest">${rest ? esc(rest) : ""}</span>`;
 };
+
+/** Can you still walk to the stop in time? Re-evaluated every second. */
+const reachable = (secs, walkS) => secs >= walkS;
+
+function tickETAs(){
+  for(const el of document.querySelectorAll(".etas .n[data-exp]")){
+    const c = countdown(el.dataset.exp || null, +el.dataset.min);
+    el.textContent = c.text;
+    el.classList.toggle("due", c.secs === 0);
+    const row = el.closest(".row");
+    if(row) row.classList.toggle("unreachable", !reachable(c.secs, +el.dataset.walk));
+  }
+}
+setInterval(tickETAs, 1000);
 
 // "Platform 1" overflows the narrow rail column; "Plat 1" fits.
 const plat = p => (p && p !== "—") ? esc(p.replace(/^Platform\s+/i, "Plat ")) : "";
@@ -302,10 +344,13 @@ const busGroups = (rows, dir) => {
 // lined up. There is only one line here; a train says it just as well.
 const TRAIN_GLYPH = `<svg viewBox="0 0 24 24" width="19" height="19" fill="#fff" aria-hidden="true"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3.5-7H6V6h5v4Zm2 0V6h5v4h-5Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>`;
 
+const WARN_GLYPH = `<span class="warn" title="Not enough time to walk there">⚠</span> `;
+
 const rowHTML = g => {
   const badge = g.rail
     ? `<div class="badge rail" title="Weaver line">${TRAIN_GLYPH}</div>`
     : `<div class="badge ${g.line.startsWith("N") ? "night" : ""}">${esc(g.line)}</div>`;
+  const walkS = g.rail ? RAIL_WALK_S : Math.round(g.walk * 60);
   // Only one station on this board, and the badge already names the line, so
   // lead with the platform — it is the part that changes.
   const sub = g.rail
@@ -316,15 +361,16 @@ const rowHTML = g => {
   const rest = g.one
     ? (g.rail ? "" : clockTime(g.expected))
     : g.etas.slice(1, 3).join(" · ");
+  const miss = !reachable(countdown(g.expected, g.etas[0]).secs, walkS);
   return `
-    <div class="row ${g.cancelled ? "off" : ""} ${focusMatchesRow(g) ? "" : "dim"}"
+    <div class="row ${g.cancelled ? "off" : ""} ${miss ? "unreachable" : ""} ${focusMatchesRow(g) ? "" : "dim"}"
          data-key="${esc(g.key)}" data-stop="${esc(g.stopId ?? "")}">
       ${badge}
       <div class="mid">
         <div class="to">${esc(shortDest(g.to))}</div>
-        <div class="from">${sub}</div>
+        <div class="from">${WARN_GLYPH}${sub}</div>
       </div>
-      <div class="etas">${etaHTML(g.etas[0], rest)}</div>
+      <div class="etas">${etaHTML(g.etas[0], rest, g.expected, walkS)}</div>
     </div>`;
 };
 
@@ -517,9 +563,30 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
 map.on("click", () => { if(focus){ focus = null; renderAll(); } });
 recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds, {maxZoom: 16}));
 
+legendBtn.addEventListener("click", () => {
+  const open = maplegend.hidden;
+  maplegend.hidden = !open;
+  legendBtn.setAttribute("aria-expanded", String(open));
+});
+
+fullscreen.addEventListener("click", () => {
+  const full = mapPanel.classList.toggle("full");
+  fullscreen.innerHTML = full ? "&#10531;" : "&#10530;";
+  fullscreen.title = full ? "Exit full screen" : "Full screen";
+  // Leaflet caches the container size; it must be told the panel resized.
+  requestAnimationFrame(() => {
+    map.invalidateSize();
+    if(!full && homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});
+  });
+});
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && mapPanel.classList.contains("full")) fullscreen.click();
+});
+
 // ---------- live buses ----------
 // Positions are estimated (TfL publishes no bus coordinates); see src/vehicles.ts.
-const BUS_GLYPH = `<svg viewBox="0 0 24 24" width="10" height="10" fill="#fff" aria-hidden="true"><path d="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4S4 2.5 4 6v10Zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM18 11H6V6h12v5Z"/></svg>`;
+const BUS_GLYPH = `<svg viewBox="0 0 24 24" width="13" height="13" fill="#fff" aria-hidden="true"><path d="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4S4 2.5 4 6v10Zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM18 11H6V6h12v5Z"/></svg>`;
+const TRAIN_GLYPH_SM = TRAIN_GLYPH.replace('width="19" height="19"', 'width="13" height="13"');
 
 // How far everything that isn't the focused route recedes.
 const DIM = {line: .03, stop: .07, tiles: .2, home: .15, pin: .1};
@@ -528,30 +595,34 @@ const pinLayer = L.layerGroup().addTo(map);
 function renderPins(pins){
   pinLayer.clearLayers();
   for(const v of pins.filter(v => selected.has(v.line))){
-    const key = `bus|${v.line}|${v.dir}`;
+    const rail = v.mode === "rail";
     const night = v.line.startsWith("N");
-    const dim = FS.active && !FS.keys.has(key);
-    const bg = night ? "#1b2a6b" : "#e1251b";
-    const arrow = night ? "#5b6ed6" : "#ff5a4d";
+    const dim = FS.active && !FS.keys.has(v.key);
+    const bg = rail ? "#823a62" : night ? "#1b2a6b" : "#e1251b";
+    const arrow = rail ? "#c184a9" : night ? "#5b6ed6" : "#ff5a4d";
+    const glyph = rail ? TRAIN_GLYPH_SM : BUS_GLYPH;
+    const label = rail ? shortDest(v.to) : v.line;
     const eta = v.etaMin === 0 ? "Due" : `${v.etaMin}m`;
-    // The bus sits at the anchor (40,40). A 34px box centred there is rotated by
-    // the bearing, swinging its triangle round to the side the bus is heading.
-    // The label floats above so it never covers the arrow.
-    const icon = L.divIcon({className:"", iconSize:[80,56], iconAnchor:[40,40], html:
-      `<div style="width:80px;height:56px;position:relative;opacity:${dim ? DIM.pin : 1}">
+    // The bus sits at the anchor (45,42): a round pin carrying the bus glyph.
+    // A 40px box centred on it is rotated by the bearing, swinging its triangle
+    // round to the side the bus is heading. The banner floats clear above both.
+    // Anchor (50,52) is the vehicle. The round pin is 26px across, so the arrow
+    // orbits at a 28px radius to clear it, and is painted last so it always wins.
+    const icon = L.divIcon({className:"", iconSize:[100,84], iconAnchor:[50,52], html:
+      `<div style="width:100px;height:84px;position:relative;opacity:${dim ? DIM.pin : 1}">
+         <div style="position:absolute;left:50px;top:0;transform:translateX(-50%);white-space:nowrap;
+                     background:${bg};color:#fff;font:800 9.5px/1 system-ui;
+                     padding:3px 5px;border-radius:4px;border:1px solid #0f1115">
+           ${esc(label)} <span style="font-weight:600;opacity:.85">${esc(eta)}</span>
+         </div>
+         <div style="position:absolute;left:37px;top:39px;width:26px;height:26px;border-radius:50%;
+                     background:${bg};border:2px solid #0f1115;box-shadow:0 0 0 1.5px ${arrow};
+                     display:grid;place-items:center">${glyph}</div>
          <div class="pin-arrow" data-bearing="${v.bearing}"
-              style="position:absolute;left:23px;top:23px;width:34px;height:34px;transform:rotate(${v.bearing}deg)">
+              style="position:absolute;left:18px;top:20px;width:64px;height:64px;
+                     transform:rotate(${v.bearing}deg);pointer-events:none">
            <div style="width:0;height:0;margin:0 auto;border:5px solid transparent;
                        border-bottom:9px solid ${arrow}"></div>
-         </div>
-         <div style="position:absolute;left:36px;top:36px;width:8px;height:8px;border-radius:50%;
-                     background:${bg};border:1.5px solid #0f1115"></div>
-         <div style="position:absolute;left:40px;top:0;transform:translateX(-50%);white-space:nowrap;
-                     display:flex;align-items:center;gap:2.5px;
-                     background:${bg};color:#fff;font:800 9px/1 system-ui;
-                     padding:2.5px 4px;border-radius:4px;border:1px solid #0f1115">
-           ${BUS_GLYPH}<span>${esc(v.line)}</span>
-           <span style="font-weight:600;opacity:.85">${esc(eta)}</span>
          </div>
        </div>`});
     L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : 1000})

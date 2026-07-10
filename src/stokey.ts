@@ -1,6 +1,6 @@
 import { Env, ArrivalDeparture, arrivals, etaMin, tflJson } from "./tfl";
 import { weather } from "./weather";
-import { busPins, Pin } from "./vehicles";
+import { vehiclePins, Pin, PinInput } from "./vehicles";
 import data from "./stokey-stops.json";
 
 // Each stop only reports the (line, direction) pairs it is the *nearest* stop
@@ -77,14 +77,45 @@ async function buses(env: Env): Promise<BusRow[]> {
 }
 
 /** The soonest departure per (line, direction) — one board row, one map pin. */
-const nextPerRoute = (rows: BusRow[]) => {
+const nextBuses = (rows: BusRow[]): PinInput[] => {
   const first = new Map<string, BusRow>();
   for (const r of rows) {
-    const k = `${r.line}|${r.dir}`;
+    const k = `bus|${r.line}|${r.dir}`;
     if (!first.has(k)) first.set(k, r);
   }
-  return [...first.values()];
+  return [...first.entries()].map(([key, r]) => ({
+    vehicleId: r.vehicleId, etaMin: r.etaMin, to: r.to, stop: r.stop,
+    key, mode: "bus" as const, london: r.london,
+  }));
 };
+
+const cleanRailDest = (name?: string) =>
+  (name ?? "—").replace(/\s+Rail Station$/, "").replace(/^London /, "");
+
+/**
+ * The rail rows come from ArrivalDepartures, which carries scheduled times but
+ * no vehicleId. Live predictions carry the vehicleId but no schedule — so pins
+ * need their own call. One train per destination, matching the board's rows.
+ */
+async function nextTrains(env: Env): Promise<PinInput[]> {
+  const preds = (await arrivals(data.rail.naptan, env)).filter((p) => p.lineName === data.rail.line);
+  const first = new Map<string, PinInput>();
+  for (const p of preds) {
+    const to = cleanRailDest(p.destinationName);
+    const key = `rail|${to}`;
+    if (first.has(key) || !p.vehicleId) continue;
+    first.set(key, {
+      vehicleId: p.vehicleId,
+      etaMin: etaMin(p),
+      to,
+      stop: "Stoke Newington",
+      key,
+      mode: "rail",
+      london: p.direction === data.rail.inDirection ? "in" : "out",
+    });
+  }
+  return [...first.values()];
+}
 
 const mmssToMin = (s?: string) => {
   const m = /^(-?\d+):(\d{2})$/.exec(s ?? "");
@@ -133,14 +164,15 @@ async function rail(env: Env): Promise<RailRow[]> {
 }
 
 export async function stokeyBoard(env: Env) {
-  const [bus, train, wx] = await Promise.all([
+  const [bus, train, wx, trainPins] = await Promise.all([
     buses(env),
     rail(env).catch(() => [] as RailRow[]),
     weather(data.home.lat, data.home.lon).catch(() => null),
+    nextTrains(env).catch(() => [] as PinInput[]),
   ]);
 
-  let vehicles: Pin[] = [];
-  if (bus.length) vehicles = await busPins(env, nextPerRoute(bus));
+  const wanted = [...nextBuses(bus), ...trainPins];
+  const vehicles: Pin[] = wanted.length ? await vehiclePins(env, wanted) : [];
 
   return { buses: bus, rail: train, weather: wx, vehicles, ts: Math.floor(Date.now() / 1000) };
 }

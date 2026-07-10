@@ -27,8 +27,10 @@ RAIL_NAPTAN = "910GSTKNWNG"      # Stoke Newington Rail Station (Weaver), CRS SK
 RAIL_LINE_ID = "weaver"
 RAIL_IN_DIRECTION = "inbound"    # verified: Weaver inbound = London Liverpool Street
 RAIL_IN_DESTINATION = "910GLIVST"  # ArrivalDepartures carries no direction, only destination
-# Both Weaver branches that call at Stoke Newington (Enfield Town, Cheshunt).
-WEAVER_OSM_RELS = (9105028, 9105027)
+# Both Weaver branches that call at Stoke Newington, Liverpool Street -> terminus.
+# Their ways are contiguous in relation-member order, so they stitch cleanly.
+WEAVER_OSM_RELS = {"enfield": 9105028, "cheshunt": 9105027}
+STATION_SNAP_M = 120  # a station further than this from a branch is not on it
 MAP_HOME_ZOOM_PAD = 0.18         # initial framing only; the map pans freely
 
 UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
@@ -48,6 +50,10 @@ MANUAL_DIRECTION = {
     "276|inbound": "out",   # -> Gateway Surgical Centre, Newham
     "276|outbound": "out",  # -> Stoke Newington Common, terminates 400 m away
 }
+
+# Routes that technically stop near us but are never worth catching. The 73's
+# outbound terminus is Stoke Newington Common, a few minutes' walk away.
+EXCLUDE_PAIRS = {"73|outbound"}
 
 
 def haversine_km(a, b):
@@ -160,7 +166,8 @@ for p in sorted(london, key=lambda p: (london[p], p)):
     print(f"    {london[p]:<3} {p:<14} {terminus[p][:32]:<33} {term_km[p]:5.1f} km{flag}")
 
 for s in near:
-    s["pairs"] = sorted(f"{l}|{d}" for l in s["lines"] for d in stop_dirs.get(s["id"], {}).get(l, ()))
+    s["pairs"] = sorted(p for l in s["lines"] for d in stop_dirs.get(s["id"], {}).get(l, ())
+                        if (p := f"{l}|{d}") not in EXCLUDE_PAIRS)
 
 # ---------- 3. keep only stops that are nearest for some (line, direction) ----------
 nearest = {}
@@ -204,23 +211,74 @@ for ln in BUS_LINES:
                                  "properties": {"kind": "bus", "line": ln, "dir": d, "night": ln.startswith("N")}})
 
 print("rail geometry (OpenStreetMap) ...", flush=True)
-# Both branches that call at Stoke Newington. They share track most of the way,
-# so ways are deduplicated by id.
-seen_ways, rail_ways = set(), []
-for rel in WEAVER_OSM_RELS:
-    q = f"[out:json][timeout:90];rel({rel});way(r);out geom;"
-    for w in get_json("https://overpass-api.de/api/interpreter",
-                      urllib.parse.urlencode({"data": q}).encode(),
-                      {"Content-Type": "application/x-www-form-urlencoded"})["elements"]:
-        if w["id"] not in seen_ways:
-            seen_ways.add(w["id"])
-            rail_ways.append(w)
-for w in rail_ways:
-    path = [[n["lon"], n["lat"]] for n in w.get("geometry", [])]
-    if len(path) >= 2:
-        features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": rnd(path)},
-                         "properties": {"kind": "rail", "line": "Weaver"}})
-print(f"  {len(rail_ways)} ways across {len(WEAVER_OSM_RELS)} branches")
+
+
+def overpass(query):
+    return get_json("https://overpass-api.de/api/interpreter",
+                    urllib.parse.urlencode({"data": query}).encode(),
+                    {"Content-Type": "application/x-www-form-urlencoded"})
+
+
+def stitch(members, start_near):
+    """One-way polyline through a route relation, starting nearest `start_near`.
+
+    Ways arrive in member order and are endpoint-contiguous, though an individual
+    way may be digitised against the direction of travel. The Cheshunt relation
+    is an out-and-back — 43 km of path between endpoints 0 km apart — so the run
+    is cut at any discontinuity and the longest single-direction leg is kept.
+    """
+    ways = [[[n["lon"], n["lat"]] for n in m["geometry"]]
+            for m in members if m["type"] == "way" and m.get("geometry") and len(m["geometry"]) >= 2]
+    if not ways:
+        return []
+    gap = lambda a, b: haversine_km((a[1], a[0]), (b[1], b[0])) * 1000
+    joins = lambda a, b: gap(a, b) < 5
+
+    poly = ways[0][:]
+    if len(ways) > 1:
+        nxt = ways[1]
+        # If the first way's *start* is what touches the second way, it is reversed.
+        if min(gap(poly[0], nxt[0]), gap(poly[0], nxt[-1])) < min(gap(poly[-1], nxt[0]), gap(poly[-1], nxt[-1])):
+            poly.reverse()
+
+    runs = [poly]
+    for w in ways[1:]:
+        cur = runs[-1]
+        if joins(cur[-1], w[-1]) and not joins(cur[-1], w[0]):
+            w = w[::-1]
+        if joins(cur[-1], w[0]):
+            cur.extend(w[1:])
+        else:
+            runs.append(w[:])  # discontinuity: the relation doubles back
+
+    length = lambda r: sum(gap(r[i], r[i + 1]) for i in range(len(r) - 1))
+    best = max(runs, key=length)
+    if gap(best[-1], start_near) < gap(best[0], start_near):
+        best.reverse()
+    return best
+
+
+# Each branch is fetched once, in member order, and used both for the drawn map
+# geometry and for the routing polyline that positions live trains.
+lst = tfl(f"/StopPoint/{RAIL_IN_DESTINATION}")   # Liverpool Street, the London end
+LST = [lst["lon"], lst["lat"]]
+
+branch_polys, seen_ways = {}, set()
+for name, rel_id in WEAVER_OSM_RELS.items():
+    rel = overpass(f"[out:json][timeout:120];rel({rel_id});out geom;")["elements"][0]
+    branch_polys[name] = stitch(rel["members"], LST)
+    for m in rel["members"]:
+        if m["type"] == "way" and m.get("geometry") and m["ref"] not in seen_ways:
+            seen_ways.add(m["ref"])
+            path = [[n["lon"], n["lat"]] for n in m["geometry"]]
+            if len(path) >= 2:
+                features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": rnd(path)},
+                                 "properties": {"kind": "rail", "line": "Weaver"}})
+    km = sum(haversine_km((branch_polys[name][i][1], branch_polys[name][i][0]),
+                          (branch_polys[name][i + 1][1], branch_polys[name][i + 1][0]))
+             for i in range(len(branch_polys[name]) - 1))
+    print(f"  {name}: {len(branch_polys[name])} vertices, {km:.1f} km")
+print(f"  {len(seen_ways)} distinct ways across {len(WEAVER_OSM_RELS)} branches")
 
 # Every stop on every route we show, so panning down the line still has stops on
 # it. The ones within a 10 min walk carry their walk time; the board's 7 are
@@ -302,6 +360,39 @@ for ln in BUS_LINES:
             "stops": [s["id"] for s in sp],
             "idx": idx,
         }
+
+# Trains get the same treatment. A Weaver train's next stations come from
+# /Vehicle/{id}/Arrivals just as a bus's next stops do; it only needs a routed
+# polyline to sit on. Both branches are stored, and src/vehicles.ts picks the one
+# that contains the train's next two stations.
+print("rail route polylines ...", flush=True)
+for name, poly in branch_polys.items():
+    if len(poly) < 2:
+        continue
+    snapped = []
+    for st in weaver_stops:
+        best_i, best_m = None, None
+        for i, (lon, lat) in enumerate(poly):
+            m = haversine_km((lat, lon), (st["lat"], st["lon"])) * 1000
+            if best_m is None or m < best_m:
+                best_m, best_i = m, i
+        if best_m <= STATION_SNAP_M:
+            snapped.append((best_i, st["naptanId"], st["commonName"]))
+    snapped.sort()
+    if len(snapped) < 2:
+        print(f"  !! {name}: only {len(snapped)} stations snapped, skipping")
+        continue
+
+    idx = [i for i, _, _ in snapped]
+    ids = [n for _, n, _ in snapped]
+    rp = [[round(x, 5), round(y, 5)] for x, y in poly]
+    routes[f"Weaver|outbound|{name}"] = {"poly": rp, "stops": ids, "idx": idx}
+    # inbound is the same track walked the other way
+    last = len(rp) - 1
+    routes[f"Weaver|inbound|{name}"] = {
+        "poly": rp[::-1], "stops": ids[::-1], "idx": [last - i for i in idx][::-1],
+    }
+    print(f"  {name}: {len(ids)} stations snapped ({ids[0]} -> {ids[-1]})")
 
 (ROOT / "src" / "stokey-routes.json").write_text(
     json.dumps(routes, separators=(",", ":")) + "\n")

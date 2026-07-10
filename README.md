@@ -70,8 +70,9 @@ it does what it does:
 - **Stops are deduplicated per (line, direction), not per line.** Dropping a stop
   because a nearer one serves "the same lines" would delete your journey home.
   A stop earns a place on the board only if it is the nearest stop for at least
-  one (line, direction) pair. That takes 31 walkable stops down to 7 while
-  keeping all 20 pairs.
+  one (line, direction) pair. That takes 31 walkable stops down to 7. Pairs never
+  worth catching are named in `EXCLUDE_PAIRS` — currently the 73's outbound,
+  which terminates at Stoke Newington Common a few minutes' walk away.
 - **Bus geometry comes from TfL** (~27 m between vertices, follows the road).
   **Rail geometry comes from OpenStreetMap** (~16 m); TfL's rail `lineStrings`
   are straight chords between stations (~1200 m apart) and look wrong drawn on
@@ -137,26 +138,46 @@ bunching far more truthfully than a fabricated delay figure would.
 - Both reset themselves after an hour with no interaction — it is a wallboard,
   and it should not still be filtered the next morning.
 - The map opens framed on the seven board stops, the station and home, but pans
-  and zooms freely: routes and stops run the full length of every line. Only the
-  board's own stops are labelled; every other stop is a dot with a popup.
+  and zooms freely: routes and stops run the full length of every line. Buttons
+  give full screen, recentre, and a legend that stays out of the way until asked
+  for. Only the board's own stops are labelled; every other stop is a dot with a
+  popup.
   Rectory Road is a 7.7 min walk, but every train calls at Stoke Newington
   first, so it gets a dot and no row. Bus rows name their stop and its walk
   time; Weaver rows show only the platform and time, since there is one station
   and it is a 6 min walk.
 
-## Live bus pins
+## Countdowns
 
-TfL publishes no bus coordinates: `currentLocation` is always empty and the
-dedicated bus-location API was shelved in 2021. The only sanctioned live source
-is **BODS SIRI-VM, operator `TFLO`**, which needs its own (free) API key.
+`expectedArrival` is a full timestamp, not a rounded minute, so the board counts
+down in seconds (`0:41`, `12:07`) and re-renders every second. Rail estimates are
+only minute-precise upstream, so those tick to `:00`.
 
-Until then `src/vehicles.ts` estimates. For the next bus on each board row it
-reads `/Vehicle/{ids}/Arrivals`, which gives that bus's predicted arrival at
-every stop still ahead of it. It derives the bus's current speed from the gap to
-the stop after next, then walks backwards along the route polyline by
-`time × speed`, never going back past the stop it has already left. Accurate to
-about a block; pins are labelled *estimated*. Roughly a quarter of pins saturate
-at the previous stop, which is why two buses sometimes share a point.
+A row turns amber and grows a warning triangle when its countdown drops below
+the walk time to its stop — you can no longer get there on foot. That is
+re-evaluated on every tick, not just on each fetch.
+
+## Live pins
+
+TfL publishes no vehicle coordinates: `currentLocation` is always empty and the
+dedicated bus-location API was shelved in 2021. BODS SIRI-VM (operator `TFLO`)
+carries real bus positions but needs its own key, and nothing comparable exists
+for rail — Network Rail's TD feed reports signalling berths, not coordinates.
+
+So `src/vehicles.ts` estimates, for buses *and* Weaver trains alike. For the next
+vehicle on each board row it reads `/Vehicle/{ids}/Arrivals`, which gives that
+vehicle's predicted arrival at every stop still ahead of it. It derives the
+current speed from the gap to the stop after next, then walks backwards along the
+route polyline by `time × speed`, never going back past the stop already left.
+Pins are labelled *estimated*. Roughly a quarter saturate at the previous stop,
+which is why two vehicles sometimes share a point.
+
+Trains need a routed polyline to sit on, which `tools/build-stokey-data.py`
+stitches from the OSM route relations in member order. Watch out: the Cheshunt
+relation is an out-and-back — 43 km of path between endpoints 0 km apart — so the
+stitch is cut at discontinuities and the longest one-way leg is kept. Both
+branches are stored and `vehicles.ts` picks whichever contains the train's next
+two stations.
 
 ## History
 

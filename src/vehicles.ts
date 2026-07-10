@@ -28,12 +28,16 @@ const HOME: [number, number] = [data.home.lon, data.home.lat];
 const MAX_PIN_KM = 12;
 
 const FALLBACK_SPEED = 5.5; // m/s, ~20 km/h: an urban bus including dwell time
+const FALLBACK_RAIL_SPEED = 14; // ~50 km/h: inner-suburban stopping service
 const MIN_SPEED = 1.5;
 const MAX_SPEED = 18;
+const MAX_RAIL_SPEED = 40; // ~145 km/h
 
 export interface Pin {
   line: string;
   dir: string;
+  mode: "bus" | "rail";
+  key: string; // matches the board row's data-key
   london: "in" | "out";
   to: string;
   lat: number;
@@ -44,6 +48,24 @@ export interface Pin {
   vehicleId: string;
   estimated: true;
 }
+
+/** What a caller must know about a vehicle before we can place it. */
+export interface PinInput {
+  vehicleId: string;
+  etaMin: number;
+  to: string;
+  stop: string;
+  key: string;
+  mode: "bus" | "rail";
+  london: "in" | "out";
+}
+
+// A Weaver train could be on either branch; try both and take the one whose
+// polyline actually contains the train's next two stations, in order.
+const routeKeys = (line: string, dir: string) =>
+  line === data.rail.line
+    ? [`${line}|${dir}|enfield`, `${line}|${dir}|cheshunt`]
+    : [`${line}|${dir}`];
 
 function metres(a: [number, number], b: [number, number]): number {
   const R = 6371000, p = Math.PI / 180;
@@ -99,11 +121,8 @@ function pointAt(key: string, s: number) {
 const plausible = (lat: number, lon: number) =>
   metres([lon, lat], HOME) / 1000 <= MAX_PIN_KM;
 
-/** One pin per (line, direction): the next bus due at our stop for that row. */
-export async function busPins(
-  env: Env,
-  next: { vehicleId: string; etaMin: number; to: string; stop: string }[],
-): Promise<Pin[]> {
+/** One pin per board row: the next vehicle due at our stop for that row. */
+export async function vehiclePins(env: Env, next: PinInput[]): Promise<Pin[]> {
   const ids = [...new Set(next.map((n) => n.vehicleId).filter(Boolean))];
   if (!ids.length) return [];
 
@@ -127,24 +146,34 @@ export async function busPins(
     seen.sort((a, b) => a.timeToStation - b.timeToStation);
 
     const [p0, p1] = seen;
-    const key = `${p0.lineName}|${p0.direction}`;
+
+    // Resolve which route polyline this vehicle is actually on.
+    let key = "", i0 = -1, i1 = -1;
+    for (const k of routeKeys(p0.lineName, p0.direction ?? "")) {
+      const r = ROUTES[k];
+      if (!r) continue;
+      const a = r.stops.indexOf(p0.naptanId ?? "");
+      if (a < 0) continue;
+      const b = r.stops.indexOf(p1.naptanId ?? "", a + 1);
+      if (b < 0) continue;
+      key = k; i0 = a; i1 = b;
+      break;
+    }
+    if (!key) continue;
+
     const route = ROUTES[key];
-    if (!route) continue;
-
-    const i0 = route.stops.indexOf(p0.naptanId ?? "");
-    const i1 = route.stops.indexOf(p1.naptanId ?? "", i0 + 1);
-    if (i0 < 0 || i1 < 0) continue;
-
     const c = cumulative(key);
     const s0 = c[route.idx[i0]];
     const s1 = c[route.idx[i1]];
 
-    // Speed from the bus's own next leg. Nonsense values fall back to a constant.
+    // Speed from the vehicle's own next leg. Nonsense values fall back.
     const dt = p1.timeToStation - p0.timeToStation;
-    let speed = dt > 0 && s1 > s0 ? (s1 - s0) / dt : FALLBACK_SPEED;
-    if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) speed = FALLBACK_SPEED;
+    const limit = row.mode === "rail" ? MAX_RAIL_SPEED : MAX_SPEED;
+    const fallback = row.mode === "rail" ? FALLBACK_RAIL_SPEED : FALLBACK_SPEED;
+    let speed = dt > 0 && s1 > s0 ? (s1 - s0) / dt : fallback;
+    if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > limit) speed = fallback;
 
-    // Never place the bus behind the stop it has already left.
+    // Never place the vehicle behind the stop it has already left.
     const floor = i0 > 0 ? c[route.idx[i0 - 1]] : 0;
     const s = Math.min(s0, Math.max(floor, s0 - p0.timeToStation * speed));
     const at = pointAt(key, s);
@@ -153,7 +182,9 @@ export async function busPins(
     pins.push({
       line: p0.lineName,
       dir: p0.direction ?? "",
-      london: LONDON[key] ?? "out",
+      mode: row.mode,
+      key: row.key,
+      london: row.london,
       to: row.to,
       lat: at.lat,
       lon: at.lon,
