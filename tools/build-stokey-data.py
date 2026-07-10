@@ -37,9 +37,10 @@ MAP_HOME_ZOOM_PAD = 0.18         # initial framing only; the map pans freely
 # One-way arrows are drawn per road, not per line, and only near home — the
 # routes run to Wood Green and London Bridge and we do not need arrows there.
 ARROW_BBOX = (51.5431, -0.1030, 51.5791, -0.0450)   # ~2 km around home
+# No *_link: slip roads and junction stubs are one-way but are not corridors.
 ARROW_ROAD_TYPES = {"primary", "secondary", "tertiary", "trunk", "unclassified",
-                    "residential", "living_street", "primary_link", "secondary_link",
-                    "tertiary_link", "trunk_link"}
+                    "residential", "living_street"}
+ARROW_MIN_WAY_M = 60       # ignore tiny one-way stubs at junctions
 ARROW_SNAP_M = 12          # a route vertex this close to a one-way road is on it
 ARROW_BEARING_TOL = 35     # degrees; the route must run *with* the one-way
 ARROW_SPACING_M = 220      # at most one arrow per road per this distance
@@ -444,14 +445,30 @@ def metres(a, b):
 s, w, n, e = ARROW_BBOX
 q = (f'[out:json][timeout:120];way["highway"]["oneway"="yes"]({s},{w},{n},{e});out geom;')
 oneway_segs = []
+skipped = {"type": 0, "roundabout": 0, "short": 0, "unnamed": 0}
 for way in overpass(q)["elements"]:
-    if way["tags"].get("highway") not in ARROW_ROAD_TYPES:
+    t = way["tags"]
+    if t.get("highway") not in ARROW_ROAD_TYPES:
+        skipped["type"] += 1
+        continue
+    if t.get("junction") in ("roundabout", "circular"):
+        skipped["roundabout"] += 1
+        continue
+    if not t.get("name"):
+        # junction stubs and service spurs are unnamed; corridors have names
+        skipped["unnamed"] += 1
         continue
     g = [[p["lon"], p["lat"]] for p in way["geometry"]]
+    length = sum(metres(g[i], g[i + 1]) for i in range(len(g) - 1))
+    if length < ARROW_MIN_WAY_M:
+        skipped["short"] += 1
+        continue
     for i in range(len(g) - 1):
         if metres(g[i], g[i + 1]) >= 1:
-            oneway_segs.append((g[i], g[i + 1], way["id"], way["tags"].get("name", "")))
-print(f"  {len(oneway_segs)} one-way road segments on drivable roads")
+            oneway_segs.append((g[i], g[i + 1], way["id"], t["name"]))
+print(f"  {len(oneway_segs)} one-way segments on named corridors "
+      f"(skipped {skipped['type']} by type, {skipped['roundabout']} roundabouts, "
+      f"{skipped['unnamed']} unnamed, {skipped['short']} under {ARROW_MIN_WAY_M} m)")
 
 # grid index so this stays linear rather than 5000 x 5000
 CELL = 0.0006
@@ -461,11 +478,10 @@ for idx, (a, b, _, _) in enumerate(oneway_segs):
         grid.setdefault((int(pt[0] / CELL), int(pt[1] / CELL)), []).append(idx)
 
 in_box = lambda p: s <= p[1] <= n and w <= p[0] <= e
-candidates = []   # (lon, lat, bearing, wayid, line)
+candidates = []   # (lon, lat, bearing, wayid, "line|direction")
 for key, r in routes.items():
     if key.startswith("Weaver|"):
         continue
-    line = key.split("|")[0]
     poly = r["poly"]
     for i in range(len(poly) - 1):
         p0, p1 = poly[i], poly[i + 1]
@@ -487,31 +503,36 @@ for key, r in routes.items():
                     if best is None or d < best[0]:
                         best = (d, wid, bearing_deg(a, b))
         if best:
-            candidates.append((mid[0], mid[1], best[2], best[1], line))
+            candidates.append((mid[0], mid[1], best[2], best[1], key))
 
 # One arrow per corridor — not per line, and not per OSM way, since a single
 # street is usually several ways. Thin greedily across all ways: an arrow is
 # absorbed by a nearby one only if it points the same way, so both carriageways
 # of a gyratory keep their own arrow.
 by_way = {}
-for lon, lat, brg, wid, line in candidates:
+for lon, lat, brg, wid, pair in candidates:
     if in_box([lon, lat]):
-        by_way.setdefault(wid, []).append((lon, lat, brg, line))
+        by_way.setdefault(wid, []).append((lon, lat, brg, pair))
 
 arrows = []
 for pts in by_way.values():
-    for lon, lat, brg, line in pts:
+    for lon, lat, brg, pair in pts:
         near = next((k for k in arrows
                      if metres([lon, lat], [k[0], k[1]]) < ARROW_SPACING_M
                      and angle_gap(brg, k[2]) < 45), None)
         if near:
-            near[3].add(line)
+            near[3].add(pair)
         else:
-            arrows.append([lon, lat, brg, {line}])
+            arrows.append([lon, lat, brg, {pair}])
 
-for lon, lat, brg, lines in arrows:
+for lon, lat, brg, pairs in arrows:
+    # `pairs` are the exact route-directions that use this stretch, so focusing a
+    # single row can hide arrows on roads that row never touches. `lines` is kept
+    # for the timetable check, which is per line.
     features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]},
-                     "properties": {"kind": "arrow", "bearing": round(brg, 1), "lines": sorted(lines)}})
+                     "properties": {"kind": "arrow", "bearing": round(brg, 1),
+                                    "pairs": sorted(pairs),
+                                    "lines": sorted({p.split("|")[0] for p in pairs})}})
 print(f"  {len(candidates)} route vertices on one-way roads -> {len(arrows)} arrows "
       f"across {len(by_way)} roads")
 
@@ -565,9 +586,16 @@ missing = [l for l in BUS_LINES if l not in service]
 if missing:
     print(f"  !! no timetable for {missing}")
 
+# Every stop each bus route-direction calls at, in order. Focusing a row can then
+# light the whole line and label its termini.
+route_stops = {k: v["stops"] for k, v in routes.items() if not k.startswith("Weaver|")}
+print(f"  routeStops: {len(route_stops)} route-directions, "
+      f"{sum(len(v) for v in route_stops.values())} stop references")
+
 out = ROOT / "public" / "stokey" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps({"type": "FeatureCollection", "service": service, "features": features},
+out.write_text(json.dumps({"type": "FeatureCollection", "service": service,
+                           "routeStops": route_stops, "features": features},
                           separators=(",", ":")) + "\n")
 print(f"\nwrote src/stokey-stops.json ({len(board)} stops)")
 print(f"wrote public/stokey/geo.json ({len(features)} features, {out.stat().st_size // 1024} KB)")

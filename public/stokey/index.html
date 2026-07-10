@@ -55,8 +55,26 @@
   .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
 
   .wrap{padding:12px;display:flex;flex:1;min-height:0}
-  .cols{display:grid;gap:12px;width:100%;grid-template-columns:1.15fr 1.15fr 0.95fr}
-  @media (max-aspect-ratio:1/1){.cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr}#mapPanel{grid-column:1/-1;min-height:340px}}
+  .cols{display:grid;gap:12px;width:100%;
+        grid-template-columns:1.15fr 1.15fr 0.95fr;
+        grid-template-areas:"in out map"}
+  #inPanel{grid-area:in} #outPanel{grid-area:out} #mapPanel{grid-area:map}
+
+  /* Focus one row and the other direction has nothing to say — drop it and give
+     the space to the map. Narrow by chip and both directions still matter, so
+     stack them in one column instead. */
+  .cols.solo-in {grid-template-columns:1.15fr 2.1fr;grid-template-areas:"in map"}
+  .cols.solo-out{grid-template-columns:1.15fr 2.1fr;grid-template-areas:"out map"}
+  .cols.solo-in  #outPanel,
+  .cols.solo-out #inPanel{display:none}
+  .cols.stacked{grid-template-columns:1.15fr 2.1fr;grid-template-rows:1fr 1fr;
+                grid-template-areas:"in map" "out map"}
+
+  @media (max-aspect-ratio:1/1){
+    .cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;
+          grid-template-areas:"in out" "map map"}
+    #mapPanel{min-height:340px}
+  }
   .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
   .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
@@ -139,13 +157,13 @@
 <div class="filters" id="filters"></div>
 
 <div class="wrap">
-  <div class="cols">
-    <section class="panel">
+  <div class="cols" id="cols">
+    <section class="panel" id="inPanel">
       <h2>Into London <span class="count" id="inCount"></span></h2>
       <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="outPanel">
       <h2>Out of London <span class="count" id="outCount"></span></h2>
       <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
     </section>
@@ -164,6 +182,7 @@
         <div><span class="dot" style="border-color:#6c7484"></span> Other stop on these lines</div>
         <div><span style="color:#ff5a4d;font-size:11px">&#9650;</span> Next bus <i>(estimated)</i></div>
         <div><span style="color:#c184a9;font-size:11px">&#9650;</span> Next train <i>(estimated)</i></div>
+        <div><span style="color:#8a90a0;font-size:11px">&#9650;</span> Already past your stop</div>
         <div><span style="color:#ff8f85;font-size:9px">&#9650;</span> One-way road</div>
       </div>
     </section>
@@ -475,12 +494,62 @@ function renderDirection(dir, listEl, countEl){
     : '<div class="empty">Nothing due.</div>';
 }
 
+/** Which column holds the focused row. Null for a stop, which serves both
+    directions and so has rows in each. */
+function focusedSide(){
+  if(!focus || focus.kind !== "route" || !board) return null;
+  for(const dir of ["in", "out"]){
+    const groups = [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)];
+    if(groups.some(g => g.key === focus.key)) return dir;
+  }
+  return null;
+}
+
+let layoutClass = "";
+function applyLayout(){
+  const side = focusedSide();
+  const next = side ? `solo-${side}` : expanded() ? "stacked" : "";
+  if(next === layoutClass) return;
+  cols.classList.remove("solo-in", "solo-out", "stacked");
+  if(next) cols.classList.add(next);
+  layoutClass = next;
+  // The map's box just changed size; Leaflet caches it.
+  requestAnimationFrame(() => map.invalidateSize());
+}
+
 function renderAll(){
   if(!board) return;
   FS = focusSets();
+  applyLayout();
   renderDirection("in",  inList,  inCount);
   renderDirection("out", outList, outCount);
-  renderPins(board.vehicles ?? []);
+  renderPins();
+  applyMapFilter();
+  syncFleet();
+}
+
+// ---------- the rest of the fleet ----------
+// One pin per board row is too sparse once the map is full-screen or narrowed to
+// a few lines. Then ask for every vehicle on those lines, including the ones
+// that have already gone past our stops — those are drawn grey.
+let fleetToken = 0;
+async function syncFleet(){
+  const lines = [...new Set(activePairs().map(pr => pr.split("|")[0]))];
+  const token = ++fleetToken;
+  if(!lines.length){
+    if(fleet.length){ fleet = []; renderPins(); }
+    return;
+  }
+  try{
+    const res = await fetch(`/api/fleet/stokey?lines=${lines.join(",")}`, {cache:"no-store"});
+    const data = res.ok ? await res.json() : {vehicles:[]};
+    if(token !== fleetToken) return;   // a newer request superseded this one
+    fleet = data.vehicles ?? [];
+  }catch{
+    if(token !== fleetToken) return;
+    fleet = [];
+  }
+  renderPins();
   applyMapFilter();
 }
 
@@ -517,6 +586,10 @@ const arrowMarkers = [];      // one-way roads; an arrow belongs to a road, not 
 let homeMarker = null;
 let homeBounds = null;
 
+let ROUTE_STOPS = {};        // "73|inbound" -> [naptanId, ...] in order
+let fleet = [];              // every vehicle on the lines we asked about
+const tempTips = [];         // terminus labels, bound and unbound as focus changes
+
 // Each line's scheduled operating windows, minutes past midnight. The Weaver has
 // no entry and is treated as always running.
 let SERVICE = {};
@@ -532,9 +605,38 @@ function operating(line, now = new Date()){
 // A chip overrides the timetable: ask for the night bus at noon and you get it.
 const onMap = line => selected.has(line) && (expanded() || operating(line));
 
+const isFull = () => mapPanel.classList.contains("full");
+
+/**
+ * The route-directions the map is currently *about*: one when a row is focused,
+ * every selected line's when chips have narrowed it, and none when the board is
+ * showing everything (where lighting 900 stops would say nothing).
+ */
+function activePairs(){
+  if(focus && focus.kind === "route" && focus.key.startsWith("bus|")) return [focus.key.slice(4)];
+  if(expanded() || isFull()){
+    return Object.keys(ROUTE_STOPS).filter(pr => onMap(pr.split("|")[0]));
+  }
+  return [];
+}
+
+/** Stops called at by the active route-directions, and their termini. */
+function activeStops(){
+  const pairs = activePairs();
+  if(!pairs.length) return null;
+  const all = new Set(), ends = new Set();
+  for(const pr of pairs){
+    const ids = ROUTE_STOPS[pr] ?? [];
+    ids.forEach(id => all.add(id));
+    if(ids.length){ ends.add(ids[0]); ends.add(ids[ids.length - 1]); }
+  }
+  return {all, ends};
+}
+
 fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   const of = kind => geo.features.filter(f => f.properties.kind === kind);
   SERVICE = geo.service ?? {};
+  ROUTE_STOPS = geo.routeStops ?? {};
 
   // One arrow per one-way road, shared by every line that uses it.
   for(const f of of("arrow")){
@@ -543,7 +645,7 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
       `<div style="width:14px;height:14px;transform:rotate(${p.bearing}deg)">
          <div style="width:0;height:0;margin:0 auto;border:3.5px solid transparent;border-bottom:6px solid #ff8f85"></div>
        </div>`})}).addTo(map);
-    arrowMarkers.push({marker:m, lines:p.lines});
+    arrowMarkers.push({marker:m, lines:p.lines, pairs:p.pairs ?? []});
   }
 
   for(const f of of("bus")){
@@ -576,7 +678,7 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
         {permanent:true, direction:"right", offset:[7,0], className:"maplabel"});
       m.on("click", e => { L.DomEvent.stopPropagation(e); focusStop(p.id); });
     }
-    stopMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false});
+    stopMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false, name:p.name});
   }
 
   for(const f of of("station")){
@@ -627,6 +729,7 @@ fullscreen.addEventListener("click", () => {
     map.invalidateSize();
     if(!full && homeBounds) map.fitBounds(homeBounds, {maxZoom: 16});
   });
+  renderAll();   // full screen widens what the map is about: fetch the whole fleet
 });
 document.addEventListener("keydown", e => {
   if(e.key === "Escape" && mapPanel.classList.contains("full")) fullscreen.click();
@@ -641,17 +744,29 @@ const TRAIN_GLYPH_SM = TRAIN_GLYPH.replace('width="19" height="19"', 'width="13"
 const DIM = {line: .03, stop: .07, tiles: .2, home: .15, pin: .1};
 
 const pinLayer = L.layerGroup().addTo(map);
-function renderPins(pins){
+const GONE = "#5a6070";   // this one has already gone past our stop
+
+/** Board pins first (they carry the ETA), then any fleet vehicle not among them. */
+function allPins(){
+  const rows = (board?.vehicles ?? []).map(v => ({...v, serving:true}));
+  const seen = new Set(rows.map(v => v.vehicleId));
+  return rows.concat(fleet.filter(v => !seen.has(v.vehicleId)));
+}
+
+function renderPins(){
   pinLayer.clearLayers();
-  for(const v of pins.filter(v => onMap(v.line))){
+  for(const v of allPins().filter(v => onMap(v.line))){
     const rail = v.mode === "rail";
     const night = v.line.startsWith("N");
-    const dim = FS.active && !FS.keys.has(v.key);
-    const bg = rail ? "#823a62" : night ? "#1b2a6b" : "#e1251b";
-    const arrow = rail ? "#c184a9" : night ? "#5b6ed6" : "#ff5a4d";
+    // "mine" — this vehicle belongs to whatever the map is currently about.
+    const mine = !FS.active || FS.keys.has(v.key);
+    const gone = v.serving === false;
+    const dim = FS.active && !mine;
+    const bg = gone ? GONE : rail ? "#823a62" : night ? "#1b2a6b" : "#e1251b";
+    const arrow = gone ? "#8a90a0" : rail ? "#c184a9" : night ? "#5b6ed6" : "#ff5a4d";
     const glyph = rail ? TRAIN_GLYPH_SM : BUS_GLYPH;
     const label = rail ? shortDest(v.to) : v.line;
-    const eta = v.etaMin === 0 ? "Due" : `${v.etaMin}m`;
+    const eta = v.etaMin == null ? "" : v.etaMin === 0 ? "Due" : `${v.etaMin}m`;
     // The bus sits at the anchor (45,42): a round pin carrying the bus glyph.
     // A 40px box centred on it is rotated by the bearing, swinging its triangle
     // round to the side the bus is heading. The banner floats clear above both.
@@ -662,7 +777,7 @@ function renderPins(pins){
          <div style="position:absolute;left:50px;top:0;transform:translateX(-50%);white-space:nowrap;
                      background:${bg};color:#fff;font:800 9.5px/1 system-ui;
                      padding:3px 5px;border-radius:4px;border:1px solid #0f1115">
-           ${esc(label)} <span style="font-weight:600;opacity:.85">${esc(eta)}</span>
+           ${esc(label)}${eta ? ` <span style="font-weight:600;opacity:.85">${esc(eta)}</span>` : ""}
          </div>
          <div style="position:absolute;left:37px;top:39px;width:26px;height:26px;border-radius:50%;
                      background:${bg};border:2px solid #0f1115;box-shadow:0 0 0 1.5px ${arrow};
@@ -674,9 +789,11 @@ function renderPins(pins){
                        border-bottom:9px solid ${arrow}"></div>
          </div>
        </div>`});
-    L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : 1000})
+    const when = v.etaMin == null ? "already past your stop"
+      : `${v.etaMin === 0 ? "Due" : v.etaMin + " min"} at ${esc(shortStop(v.stop ?? "your stop"))}`;
+    L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000})
       .bindPopup(`<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>
-        ${v.etaMin === 0 ? "Due" : v.etaMin + " min"} at ${esc(shortStop(v.stop))}<br>
+        ${when}<br>
         <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`)
       .addTo(pinLayer);
   }
@@ -702,11 +819,12 @@ function applyMapFilter(){
     });
   }
 
-  // An arrow shows while any line still drawn on that road is showing.
+  // An arrow belongs to the roads a route-direction actually drives. Focusing a
+  // row hides arrows on streets that row never touches.
   for(const a of arrowMarkers){
     const live = a.lines.some(onMap);
-    const dim = focused && !a.lines.some(l => [...FS.keys].some(k => k === `bus|${l}|inbound` || k === `bus|${l}|outbound`));
-    a.marker.setOpacity(!live ? 0 : dim ? DIM.line : .9);
+    const mine = !focused || a.pairs.some(pr => FS.keys.has(`bus|${pr}`));
+    a.marker.setOpacity(!live ? 0 : !mine ? 0 : .9);
   }
 
   const railHidden = !onMap("Weaver");
@@ -716,18 +834,38 @@ function applyMapFilter(){
     weight: !railHidden && focused && !railDim ? 6 : 5,
   });
 
+  const act = activeStops();
   for(const s of stopMarkers){
     const serves = s.lines.some(onMap);
-    const dim = !serves || (focused && !FS.stops.has(s.id));
+    // With a route in view, light every stop it calls at, not just the board's.
+    const dim = !serves || (act ? !act.all.has(s.id)
+                                : (focused && !FS.stops.has(s.id)));
     const o = dim ? DIM.stop : 1;
     if(s.marker.setOpacity) s.marker.setOpacity(o);
     else s.marker.setStyle({opacity:o, fillOpacity:o});
     const tip = s.marker.getTooltip && s.marker.getTooltip();
     if(tip && tip.getElement()) tip.getElement().style.opacity = o;
   }
+  labelTermini(act);
 
   tiles.setOpacity(focused ? DIM.tiles : 1);
   if(homeMarker) homeMarker.setOpacity(focused ? DIM.home : 1);
+}
+
+/** Name the first and last stop of each route in view; the board's own stops
+    already carry permanent labels, so they are left alone. */
+function labelTermini(act){
+  while(tempTips.length){
+    const s = tempTips.pop();
+    s.marker.unbindTooltip();
+  }
+  if(!act) return;
+  for(const s of stopMarkers){
+    if(s.onBoard || !act.ends.has(s.id)) continue;
+    s.marker.bindTooltip(esc(shortStop(s.name ?? s.id)),
+      {permanent:true, direction:"right", offset:[7,0], className:"maplabel terminus"});
+    tempTips.push(s);
+  }
 }
 
 // ---------- polling ----------

@@ -121,6 +121,110 @@ function pointAt(key: string, s: number) {
 const plausible = (lat: number, lon: number) =>
   metres([lon, lat], HOME) / 1000 <= MAX_PIN_KM;
 
+/**
+ * Place a vehicle from its own forward predictions. `preds` must be that one
+ * vehicle's upcoming stops; the two soonest fix its position and speed.
+ */
+function place(preds: Prediction[], mode: "bus" | "rail") {
+  if (preds.length < 2) return null;
+  const [p0, p1] = preds;
+
+  let key = "", i0 = -1, i1 = -1;
+  for (const k of routeKeys(p0.lineName, p0.direction ?? "")) {
+    const r = ROUTES[k];
+    if (!r) continue;
+    const a = r.stops.indexOf(p0.naptanId ?? "");
+    if (a < 0) continue;
+    const b = r.stops.indexOf(p1.naptanId ?? "", a + 1);
+    if (b < 0) continue;
+    key = k; i0 = a; i1 = b;
+    break;
+  }
+  if (!key) return null;
+
+  const route = ROUTES[key];
+  const c = cumulative(key);
+  const s0 = c[route.idx[i0]];
+  const s1 = c[route.idx[i1]];
+
+  const dt = p1.timeToStation - p0.timeToStation;
+  const limit = mode === "rail" ? MAX_RAIL_SPEED : MAX_SPEED;
+  const fallback = mode === "rail" ? FALLBACK_RAIL_SPEED : FALLBACK_SPEED;
+  let speed = dt > 0 && s1 > s0 ? (s1 - s0) / dt : fallback;
+  if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > limit) speed = fallback;
+
+  const floor = i0 > 0 ? c[route.idx[i0 - 1]] : 0;
+  const s = Math.min(s0, Math.max(floor, s0 - p0.timeToStation * speed));
+  const at = pointAt(key, s);
+  return plausible(at.lat, at.lon) ? at : null;
+}
+
+/** The board's nearest stop for each (line, direction) it shows. */
+const STOP_FOR_PAIR: Record<string, string> = {};
+for (const stop of data.stops) {
+  for (const pair of stop.primary) STOP_FOR_PAIR[pair] = stop.id;
+}
+
+export interface FleetPin extends Omit<Pin, "etaMin" | "stop" | "to"> {
+  /** Still due at the board's stop for this route; false once it has gone past. */
+  serving: boolean;
+  etaMin: number | null;
+  to: string;
+}
+
+/**
+ * Every vehicle currently running on the given lines, wherever it is on the
+ * route — including ones that have already passed our stops. Used when the map
+ * is opened full-screen or narrowed to a few lines, where a single pin per row
+ * is too sparse to be useful.
+ */
+export async function lineVehicles(env: Env, lines: string[]): Promise<FleetPin[]> {
+  if (!lines.length) return [];
+  let preds: Prediction[];
+  try {
+    preds = await tflJson<Prediction[]>(`/Line/${lines.join(",")}/Arrivals`, env, {}, 20);
+  } catch {
+    return [];
+  }
+
+  const byVehicle = new Map<string, Prediction[]>();
+  for (const p of preds) {
+    if (!p.vehicleId) continue;
+    if (!byVehicle.has(p.vehicleId)) byVehicle.set(p.vehicleId, []);
+    byVehicle.get(p.vehicleId)!.push(p);
+  }
+
+  const pins: FleetPin[] = [];
+  for (const [vehicleId, rows] of byVehicle) {
+    rows.sort((a, b) => a.timeToStation - b.timeToStation);
+    const at = place(rows, "bus");
+    if (!at) continue;
+
+    const p0 = rows[0];
+    const pair = `${p0.lineName}|${p0.direction}`;
+    const ourStop = STOP_FOR_PAIR[pair];
+    // Still serving us only if our stop is still ahead of it.
+    const due = ourStop ? rows.find((r) => r.naptanId === ourStop) : undefined;
+
+    pins.push({
+      line: p0.lineName,
+      dir: p0.direction ?? "",
+      mode: "bus",
+      key: `bus|${pair}`,
+      london: LONDON[pair] ?? "out",
+      to: p0.destinationName ?? p0.towards ?? "—",
+      lat: at.lat,
+      lon: at.lon,
+      bearing: at.bearing,
+      serving: !!due,
+      etaMin: due ? Math.max(0, Math.round(due.timeToStation / 60)) : null,
+      vehicleId,
+      estimated: true,
+    });
+  }
+  return pins;
+}
+
 /** One pin per board row: the next vehicle due at our stop for that row. */
 export async function vehiclePins(env: Env, next: PinInput[]): Promise<Pin[]> {
   const ids = [...new Set(next.map((n) => n.vehicleId).filter(Boolean))];

@@ -166,10 +166,13 @@ one-way-ness comes from OSM (`oneway=yes` on a drivable road), not inferred from
 the routes: candidate points come from the route geometry, and one survives only
 if it sits within 12 m of such a road and runs within 35 degrees of it.
 
-An arrow belongs to a **road, not a line** — half of them are shared by several
-routes. They are thinned across OSM ways, not within them (a street is usually
-many ways), and two arrows merge only if they also point the same way, so both
-carriageways of a gyratory keep an arrow. 52 arrows within 2 km of the flat.
+An arrow belongs to a **road, not a line**, and is tagged with the exact
+route-directions that drive it, so focusing one row hides arrows on streets that
+row never touches. They are thinned across OSM ways, not within them (a street is
+usually many ways), and two arrows merge only if they also point the same way, so
+both carriageways of a gyratory keep an arrow. Junction geometry is excluded —
+`*_link` ways, roundabouts, unnamed stubs, and anything under 60 m — which took
+52 arrows down to 14 corridors.
 
 `geo.json` also carries each line's operating windows, from
 `Line/{id}/Timetable/{stopId}`. The map hides a line that is not running, so the
@@ -180,6 +183,22 @@ Schedule names are not consistent across lines ("Monday to Friday" for the 106,
 N73), so the windows are the union of every scheduled departure regardless of day
 type. That is enough to answer "is it running now"; it does not know that a
 Saturday-night journey should not make Monday 01:00 look served.
+
+## Narrowing the map
+
+Focus a row and the opposite column slides away; narrow by chip and the two
+columns stack. Either way the map roughly doubles in width, and it becomes *about*
+one or more route-directions:
+
+- every stop on those routes lights up, with their termini labelled
+- one-way arrows survive only on roads those routes actually drive
+- `/api/fleet/stokey?lines=...` fetches **every vehicle on those lines**, not just
+  the next one per row. Vehicles still due at your stop keep their colour; the
+  ones that have already gone past are grey. Full screen does the same for every
+  running line — 147 vehicles across 9 lines costs one 35 KB response.
+
+With the board showing everything, none of this fires: lighting 900 stops would
+say nothing, and the fleet is not fetched at all.
 
 ## Live pins
 
