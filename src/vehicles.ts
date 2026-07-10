@@ -229,17 +229,39 @@ export async function lineVehicles(env: Env, lines: string[]): Promise<FleetPin[
   return pins;
 }
 
+// TfL rejects a path segment over 255 characters with a bare 400. A bus reg is
+// 7 characters but a train id is 15, so a board with enough live vehicles used
+// to blow the limit and lose *every* pin at once — how many, and therefore
+// whether it broke, depended on the traffic.
+const MAX_SEGMENT = 240;
+
+function idChunks(ids: string[]): string[][] {
+  const out: string[][] = [];
+  let cur: string[] = [], len = 0;
+  for (const id of ids) {
+    const add = id.length + (cur.length ? 1 : 0);
+    if (cur.length && len + add > MAX_SEGMENT) {
+      out.push(cur);
+      cur = []; len = 0;
+    }
+    cur.push(id);
+    len += cur.length > 1 ? id.length + 1 : id.length;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
 /** One pin per board row: the next vehicle due at our stop for that row. */
 export async function vehiclePins(env: Env, next: PinInput[]): Promise<Pin[]> {
   const ids = [...new Set(next.map((n) => n.vehicleId).filter(Boolean))];
   if (!ids.length) return [];
 
-  let preds: Prediction[];
-  try {
-    preds = await tflJson<Prediction[]>(`/Vehicle/${ids.join(",")}/Arrivals`, env, {}, 15);
-  } catch {
-    return []; // pins are a garnish; never fail the board over them
-  }
+  // Fetch in chunks; one failed chunk must not cost the others their pins.
+  const chunks = await Promise.all(idChunks(ids).map((c) =>
+    tflJson<Prediction[]>(`/Vehicle/${c.join(",")}/Arrivals`, env, {}, 15)
+      .catch(() => [] as Prediction[])));
+  const preds = chunks.flat();
+  if (!preds.length) return [];
 
   const byVehicle = new Map<string, Prediction[]>();
   for (const p of preds) {

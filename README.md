@@ -251,6 +251,13 @@ dedicated bus-location API was shelved in 2021. BODS SIRI-VM (operator `TFLO`)
 carries real bus positions but needs its own key, and nothing comparable exists
 for rail — Network Rail's TD feed reports signalling berths, not coordinates.
 
+TfL also rejects a URL path segment over 255 characters with a bare `400`. A bus
+registration is 7 characters and a train id is 15, so the batched
+`/Vehicle/{ids}/Arrivals` call silently blew that limit once there were enough
+live vehicles — losing *every* pin, buses and trains, and only on a busy board.
+`idChunks` splits the ids so no segment exceeds 240, and one failed chunk cannot
+cost the others their pins.
+
 So `src/vehicles.ts` estimates, for buses *and* Weaver trains alike. For the next
 vehicle on each board row it reads `/Vehicle/{ids}/Arrivals`, which gives that
 vehicle's predicted arrival at every stop still ahead of it. It derives the
