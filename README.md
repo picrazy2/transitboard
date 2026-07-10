@@ -197,7 +197,10 @@ that timestamp, never on `etaMin`: a bus 58 s away and one 86 s away both round
 to `1`, and sorting by the rounded value ordered them by luck.
 
 Map pins count down from the same timestamp, floored to whole minutes, so a row
-reading `11:03` has a pin reading `11m`. They used to carry the rounded `etaMin`
+reading `11:03` has a pin reading `11m`. For trains that timestamp is the
+*departure*: the prediction carries `expectedArrival`, about 30 s earlier than the
+row's `estimatedTimeOfDeparture`, and a row reading `1:05` had a pin reading `0m`
+until the pin was made to borrow its row's departure time. They used to carry the rounded `etaMin`
 frozen at fetch time, which drifted up to a refresh behind the row and rounded
 the wrong way. Rail estimates are
 only minute-precise upstream, so those tick to `:00`.

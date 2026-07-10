@@ -103,17 +103,29 @@ const weaverArrivals = async (env: Env) =>
 /** Pin every train we can place, so any rail row can be focused individually. */
 const MAX_TRAIN_PINS = 8;
 
-function trainPins(preds: Prediction[]): PinInput[] {
+/**
+ * A train's pin must count down to the same instant its row does. The row uses
+ * `estimatedTimeOfDeparture`; the prediction carries `expectedArrival`, which is
+ * about 30 s earlier — the dwell. Left alone, a row reading 1:05 had a pin
+ * reading 0m. So the pin borrows its row's departure time where we have one.
+ */
+function trainPins(preds: Prediction[], rows: RailRow[]): PinInput[] {
+  const departs = new Map<string, { expected: string | null; etaMin: number }>();
+  for (const r of rows) {
+    if (r.vehicleId) departs.set(r.vehicleId, { expected: r.expected, etaMin: r.etaMin });
+  }
+
   const seen = new Set<string>();
   const out: PinInput[] = [];
   for (const p of [...preds].sort((a, b) => a.timeToStation - b.timeToStation)) {
     if (!p.vehicleId || seen.has(p.vehicleId)) continue;
     seen.add(p.vehicleId);
     const to = cleanRailDest(p.destinationName);
+    const row = departs.get(p.vehicleId);
     out.push({
       vehicleId: p.vehicleId,
-      etaMin: etaMin(p),
-      expected: p.expectedArrival ?? null,
+      etaMin: row?.etaMin ?? etaMin(p),
+      expected: row?.expected ?? p.expectedArrival ?? null,
       to,
       stop: "Stoke Newington",
       key: `rail|${to}`,
@@ -198,7 +210,7 @@ export async function stokeyBoard(env: Env) {
   ]);
   const train = await rail(env, preds).catch(() => [] as RailRow[]);
 
-  const wanted = [...nextBuses(bus), ...trainPins(preds)];
+  const wanted = [...nextBuses(bus), ...trainPins(preds, train)];
   const vehicles: Pin[] = wanted.length ? await vehiclePins(env, wanted) : [];
 
   return { buses: bus, rail: train, weather: wx, vehicles, ts: Math.floor(Date.now() / 1000) };
