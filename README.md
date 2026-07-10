@@ -150,12 +150,36 @@ bunching far more truthfully than a fabricated delay figure would.
 ## Countdowns
 
 `expectedArrival` is a full timestamp, not a rounded minute, so the board counts
-down in seconds (`0:41`, `12:07`) and re-renders every second. Rail estimates are
+down in seconds (`0:41`, `12:07`) and re-renders every second. Rows are sorted on
+that timestamp, never on `etaMin`: a bus 58 s away and one 86 s away both round
+to `1`, and sorting by the rounded value ordered them by luck. Rail estimates are
 only minute-precise upstream, so those tick to `:00`.
 
 A row turns amber and grows a warning triangle when its countdown drops below
 the walk time to its stop — you can no longer get there on foot. That is
 re-evaluated on every tick, not just on each fetch.
+
+## One-way arrows, and which lines are running
+
+The map draws a small arrow where a bus route runs down a one-way street. The
+one-way-ness comes from OSM (`oneway=yes` on a drivable road), not inferred from
+the routes: candidate points come from the route geometry, and one survives only
+if it sits within 12 m of such a road and runs within 35 degrees of it.
+
+An arrow belongs to a **road, not a line** — half of them are shared by several
+routes. They are thinned across OSM ways, not within them (a street is usually
+many ways), and two arrows merge only if they also point the same way, so both
+carriageways of a gyratory keep an arrow. 52 arrows within 2 km of the flat.
+
+`geo.json` also carries each line's operating windows, from
+`Line/{id}/Timetable/{stopId}`. The map hides a line that is not running, so the
+N73 does not sit there all afternoon and the day buses vanish at 3 a.m. Selecting
+a line by chip overrides this — ask for the night bus at noon and you get it.
+Schedule names are not consistent across lines ("Monday to Friday" for the 106,
+"Monday to Thursday" + "Friday" for the 67, "Mo-Th Nights/Tu-Fr Morning" for the
+N73), so the windows are the union of every scheduled departure regardless of day
+type. That is enough to answer "is it running now"; it does not know that a
+Saturday-night journey should not make Monday 01:00 look served.
 
 ## Live pins
 

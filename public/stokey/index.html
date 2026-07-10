@@ -164,6 +164,7 @@
         <div><span class="dot" style="border-color:#6c7484"></span> Other stop on these lines</div>
         <div><span style="color:#ff5a4d;font-size:11px">&#9650;</span> Next bus <i>(estimated)</i></div>
         <div><span style="color:#c184a9;font-size:11px">&#9650;</span> Next train <i>(estimated)</i></div>
+        <div><span style="color:#ff8f85;font-size:9px">&#9650;</span> One-way road</div>
       </div>
     </section>
   </div>
@@ -459,10 +460,14 @@ function focusStop(id){
   renderAll();
 }
 
+// Sort on the same clock the row displays. etaMin is rounded, so a bus 58 s away
+// and one 86 s away both read "1" and would be ordered by luck.
+const departsAt = g => g.expected ? Date.parse(g.expected) : Date.now() + g.etas[0] * 60000;
+
 function renderDirection(dir, listEl, countEl){
   const groups = [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)]
     .filter(shown)
-    .sort((a,b) => a.etas[0] - b.etas[0]);
+    .sort((a,b) => departsAt(a) - departsAt(b));
   countEl.textContent = groups.length
     ? `${groups.length} ${expanded() ? "departures" : "routes"}` : "";
   listEl.innerHTML = groups.length
@@ -508,11 +513,38 @@ map.setView(HOME, 15);
 const busLines = new Map();   // "bus|73|inbound" -> [polyline]
 const railLines = [];
 const stopMarkers = [];       // {id, marker, lines, onBoard}
+const arrowMarkers = [];      // one-way roads; an arrow belongs to a road, not a line
 let homeMarker = null;
 let homeBounds = null;
 
+// Each line's scheduled operating windows, minutes past midnight. The Weaver has
+// no entry and is treated as always running.
+let SERVICE = {};
+const OPERATING_SLACK = 15;   // minutes of grace either side of the timetable
+
+function operating(line, now = new Date()){
+  const iv = SERVICE[line];
+  if(!iv) return true;
+  const m = now.getHours() * 60 + now.getMinutes();
+  return iv.some(([a, b]) => m >= a - OPERATING_SLACK && m <= b + OPERATING_SLACK);
+}
+
+// A chip overrides the timetable: ask for the night bus at noon and you get it.
+const onMap = line => selected.has(line) && (expanded() || operating(line));
+
 fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   const of = kind => geo.features.filter(f => f.properties.kind === kind);
+  SERVICE = geo.service ?? {};
+
+  // One arrow per one-way road, shared by every line that uses it.
+  for(const f of of("arrow")){
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    const m = L.marker([lat, lon], {interactive:false, icon: L.divIcon({className:"", iconSize:[14,14], iconAnchor:[7,7], html:
+      `<div style="width:14px;height:14px;transform:rotate(${p.bearing}deg)">
+         <div style="width:0;height:0;margin:0 auto;border:3.5px solid transparent;border-bottom:6px solid #ff8f85"></div>
+       </div>`})}).addTo(map);
+    arrowMarkers.push({marker:m, lines:p.lines});
+  }
 
   for(const f of of("bus")){
     const p = f.properties, key = `bus|${p.line}|${p.dir}`;
@@ -611,7 +643,7 @@ const DIM = {line: .03, stop: .07, tiles: .2, home: .15, pin: .1};
 const pinLayer = L.layerGroup().addTo(map);
 function renderPins(pins){
   pinLayer.clearLayers();
-  for(const v of pins.filter(v => selected.has(v.line))){
+  for(const v of pins.filter(v => onMap(v.line))){
     const rail = v.mode === "rail";
     const night = v.line.startsWith("N");
     const dim = FS.active && !FS.keys.has(v.key);
@@ -660,7 +692,7 @@ function applyMapFilter(){
 
   for(const [key, lines] of busLines){
     const line = key.split("|")[1];
-    const hidden = !selected.has(line);
+    const hidden = !onMap(line);
     const night = line.startsWith("N");
     const dim = focused && !FS.keys.has(key);
     const base = night ? .45 : .6;
@@ -670,7 +702,14 @@ function applyMapFilter(){
     });
   }
 
-  const railHidden = !selected.has("Weaver");
+  // An arrow shows while any line still drawn on that road is showing.
+  for(const a of arrowMarkers){
+    const live = a.lines.some(onMap);
+    const dim = focused && !a.lines.some(l => [...FS.keys].some(k => k === `bus|${l}|inbound` || k === `bus|${l}|outbound`));
+    a.marker.setOpacity(!live ? 0 : dim ? DIM.line : .9);
+  }
+
+  const railHidden = !onMap("Weaver");
   const railDim = focused && ![...FS.keys].some(k => k.startsWith("rail|"));
   for(const l of railLines) l.setStyle({
     opacity: railHidden ? 0 : railDim ? DIM.line : .95,
@@ -678,7 +717,7 @@ function applyMapFilter(){
   });
 
   for(const s of stopMarkers){
-    const serves = s.lines.some(l => selected.has(l));
+    const serves = s.lines.some(onMap);
     const dim = !serves || (focused && !FS.stops.has(s.id));
     const o = dim ? DIM.stop : 1;
     if(s.marker.setOpacity) s.marker.setOpacity(o);

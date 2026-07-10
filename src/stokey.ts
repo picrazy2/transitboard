@@ -73,7 +73,10 @@ async function buses(env: Env): Promise<BusRow[]> {
         }));
     }),
   );
-  return rows.flat().sort((a, b) => a.etaMin - b.etaMin);
+  // Sort on expectedArrival, not the rounded minute: two buses 58 s and 86 s away
+  // both have etaMin 1, and nextBuses() must still pick the nearer one.
+  const at = (r: BusRow) => (r.expected ? Date.parse(r.expected) : Date.now() + r.etaMin * 60000);
+  return rows.flat().sort((a, b) => at(a) - at(b));
 }
 
 /** The soonest departure per (line, direction) — one board row, one map pin. */

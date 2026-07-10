@@ -5,7 +5,8 @@ Writes:
   src/stokey-stops.json   stop list + the (line, direction) pairs each stop is nearest for
   src/stokey-routes.json  per route-direction: polyline + where each stop sits on it,
                           used to estimate live bus positions (see src/vehicles.ts)
-  public/stokey/geo.json  map geometry: bus routes, Weaver line, stops, home
+  public/stokey/geo.json  map geometry: bus routes, Weaver line, stops, home,
+                          one-way arrows, and each line's operating hours
 
 Nothing is clipped: routes and stops run to the ends of their lines so the map
 can be panned. Bus geometry comes from TfL (~27 m between vertices, road-following).
@@ -32,6 +33,16 @@ RAIL_IN_DESTINATION = "910GLIVST"  # ArrivalDepartures carries no direction, onl
 WEAVER_OSM_RELS = {"enfield": 9105028, "cheshunt": 9105027}
 STATION_SNAP_M = 120  # a station further than this from a branch is not on it
 MAP_HOME_ZOOM_PAD = 0.18         # initial framing only; the map pans freely
+
+# One-way arrows are drawn per road, not per line, and only near home — the
+# routes run to Wood Green and London Bridge and we do not need arrows there.
+ARROW_BBOX = (51.5431, -0.1030, 51.5791, -0.0450)   # ~2 km around home
+ARROW_ROAD_TYPES = {"primary", "secondary", "tertiary", "trunk", "unclassified",
+                    "residential", "living_street", "primary_link", "secondary_link",
+                    "tertiary_link", "trunk_link"}
+ARROW_SNAP_M = 12          # a route vertex this close to a one-way road is on it
+ARROW_BEARING_TOL = 35     # degrees; the route must run *with* the one-way
+ARROW_SPACING_M = 220      # at most one arrow per road per this distance
 
 UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -333,6 +344,7 @@ print(f"  {len(weaver_stops)} Weaver stations, "
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
 
+
 # ---------- 5. route polylines + stop offsets, for estimating live bus positions ----------
 # TfL publishes no bus coordinates (`currentLocation` is always empty), so
 # src/vehicles.ts back-projects a bus from its next stop along the route. That
@@ -405,8 +417,157 @@ for name, poly in branch_polys.items():
 rj = ROOT / "src" / "stokey-routes.json"
 print(f"  {len(routes)} route-directions, {rj.stat().st_size // 1024} KB")
 
+# ---------- 4b. one-way arrows, per road ----------
+# Which way do the buses go down a one-way street? Candidate points come from the
+# route geometry; an arrow survives only if it sits on a road OSM tags oneway=yes
+# and the route runs *with* that road. Arrows belong to the road, so several
+# lines sharing a corridor produce one arrow, tagged with all of them.
+print("one-way arrows ...", flush=True)
+
+
+def bearing_deg(a, b):
+    p = math.pi / 180
+    y = math.sin((b[0] - a[0]) * p) * math.cos(b[1] * p)
+    x = (math.cos(a[1] * p) * math.sin(b[1] * p)
+         - math.sin(a[1] * p) * math.cos(b[1] * p) * math.cos((b[0] - a[0]) * p))
+    return (math.atan2(y, x) * 180 / math.pi + 360) % 360
+
+
+def angle_gap(a, b):
+    return abs((a - b + 180) % 360 - 180)
+
+
+def metres(a, b):
+    return haversine_km((a[1], a[0]), (b[1], b[0])) * 1000
+
+
+s, w, n, e = ARROW_BBOX
+q = (f'[out:json][timeout:120];way["highway"]["oneway"="yes"]({s},{w},{n},{e});out geom;')
+oneway_segs = []
+for way in overpass(q)["elements"]:
+    if way["tags"].get("highway") not in ARROW_ROAD_TYPES:
+        continue
+    g = [[p["lon"], p["lat"]] for p in way["geometry"]]
+    for i in range(len(g) - 1):
+        if metres(g[i], g[i + 1]) >= 1:
+            oneway_segs.append((g[i], g[i + 1], way["id"], way["tags"].get("name", "")))
+print(f"  {len(oneway_segs)} one-way road segments on drivable roads")
+
+# grid index so this stays linear rather than 5000 x 5000
+CELL = 0.0006
+grid = {}
+for idx, (a, b, _, _) in enumerate(oneway_segs):
+    for pt in (a, b):
+        grid.setdefault((int(pt[0] / CELL), int(pt[1] / CELL)), []).append(idx)
+
+in_box = lambda p: s <= p[1] <= n and w <= p[0] <= e
+candidates = []   # (lon, lat, bearing, wayid, line)
+for key, r in routes.items():
+    if key.startswith("Weaver|"):
+        continue
+    line = key.split("|")[0]
+    poly = r["poly"]
+    for i in range(len(poly) - 1):
+        p0, p1 = poly[i], poly[i + 1]
+        if not in_box(p0) or metres(p0, p1) < 6:
+            continue
+        brg = bearing_deg(p0, p1)
+        mid = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2]
+        cx, cy = int(mid[0] / CELL), int(mid[1] / CELL)
+        best = None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in grid.get((cx + dx, cy + dy), ()):
+                    a, b, wid, _ = oneway_segs[j]
+                    d = min(metres(mid, a), metres(mid, b))
+                    if d > ARROW_SNAP_M:
+                        continue
+                    if angle_gap(brg, bearing_deg(a, b)) > ARROW_BEARING_TOL:
+                        continue
+                    if best is None or d < best[0]:
+                        best = (d, wid, bearing_deg(a, b))
+        if best:
+            candidates.append((mid[0], mid[1], best[2], best[1], line))
+
+# One arrow per corridor — not per line, and not per OSM way, since a single
+# street is usually several ways. Thin greedily across all ways: an arrow is
+# absorbed by a nearby one only if it points the same way, so both carriageways
+# of a gyratory keep their own arrow.
+by_way = {}
+for lon, lat, brg, wid, line in candidates:
+    if in_box([lon, lat]):
+        by_way.setdefault(wid, []).append((lon, lat, brg, line))
+
+arrows = []
+for pts in by_way.values():
+    for lon, lat, brg, line in pts:
+        near = next((k for k in arrows
+                     if metres([lon, lat], [k[0], k[1]]) < ARROW_SPACING_M
+                     and angle_gap(brg, k[2]) < 45), None)
+        if near:
+            near[3].add(line)
+        else:
+            arrows.append([lon, lat, brg, {line}])
+
+for lon, lat, brg, lines in arrows:
+    features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]},
+                     "properties": {"kind": "arrow", "bearing": round(brg, 1), "lines": sorted(lines)}})
+print(f"  {len(candidates)} route vertices on one-way roads -> {len(arrows)} arrows "
+      f"across {len(by_way)} roads")
+
+# ---------- 4c. when does each line actually run? ----------
+# The night bus should not sit on the map all afternoon, nor the day buses at
+# 3 a.m. Scheduled departures at each line's own stop give the operating window
+# per day type. Gaps over 90 minutes split it, so N73's late-evening start and
+# small-hours finish come out as two intervals rather than one that spans noon.
+print("service hours (TfL timetables) ...", flush=True)
+# Schedule names are not consistent across lines ("Monday to Friday" for the 106,
+# "Monday to Thursday" + "Friday" for the 67, "Mo-Th Nights/Tu-Fr Morning" for the
+# N73), and the board only needs to know whether a line runs *now*. So take the
+# union of every scheduled departure, whatever the day type.
+service = {}
+for pair, sid in sorted(nearest.items()):
+    ln, d = pair.split("|")
+    try:
+        tt = tfl(f"/Line/{ln}/Timetable/{sid}", direction=d)
+    except Exception as exc:
+        print(f"  !! {pair}: {exc}")
+        continue
+    mins = service.setdefault(ln, set())
+    for route in (tt.get("timetable") or {}).get("routes") or []:
+        for sched in route.get("schedules") or []:
+            for j in sched.get("knownJourneys") or []:
+                mins.add(int(j["hour"]) % 24 * 60 + int(j["minute"]))
+
+
+def intervals(minutes, split=90):
+    """Contiguous runs of scheduled minutes. A gap over `split` starts a new one,
+    so the N73's late-evening start and small-hours finish stay separate rather
+    than merging into one window that spans lunchtime."""
+    ms = sorted(minutes)
+    if not ms:
+        return []
+    out, start, prev = [], ms[0], ms[0]
+    for m in ms[1:]:
+        if m - prev > split:
+            out.append([start, prev])
+            start = m
+        prev = m
+    out.append([start, prev])
+    return out
+
+
+service = {ln: intervals(v) for ln, v in service.items() if v}
+hhmm = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+for ln in sorted(service, key=lambda x: (x[0] == "N", len(x), x)):
+    print(f"  {ln:<4} " + ", ".join(f"{hhmm(a)}-{hhmm(b)}" for a, b in service[ln]))
+missing = [l for l in BUS_LINES if l not in service]
+if missing:
+    print(f"  !! no timetable for {missing}")
+
 out = ROOT / "public" / "stokey" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":")) + "\n")
+out.write_text(json.dumps({"type": "FeatureCollection", "service": service, "features": features},
+                          separators=(",", ":")) + "\n")
 print(f"\nwrote src/stokey-stops.json ({len(board)} stops)")
 print(f"wrote public/stokey/geo.json ({len(features)} features, {out.stat().st_size // 1024} KB)")
