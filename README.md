@@ -101,7 +101,13 @@ replace it with itself.
 
 Not every Weaver row is live. The feed runs ~110 minutes ahead, but a platform is
 only assigned about 35 minutes out; beyond that the rows are timetable, with
-`estimated == scheduled`. Bus rows, by contrast, are always live — each carries a
+`estimated == scheduled`.
+
+`ArrivalDepartures` carries the schedule but no `vehicleId`; the live predictions
+carry the `vehicleId` but no schedule. They are joined on destination and expected
+time — a 90-second window matches 16 of 17 rows uniquely with no ambiguity, and a
+row that matches more than one train is left unmatched rather than guessed. That
+join is what lets a rail row be focused down to a single train. Bus rows, by contrast, are always live — each carries a
 `vehicleId` (the real registration), and a route simply vanishes for a minute
 when no vehicle is being tracked.
 
@@ -145,6 +151,8 @@ bunching far more truthfully than a fabricated delay figure would.
   — collapsing a column there would just duplicate `Only`.
 - Vehicles that have already gone past appear only in full screen, where there is
   room for context.
+- Clearing the last filter, or the focus, recentres on the opening frame — once,
+  on the way out, so a manual pan while unfiltered is never yanked back.
 - Map fits use a fixed pixel inset (`FIT`), not `bounds.pad(fraction)` — padding
   by a fraction of the bounds means two stops a block apart get a tight frame
   while a bus 3 km out drags a kilometre of margin along. The map also runs

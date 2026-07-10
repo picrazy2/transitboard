@@ -1,4 +1,4 @@
-import { Env, ArrivalDeparture, arrivals, etaMin, tflJson } from "./tfl";
+import { Env, ArrivalDeparture, Prediction, arrivals, etaMin, tflJson } from "./tfl";
 import { weather } from "./weather";
 import { vehiclePins, Pin, PinInput } from "./vehicles";
 import data from "./stokey-stops.json";
@@ -32,6 +32,8 @@ export interface RailRow {
   plat: string;
   london: Towards;
   etaMin: number;
+  /** Matched across from the live predictions; null when no confident match. */
+  vehicleId: string | null;
   scheduled: string | null;
   expected: string | null;
   /** Minutes late, from scheduled vs estimated. Null when TfL gives no estimate. */
@@ -95,30 +97,50 @@ const nextBuses = (rows: BusRow[]): PinInput[] => {
 const cleanRailDest = (name?: string) =>
   (name ?? "—").replace(/\s+Rail Station$/, "").replace(/^London /, "");
 
-/**
- * The rail rows come from ArrivalDepartures, which carries scheduled times but
- * no vehicleId. Live predictions carry the vehicleId but no schedule — so pins
- * need their own call. One train per destination, matching the board's rows.
- */
-async function nextTrains(env: Env): Promise<PinInput[]> {
-  const preds = (await arrivals(data.rail.naptan, env)).filter((p) => p.lineName === data.rail.line);
-  const first = new Map<string, PinInput>();
-  for (const p of preds) {
+const weaverArrivals = async (env: Env) =>
+  (await arrivals(data.rail.naptan, env)).filter((p) => p.lineName === data.rail.line);
+
+/** Pin every train we can place, so any rail row can be focused individually. */
+const MAX_TRAIN_PINS = 8;
+
+function trainPins(preds: Prediction[]): PinInput[] {
+  const seen = new Set<string>();
+  const out: PinInput[] = [];
+  for (const p of [...preds].sort((a, b) => a.timeToStation - b.timeToStation)) {
+    if (!p.vehicleId || seen.has(p.vehicleId)) continue;
+    seen.add(p.vehicleId);
     const to = cleanRailDest(p.destinationName);
-    const key = `rail|${to}`;
-    if (first.has(key) || !p.vehicleId) continue;
-    first.set(key, {
+    out.push({
       vehicleId: p.vehicleId,
       etaMin: etaMin(p),
       expected: p.expectedArrival ?? null,
       to,
       stop: "Stoke Newington",
-      key,
+      key: `rail|${to}`,
       mode: "rail",
       london: p.direction === data.rail.inDirection ? "in" : "out",
     });
+    if (out.length >= MAX_TRAIN_PINS) break;
   }
-  return [...first.values()];
+  return out;
+}
+
+/**
+ * ArrivalDepartures carries the schedule but no vehicleId; the live predictions
+ * carry the vehicleId but no schedule. Join them on destination and expected
+ * time — a 90 s window matches 16 of 17 rows uniquely, with no ambiguity — so a
+ * rail row can be focused down to one train.
+ */
+const MATCH_WINDOW_MS = 90_000;
+
+function matchVehicle(row: ArrivalDeparture, preds: Prediction[]): string | null {
+  const when = Date.parse(row.estimatedTimeOfDeparture ?? row.scheduledTimeOfDeparture ?? "");
+  if (!Number.isFinite(when)) return null;
+  const hits = preds.filter((p) =>
+    p.destinationNaptanId === row.destinationNaptanId &&
+    p.expectedArrival &&
+    Math.abs(Date.parse(p.expectedArrival) - when) <= MATCH_WINDOW_MS);
+  return hits.length === 1 ? hits[0].vehicleId ?? null : null;   // never guess
 }
 
 const mmssToMin = (s?: string) => {
@@ -129,7 +151,7 @@ const mmssToMin = (s?: string) => {
 // Weaver is the one mode here with a published timetable: ArrivalDepartures
 // gives scheduled vs estimated, so it is the only place a real delay exists.
 // It carries no direction field, only a destination.
-async function rail(env: Env): Promise<RailRow[]> {
+async function rail(env: Env, preds: Prediction[]): Promise<RailRow[]> {
   const rows = await tflJson<ArrivalDeparture[]>(
     `/StopPoint/${data.rail.naptan}/ArrivalDepartures`, env, { lineIds: data.rail.lineId },
   );
@@ -152,6 +174,7 @@ async function rail(env: Env): Promise<RailRow[]> {
         // "Platform Unknown" is noise on a board; show nothing instead.
         plat: r.platformName && r.platformName !== "Platform Unknown" ? r.platformName : "—",
         london: (r.destinationNaptanId === data.rail.inDestinationNaptan ? "in" : "out") as Towards,
+        vehicleId: matchVehicle(r, preds),
         etaMin: eta ?? 0,
         scheduled: sched,
         expected: est,
@@ -168,14 +191,14 @@ async function rail(env: Env): Promise<RailRow[]> {
 }
 
 export async function stokeyBoard(env: Env) {
-  const [bus, train, wx, trainPins] = await Promise.all([
+  const [bus, wx, preds] = await Promise.all([
     buses(env),
-    rail(env).catch(() => [] as RailRow[]),
     weather(data.home.lat, data.home.lon).catch(() => null),
-    nextTrains(env).catch(() => [] as PinInput[]),
+    weaverArrivals(env).catch(() => [] as Prediction[]),
   ]);
+  const train = await rail(env, preds).catch(() => [] as RailRow[]);
 
-  const wanted = [...nextBuses(bus), ...trainPins];
+  const wanted = [...nextBuses(bus), ...trainPins(preds)];
   const vehicles: Pin[] = wanted.length ? await vehiclePins(env, wanted) : [];
 
   return { buses: bus, rail: train, weather: wx, vehicles, ts: Math.floor(Date.now() / 1000) };

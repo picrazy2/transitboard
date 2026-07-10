@@ -373,7 +373,7 @@ function shortDest(name){
 const RAIL_STOP = "910GSTKNWNG";  // the only station with rows on this board
 
 const railRow = r => ({rail:true, line:"Weaver", to:r.to, plat:r.plat,
-                       key:`rail|${r.to}`, stopId:RAIL_STOP,
+                       key:`rail|${r.to}`, stopId:RAIL_STOP, vehicleId:r.vehicleId,
                        delayMin:r.delayMin, cancelled:r.cancelled,
                        scheduled:r.scheduled, expected:r.expected, etas:[]});
 
@@ -1064,8 +1064,16 @@ function applyMapFilter(){
 // map out from under a pan.
 let lastFit = null;
 function fitFocus(){
-  // Nothing narrowed, or merely full-screen: leave the view where it is.
-  if(!focus && !mapNarrowed()){ lastFit = null; return; }
+  // Back to showing everything: recentre once, on the way out. `lastFit` doubles
+  // as the record of having been narrowed, so a manual pan while unfiltered is
+  // never yanked back.
+  if(!focus && !mapNarrowed()){
+    if(lastFit !== null){
+      lastFit = null;
+      if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate: true});
+    }
+    return;
+  }
   const pairs = activePairs();
 
   const pts = [];

@@ -35,6 +35,7 @@ export interface Prediction {
   expectedArrival?: string;
   direction?: string;
   naptanId?: string;
+  destinationNaptanId?: string;
   stationName?: string;
   vehicleId?: string;
 }
