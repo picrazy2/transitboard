@@ -479,6 +479,22 @@ function renderAll(){
   applyMapFilter();
 }
 
+// A board stop usually serves lines that a *nearer* stop already covers. Only
+// the lines it is nearest for produce rows, and only those respond to tapping
+// it — so the popup shows them bold and greys the rest out.
+function linesHTML(p){
+  const lines = p.lines ?? [];
+  if(!p.onBoard) return lines.map(esc).join(", ");
+  const own = new Set(p.primaryLines ?? []);
+  const html = lines.map(l => own.has(l)
+    ? `<b>${esc(l)}</b>`
+    : `<span style="color:#6c7484">${esc(l)}</span>`).join(", ");
+  const others = lines.filter(l => !own.has(l));
+  return html + (others.length
+    ? `<br><span style="color:#6c7484;font-size:11px">grey: a nearer stop serves these</span>`
+    : "");
+}
+
 // ---------- map ----------
 // Routes and stops run the full length of each line, so the board opens framed
 // on the flat but you can pan out to any terminus.
@@ -520,7 +536,8 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
       color: on ? "#fff" : near ? "#6c7484" : "#4a5162",
       weight: on ? 2 : 1.5, fillColor: "#0f1115", fillOpacity: 1,
     }).bindPopup(`<b>${esc(p.name)}</b>${p.letter ? " (" + esc(p.letter) + ")" : ""}<br>
-      ${p.walk_min != null ? walkMins(p.walk_min) + " min walk · " : ""}${esc(p.lines.join(", "))}
+      ${p.walk_min != null ? walkMins(p.walk_min) + " min walk" : "not within a 10 min walk"}<br>
+      ${linesHTML(p)}
       ${p.towards ? `<br><span style="color:#9aa3b2">towards ${esc(p.towards)}</span>` : ""}`).addTo(map);
     if(on){
       m.bindTooltip(`${esc(shortStop(p.name))}${p.letter ? " " + esc(p.letter) : ""}`,

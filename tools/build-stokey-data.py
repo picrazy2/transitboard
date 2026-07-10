@@ -305,6 +305,12 @@ for sid, s in all_stops.items():
     if w:
         props["walk_min"] = w["walk_min"]
         props["towards"] = w["towards"]
+    if sid in primary:
+        # The (line, direction) pairs this stop is the *nearest* for. A board
+        # stop usually also serves lines a nearer stop already covers; the map
+        # popup must not imply you can catch those here.
+        props["primary"] = sorted(primary[sid])
+        props["primaryLines"] = sorted({p.split("|")[0] for p in primary[sid]})
     features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
                      "properties": props})
 print(f"  {len(all_stops)} bus stops on the map, {len(walkable)} within a 10 min walk, {len(primary)} on the board")
