@@ -122,6 +122,34 @@
           grid-template-areas:"in out" "map map"}
     #mapPanel{min-height:340px}
   }
+
+  /* --- Phones. The iPad Air (820 portrait / 1180 landscape) is always wider
+     than this, so none of it applies there — no regression to the wallboard. --- */
+  @media (max-width: 760px){
+    html,body{height:auto;overflow:auto}
+    body{min-height:100dvh}
+    header{flex-wrap:wrap;gap:6px;padding:8px 12px;align-items:center}
+    .clock{font-size:38px}
+    .headmeta{align-items:flex-start;text-align:left}
+    .wx{gap:10px;margin-top:2px}
+    .wx .temp{font-size:32px} .wx .icon{font-size:26px}
+    .wx .hours{display:none}          /* the hourly strip is too wide for a phone */
+    .chiprow{flex-wrap:wrap;padding:8px 12px 0}
+    .stamp{order:2;width:100%}
+
+    /* One vertical scroll: map, then Into London, then Out of London. The JS
+       layout classes are grid; forcing flex-column makes their grid templates
+       inert, so stacked / solo / view all collapse to the same phone stack. */
+    .wrap{display:block;flex:none;padding:8px}
+    .cols{display:flex!important;flex-direction:column;gap:10px;height:auto}
+    .cols .panel{opacity:1!important;pointer-events:auto!important;overflow:visible;
+                 width:auto;min-height:0;padding:10px 12px!important}
+    .cols .panel.novalue{display:none!important}   /* a genuinely empty half stays hidden */
+    .list{overflow:visible;flex:none;max-height:none;padding-right:0}
+    #mapPanel{order:-1;height:52vh;min-height:260px;padding:0!important}
+    #map{min-height:0}
+    .mapinfo{max-width:min(78vw,300px)}
+  }
   .panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
   .panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
   .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
@@ -1297,6 +1325,12 @@ renderFilters();
 refresh();
 setInterval(refresh, REFRESH_MS);
 document.addEventListener("visibilitychange", () => { if(!document.hidden) refresh(); });
+
+let _resizeT;
+addEventListener("resize", () => {
+  clearTimeout(_resizeT);
+  _resizeT = setTimeout(() => map.invalidateSize(), 200);
+});
 </script>
 </body>
 </html>
