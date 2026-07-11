@@ -9,7 +9,15 @@ import routes from "./cycle-routes.json";
 // and tells us whether it heads into or out of London.
 
 export type Towards = "in" | "out";
-const ROUTES = routes as unknown as Record<string, [number, number, string][]>; // [lon,lat,naptan]
+// Per (lineId, TfL direction): the OSM spine polyline for this line (drawn on the
+// map too) plus each stop snapped onto it with its offset in metres along the
+// track. A live train is positioned *on this polyline*, so it is always on the
+// drawn line. See tools/build-cycle-data.py.
+interface RouteGeo {
+  track: [number, number][];              // [lon,lat] vertices of the spine
+  stops: [number, number, string, number][]; // [lon,lat,naptanId,offset_m]
+}
+const ROUTES = routes as unknown as Record<string, RouteGeo>;
 
 export interface CycleRow {
   line: string;
@@ -86,21 +94,21 @@ const cumCache = new Map<string, number[]>();
 function cumulative(key: string) {
   let c = cumCache.get(key);
   if (!c) {
-    const r = ROUTES[key];
+    const t = ROUTES[key].track;
     c = [0];
-    for (let i = 1; i < r.length; i++) c[i] = c[i - 1] + metres([r[i - 1][0], r[i - 1][1]], [r[i][0], r[i][1]]);
+    for (let i = 1; i < t.length; i++) c[i] = c[i - 1] + metres(t[i - 1], t[i]);
     cumCache.set(key, c);
   }
   return c;
 }
+/** The point `s` metres along the drawn spine, with the track's local bearing. */
 function pointAt(key: string, s: number) {
-  const r = ROUTES[key], c = cumulative(key);
+  const t = ROUTES[key].track, c = cumulative(key);
   let lo = 0, hi = c.length - 1;
   while (lo < hi - 1) { const m = (lo + hi) >> 1; if (c[m] <= s) lo = m; else hi = m; }
-  const span = c[hi] - c[lo], t = span > 0 ? Math.min(1, Math.max(0, (s - c[lo]) / span)) : 0;
-  const a = r[lo], b = r[hi];
-  return { lon: a[0] + (b[0] - a[0]) * t, lat: a[1] + (b[1] - a[1]) * t,
-           bearing: bearing([a[0], a[1]], [b[0], b[1]]) };
+  const span = c[hi] - c[lo], f = span > 0 ? Math.min(1, Math.max(0, (s - c[lo]) / span)) : 0;
+  const a = t[lo], b = t[hi];
+  return { lon: a[0] + (b[0] - a[0]) * f, lat: a[1] + (b[1] - a[1]) * f, bearing: bearing(a, b) };
 }
 
 export interface Pin {
@@ -135,30 +143,28 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     const key = `${r.lineId}|${r.dir}`;
     const route = ROUTES[key];
     if (!route) continue;
+    const offOf = new Map(route.stops.map((s) => [s[2], s[3]] as const)); // naptan -> offset_m
     const seq = (byId.get(r.vehicleId) ?? [])
-      .filter((p) => p.lineId === r.lineId && p.direction === r.dir)
+      .filter((p) => p.lineId === r.lineId && p.direction === r.dir && offOf.has(p.naptanId ?? ""))
       .sort((a, b) => a.timeToStation - b.timeToStation);
     if (seq.length < 2) continue;
 
-    const idx = (nap?: string) => route.findIndex((v) => v[2] === nap);
-    let i0 = -1, i1 = -1, p0 = seq[0], p1 = seq[1];
-    for (let a = 0; a < seq.length - 1 && i1 < 0; a++) {
-      i0 = idx(seq[a].naptanId);
-      if (i0 < 0) continue;
+    // Two predicted stops with increasing offset along the track give the speed;
+    // back-project the train from the nearer one by its remaining time.
+    let p0 = seq[0], p1 = seq[1], s0 = -1, s1 = -1;
+    for (let a = 0; a < seq.length - 1 && s1 < 0; a++) {
+      const oa = offOf.get(seq[a].naptanId ?? "")!;
       for (let b = a + 1; b < seq.length; b++) {
-        const j = idx(seq[b].naptanId);
-        if (j > i0) { i1 = j; p0 = seq[a]; p1 = seq[b]; break; }
+        const ob = offOf.get(seq[b].naptanId ?? "")!;
+        if (ob > oa) { s0 = oa; s1 = ob; p0 = seq[a]; p1 = seq[b]; break; }
       }
     }
-    if (i0 < 0 || i1 < 0) continue;
+    if (s0 < 0 || s1 < 0) continue;
 
-    const c = cumulative(key);
-    const s0 = c[i0], s1 = c[i1];
     const dt = p1.timeToStation - p0.timeToStation;
     let speed = dt > 0 && s1 > s0 ? (s1 - s0) / dt : FALLBACK_SPEED;
     if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) speed = FALLBACK_SPEED;
-    const floor = i0 > 0 ? c[i0 - 1] : 0;
-    const s = Math.min(s0, Math.max(floor, s0 - p0.timeToStation * speed));
+    const s = Math.min(s0, Math.max(0, s0 - p0.timeToStation * speed));
     const at = pointAt(key, s);
 
     pins.push({

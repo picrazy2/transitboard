@@ -279,6 +279,7 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{sub
   attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
 map.setView(HOME,13);
 const stationMarkers=[];
+const railLines=[];
 const pinLayer=L.layerGroup();
 const TRAIN=`<svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3.5-7H6V6h5v4Zm2 0V6h5v4h-5Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>`;
 function renderPins(){
@@ -303,6 +304,13 @@ function renderPins(){
 }
 fetch("/stokey/cycle/geo.json").then(r=>r.json()).then(geo=>{
   const of=k=>geo.features.filter(f=>f.properties.kind===k);
+  // Rail spines first, so stops and train pins sit on top of them.
+  for(const f of of("rail")){
+    const p=f.properties,c=colorOf(p.line);
+    const poly=L.polyline(f.geometry.coordinates.map(([lo,la])=>[la,lo]),
+      {color:c,weight:3.5,opacity:.85,lineCap:"round",lineJoin:"round"}).addTo(map);
+    railLines.push({poly,line:p.line});
+  }
   for(const f of of("station")){
     const p=f.properties,[lon,lat]=f.geometry.coordinates,on=p.onBoard;
     const m=L.circleMarker([lat,lon],{radius:on?7:3.5,color:on?"#fff":"#5a6472",weight:on?2:1.5,
@@ -322,6 +330,10 @@ fetch("/stokey/cycle/geo.json").then(r=>r.json()).then(geo=>{
 
 function applyMapFilter(){
   const narrowed=selected.size!==SERVICES.length;
+  for(const r of railLines){
+    const on=selected.has(r.line);
+    r.poly.setStyle({opacity:on?.85:(narrowed?.12:.85)});
+  }
   for(const s of stationMarkers){
     const serves=!narrowed || s.lines.some(l=>selected.has(l));
     const o=s.onBoard?(serves?1:.2):(narrowed?.1:.5);

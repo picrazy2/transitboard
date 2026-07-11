@@ -51,7 +51,7 @@
         "overground"
       ],
       "serve": {
-        "windrush|inbound": "in",
+        "windrush|inbound": "out",
         "windrush|outbound": "in"
       },
       "lineNames": {
@@ -73,22 +73,6 @@
       },
       "lineNames": {
         "victoria": "Victoria"
-      }
-    },
-    {
-      "id": "910GCNNB",
-      "name": "Canonbury",
-      "lat": 51.548732,
-      "lon": -0.092191,
-      "cycMin": 8.4,
-      "modes": [
-        "overground"
-      ],
-      "serve": {
-        "windrush|outbound": "out"
-      },
-      "lineNames": {
-        "windrush": "Windrush"
       }
     },
     {
