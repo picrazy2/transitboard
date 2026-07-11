@@ -81,6 +81,7 @@
   .seg.dead button{cursor:default}
   .chipsep{width:1px;align-self:stretch;background:var(--rule);margin:0 5px}
   .chip.on{opacity:1}
+  .chip:disabled{opacity:.14!important;filter:grayscale(.7);cursor:default;pointer-events:none}
   .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
 
   .wrap{padding:12px;display:flex;flex:1;min-height:0}
@@ -561,9 +562,11 @@ function renderFilters(){
        <button data-table="0" class="${!eff ? "on" : ""}" aria-pressed="${!eff}">Default</button>
        <button data-table="1" class="${eff ? "on" : ""}" aria-pressed="${eff}">All</button>
      </div><span class="chipsep"></span>`;
+  const live = linesWithDepartures();
   filters.innerHTML = seg + SERVICES.map(id => {
     const cls = id === "Weaver" ? "weaver" : id.startsWith("N") ? "night" : "bus";
-    return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}">${esc(id)}</button>`;
+    return `<button class="chip ${cls} ${selected.has(id) ? "on" : ""}" data-line="${id}"
+              ${live.has(id) ? "" : "disabled"}>${esc(id)}</button>`;
   }).join("");
 }
 
@@ -581,7 +584,7 @@ filters.addEventListener("click", e => {
     return;
   }
   const b = e.target.closest(".chip");
-  if(!b) return;
+  if(!b || b.disabled) return;
   const id = b.dataset.line;
   if(!mapNarrowed()){
     selected = new Set([id]);  // from all-lit, the first tap isolates
@@ -710,6 +713,23 @@ function applyLayout(){
   })();
 }
 
+// A line has departures if any board row lists it. Weaver counts when there are
+// train rows. Before the first fetch, treat every line as live so the chips
+// don't flash disabled on load.
+function linesWithDepartures(){
+  if(!board) return new Set(SERVICES);
+  const live = new Set((board.buses ?? []).map(b => b.line));
+  if((board.rail ?? []).length) live.add("Weaver");
+  return live;
+}
+
+function syncChips(){
+  const live = linesWithDepartures();
+  for(const b of document.querySelectorAll(".chip[data-line]")){
+    b.disabled = !live.has(b.dataset.line);   // greyed and unclickable via CSS
+  }
+}
+
 function syncToggle(){
   const eff = effectiveTableAll();
   for(const b of document.querySelectorAll(".seg button")){
@@ -721,11 +741,17 @@ function syncToggle(){
 
 function renderAll(){
   if(!board) return;
+  // If a narrowed selection has fallen entirely silent — the last train gone,
+  // say — don't strand the board on empty (and on chips you can no longer tap).
+  if(mapNarrowed() && ![...selected].some(l => linesWithDepartures().has(l))){
+    selected = new Set(SERVICES); tableAll = false; focus = null; renderFilters();
+  }
   FS = focusSets();
   for(const b of document.querySelectorAll(".only")){
     b.setAttribute("aria-pressed", String(!!focus && focus.kind === "dir" && focus.dir === b.dataset.dir));
   }
   syncToggle();
+  syncChips();
   applyLayout();
   renderDirection("in",  inList,  inCount);
   renderDirection("out", outList, outCount);
