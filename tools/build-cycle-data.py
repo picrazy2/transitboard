@@ -70,6 +70,12 @@ def cycle_times(targets):
 is_bus = lambda name: bool(re.fullmatch(r"N?\d+", name or ""))
 cc_km = lambda lat, lon: haversine_km((lat, lon), CHARING_CROSS)
 
+# TfL only serves live predictions for tube / Overground / DLR / Elizabeth. National
+# Rail lines (Greater Anglia, Great Northern, Thameslink) come back empty from
+# StopPoint/Arrivals — they need Darwin — so cycle mode leaves them out.
+SERVED = {l["id"] for l in tfl("/Line/Mode/tube,overground,dlr,elizabeth-line")}
+print(f"TfL-served lines available: {len(SERVED)}")
+
 # ---------- 1. rail stations within cycle range ----------
 print(f"rail stations within {SEARCH_RADIUS_M} m ...", flush=True)
 raw = tfl("/StopPoint", lat=HOME[0], lon=HOME[1], stopTypes="NaptanMetroStation,NaptanRailStation",
@@ -77,7 +83,8 @@ raw = tfl("/StopPoint", lat=HOME[0], lon=HOME[1], stopTypes="NaptanMetroStation,
 
 stations = []
 for s in raw:
-    lines = [(l["id"], l["name"]) for l in (s.get("lines") or []) if not is_bus(l.get("name"))]
+    lines = [(l["id"], l["name"]) for l in (s.get("lines") or [])
+             if not is_bus(l.get("name")) and l["id"] in SERVED]
     if not lines:
         continue
     stations.append({"id": s["naptanId"], "name": s["commonName"].replace(" Rail Station", "")
@@ -202,6 +209,18 @@ for s in near:
                                         "cyc_min": s["cyc_min"], "onBoard": False}})
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
+
+# Ordered stop coordinates per (line, TfL direction), for estimating live train
+# positions (src/cycle.ts). TfL's own lineStrings are 1 km chords, so we place a
+# train by interpolating between the stops its own predictions name — no polyline
+# needed, and nothing ugly is ever drawn.
+routes = {}
+for (lid, d), order in seq_of.items():
+    if lid in {k.split("|")[0] for k in nearest}:
+        routes[f"{lid}|{d}"] = [[round(lon, 5), round(lat, 5), nid]
+                                for nid, lat, lon in order if lat is not None]
+(ROOT / "src" / "cycle-routes.json").write_text(json.dumps(routes, separators=(",", ":")) + "\n")
+print(f"wrote src/cycle-routes.json ({len(routes)} route-directions)")
 
 out = ROOT / "public" / "stokey" / "cycle" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)

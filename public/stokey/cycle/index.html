@@ -58,6 +58,12 @@
   .chip.on{opacity:1}
   .chip:disabled{opacity:.14!important;filter:grayscale(.7);cursor:default;pointer-events:none}
   .stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .statusbar{display:flex;flex-wrap:wrap;gap:8px 16px;padding:6px 14px 0;font-size:12px}
+  .statusbar[hidden]{display:none}
+  .statusbar .s{display:flex;align-items:center;gap:6px;color:#ffcf70}
+  .statusbar .s .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+  .statusbar .s b{color:var(--ink)}
+  .chip.disrupted{box-shadow:0 0 0 2px #f2c94c inset}
   .stamp.stale{color:var(--warn)} .stamp.err{color:var(--bad)}
 
   .wrap{padding:12px;display:flex;flex:1;min-height:0}
@@ -121,6 +127,7 @@
   </div>
 </header>
 <div class="chiprow"><div class="filters" id="filters"></div></div>
+<div class="statusbar" id="disruptions" hidden></div>
 
 <div class="wrap">
   <div class="cols" id="cols">
@@ -192,7 +199,7 @@ function countdown(iso, fallbackMin){
 const reachable = secs => secs >= CYC_S();
 
 let board=null;
-const SERVICES=["Weaver","Greater Anglia","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink"];
+const SERVICES=["Weaver","Victoria","Piccadilly","Mildmay","Windrush","Suffragette"];
 let selected=new Set(SERVICES);
 const shown = r => selected.has(r.line);
 
@@ -272,6 +279,28 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{sub
   attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
 map.setView(HOME,13);
 const stationMarkers=[];
+const pinLayer=L.layerGroup();
+const TRAIN=`<svg viewBox="0 0 24 24" width="12" height="12" fill="#fff"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3.5-7H6V6h5v4Zm2 0V6h5v4h-5Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>`;
+function renderPins(){
+  pinLayer.clearLayers().addTo(map);
+  for(const v of (board?.pins||[]).filter(v=>selected.has(v.line))){
+    const c=colorOf(v.line);
+    const eta=v.etaMin===0?"Due":`${v.etaMin}m`;
+    const icon=L.divIcon({className:"",iconSize:[90,58],iconAnchor:[45,40],html:
+      `<div style="width:90px;height:58px;position:relative">
+        <div style="position:absolute;left:25px;top:20px;width:40px;height:40px;transform:rotate(${v.bearing}deg)">
+          <div style="width:0;height:0;margin:0 auto;border:5px solid transparent;border-bottom:9px solid ${c}"></div></div>
+        <div style="position:absolute;left:34px;top:29px;width:22px;height:22px;border-radius:50%;background:${c};
+             border:2px solid #0f1115;box-shadow:0 0 0 1.5px ${c};display:grid;place-items:center">${TRAIN}</div>
+        <div style="position:absolute;left:45px;top:0;transform:translateX(-50%);white-space:nowrap;background:${c};
+             color:#fff;font:800 9.5px/1 system-ui;padding:3px 5px;border-radius:4px;border:1px solid #0f1115">
+          ${esc(v.line)} <span style="font-weight:600;opacity:.85">${esc(eta)}</span></div>
+      </div>`});
+    L.marker([v.lat,v.lon],{icon,zIndexOffset:1000})
+      .bindPopup(`<b>${esc(v.line)} → ${esc(v.to)}</b><br>${v.etaMin===0?"Due":v.etaMin+" min"} at ${esc(v.station)}<br>
+        <span style="color:#9aa3b2">estimated position · ${esc(v.vehicleId)}</span>`).addTo(pinLayer);
+  }
+}
 fetch("/stokey/cycle/geo.json").then(r=>r.json()).then(geo=>{
   const of=k=>geo.features.filter(f=>f.properties.kind===k);
   for(const f of of("station")){
@@ -303,9 +332,19 @@ function applyMapFilter(){
 }
 
 // ---------- poll ----------
+function renderStatus(){
+  const bad=(board?.status||[]).filter(s=>!s.good);
+  const bar=document.getElementById("disruptions");
+  bar.hidden=!bad.length;
+  bar.innerHTML=bad.map(s=>`<span class="s"><span class="dot"></span>
+    <b>${esc(s.line)}</b> ${esc(s.severity)}${s.reason?` — ${esc(s.reason.slice(0,80))}`:""}</span>`).join("");
+  const disr=new Set(bad.map(s=>s.line));
+  for(const c of document.querySelectorAll(".chip")) c.classList.toggle("disrupted", disr.has(c.dataset.line));
+}
 function renderAll(){
   if(!board) return;
-  renderFilters();
+  renderFilters(); renderStatus();
+  renderPins();
   renderDir("into", inList, inCount);
   renderDir("out", outList, outCount);
   applyMapFilter();

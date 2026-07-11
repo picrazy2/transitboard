@@ -17,14 +17,11 @@
         "overground"
       ],
       "serve": {
-        "greater-anglia|inbound": "in",
-        "greater-anglia|outbound": "out",
         "weaver|inbound": "in",
         "weaver|outbound": "out"
       },
       "lineNames": {
-        "weaver": "Weaver",
-        "greater-anglia": "Greater Anglia"
+        "weaver": "Weaver"
       }
     },
     {
@@ -109,26 +106,6 @@
       },
       "lineNames": {
         "piccadilly": "Piccadilly"
-      }
-    },
-    {
-      "id": "910GFNPK",
-      "name": "Finsbury Park",
-      "lat": 51.564302,
-      "lon": -0.106285,
-      "cycMin": 9.3,
-      "modes": [
-        "national-rail"
-      ],
-      "serve": {
-        "great-northern|inbound": "out",
-        "great-northern|outbound": "out",
-        "thameslink|inbound": "out",
-        "thameslink|outbound": "out"
-      },
-      "lineNames": {
-        "great-northern": "Great Northern",
-        "thameslink": "Thameslink"
       }
     },
     {

@@ -316,8 +316,17 @@ a `serve` map (arrival lineId + TfL direction -> in/out) so the API classifies
 live trains without re-deriving direction. Result at Stoke Newington: 8 stations,
 9 lines; 15 minutes was measured to add distance but no new lines.
 
-TfL lists lines that pass through a station without stopping (Greater Anglia at
-the Weaver stations). Those simply return no departures and their chip greys out,
-so no special handling is needed. Warnings fire when the countdown drops below
-the cycle time to the station. v1 shows station dots on the map, not live train
-positions or route geometry.
+Cycle mode is restricted to lines TfL serves live (tube + Overground); National
+Rail (Great Northern, Thameslink, Greater Anglia) returns nothing from
+StopPoint/Arrivals — it needs Darwin — so those are excluded, which drops
+Finsbury Park. 7 stations, 6 lines.
+
+Live train positions are estimated the same way as the walk board's buses: from
+each train's own forward predictions, interpolated between the stops it names —
+TfL's rail lineStrings are 1 km chords, so nothing is drawn, only the pin.
+Crucially, tube vehicle IDs are reused set-numbers ("204" is on two lines at
+once), so /Vehicle predictions are filtered by lineId to isolate the one train.
+
+Line status is shown too: a disruption banner and a ring on affected chips, from
+/Line/{ids}/Status. Warnings fire when the countdown drops below the cycle time
+to the station.
