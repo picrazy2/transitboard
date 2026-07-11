@@ -83,8 +83,8 @@
   /* Focus one row and the other direction has nothing to say — drop it and give
      the space to the map. Narrow by chip and both directions still matter, so
      stack them in one column instead. */
-  .cols.solo-in, .cols.view-in {grid-template-columns:1.15fr 0fr 2.1fr}
-  .cols.solo-out,.cols.view-out{grid-template-columns:0fr 1.15fr 2.1fr}
+  .cols.solo-in {grid-template-columns:1.15fr 0fr 2.1fr}
+  .cols.solo-out{grid-template-columns:0fr 1.15fr 2.1fr}
   .cols.stacked{grid-template-columns:1.15fr 0fr 2.1fr;grid-template-rows:1fr 1fr;
                 grid-template-areas:"in . map" "out . map"}
   /* A stop is only ever the nearest for one direction, so one half of the stack
@@ -93,8 +93,8 @@
   .cols.stacked.one-row{grid-template-rows:1fr}
 
   .panel{min-width:0;transition:opacity .22s ease,padding .34s cubic-bezier(.4,0,.2,1)}
-  .cols.solo-in  #outPanel, .cols.view-in  #outPanel,
-  .cols.solo-out #inPanel,  .cols.view-out #inPanel{opacity:0;pointer-events:none;overflow:hidden;
+  .cols.solo-in  #outPanel,
+  .cols.solo-out #inPanel{opacity:0;pointer-events:none;overflow:hidden;
                           padding-left:0;padding-right:0;border:0}
 
   @media (prefers-reduced-motion:reduce){
@@ -112,13 +112,6 @@
   .panel h2 .only{margin-left:auto;font:700 10.5px/1 system-ui;color:var(--muted);cursor:pointer;
                   background:transparent;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
   .panel h2 .only[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-  .panel h2 .vsw{margin-left:auto;font:700 10.5px/1 system-ui;color:var(--muted);cursor:pointer;
-                 background:transparent;border:1px solid var(--rule);border-radius:999px;padding:4px 9px;display:none}
-  /* In the single-direction view the switch replaces "Only" on the shown panel. */
-  .cols.view-in  #inPanel  .vsw,
-  .cols.view-out #outPanel .vsw{display:inline-block}
-  .cols.view-in  #inPanel  .only,
-  .cols.view-out #outPanel .only{display:none}
   .list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
   .empty{color:var(--muted);font-size:14px;padding:16px 4px}
 
@@ -211,15 +204,13 @@
   <div class="cols" id="cols">
     <section class="panel" id="inPanel">
       <h2>Into London <span class="count" id="inCount"></span>
-        <button class="vsw" data-view="out" title="Switch to Out of London">Out of London &rarr;</button>
-        <button class="only" data-dir="in" title="Focus this direction">Only</button></h2>
+        <button class="only" data-dir="in" title="Show only this direction">Only</button></h2>
       <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
     <section class="panel" id="outPanel">
       <h2>Out of London <span class="count" id="outCount"></span>
-        <button class="vsw" data-view="in" title="Switch to Into London">&larr; Into London</button>
-        <button class="only" data-dir="out" title="Focus this direction">Only</button></h2>
+        <button class="only" data-dir="out" title="Show only this direction">Only</button></h2>
       <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
     </section>
 
@@ -639,18 +630,12 @@ function focusPin(v){
   renderAll();
 }
 
-let viewDir = "in";   // which direction the single-column All view shows
-function setView(dir){ viewDir = dir; renderAll(); }
-
 function focusDir(dir){
   focus = (focus && focus.kind === "dir" && focus.dir === dir) ? null : {kind:"dir", dir};
   renderAll();
 }
 for(const b of document.querySelectorAll(".only")){
   b.addEventListener("click", e => { e.stopPropagation(); focusDir(b.dataset.dir); });
-}
-for(const b of document.querySelectorAll(".vsw")){
-  b.addEventListener("click", e => { e.stopPropagation(); setView(b.dataset.view); });
 }
 
 function focusStop(id){
@@ -693,16 +678,12 @@ function focusedSide(){
 let layoutClass = "";
 function applyLayout(){
   const side = focusedSide();
-  const stopFocus = focus && focus.kind === "stop";
-  // Never two columns side by side. Focus a direction and it gets its own
-  // column; a narrowed table (chip, Weaver default, stop) stacks the two short
-  // lists; otherwise — the case that used to be two full columns — show one
-  // direction with a switch to the other, so each list gets the full height.
-  const next = side ? `solo-${side}`
-             : (stopFocus || expanded()) ? "stacked"
-             : `view-${viewDir}`;
+  // Never two columns side by side. A focused direction gets its own column
+  // (solo); everything else stacks into-London over out-of-London with the map
+  // beside — one tall list is more glanceable, and the map keeps the width.
+  const next = side ? `solo-${side}` : "stacked";
   if(next === layoutClass) return;
-  cols.classList.remove("solo-in", "solo-out", "stacked", "view-in", "view-out");
+  cols.classList.remove("solo-in", "solo-out", "stacked");
   if(next) cols.classList.add(next);
   layoutClass = next;
   // Leaflet caches its container size, so it must be told throughout the
