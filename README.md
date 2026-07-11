@@ -327,6 +327,15 @@ TfL's rail lineStrings are 1 km chords, so nothing is drawn, only the pin.
 Crucially, tube vehicle IDs are reused set-numbers ("204" is on two lines at
 once), so /Vehicle predictions are filtered by lineId to isolate the one train.
 
+National Rail (Great Northern, Thameslink) at Finsbury Park comes from Darwin
+(LDBWS), the same feed the Stratford board uses. Darwin gives a time and a
+destination CRS but no line, direction, or vehicle, so the line is the operator
+code, the direction is a pre-computed south-of-Finsbury-Park = "into London"
+lookup, and there are no live pins — National Rail publishes no positions. Every
+other "National Rail" line TfL lists in range is a phantom (checked against
+Darwin: Stoke Newington only ever runs London Overground), so only Finsbury Park
+is included.
+
 Line status is shown too: a disruption banner and a ring on affected chips, from
 /Line/{ids}/Status. Warnings fire when the countdown drops below the cycle time
 to the station.

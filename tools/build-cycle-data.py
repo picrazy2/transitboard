@@ -41,6 +41,32 @@ SPINE = {
 }
 SNAP_M = 220                        # a stop further than this from the spine is off-branch
 
+# National Rail has no live TfL predictions and no vehicle positions anywhere in
+# the public feeds, so those lines get departures from Darwin (LDBWS) at runtime
+# and no live pins — there is nothing to place. Within a 10-minute cycle only one
+# National Rail station is genuinely useful: Finsbury Park (Great Northern +
+# Thameslink). Every other in-range "National Rail" line TfL lists is a phantom —
+# checked against Darwin, Stoke Newington etc. only ever run London Overground.
+#
+# Direction is decided geographically: Finsbury Park is in north London, so a
+# train is heading *into* London exactly when its destination lies south of the
+# station (toward the central termini, or through them for Thameslink). Latitudes
+# of the destinations Darwin actually returns from here — anything not listed
+# defaults to "out", which is almost always right (the unknowns are outer termini).
+NR_STATIONS = [{
+    "crs": "FPK", "naptan": "910GFNPK", "name": "Finsbury Park",
+    "lat": 51.564302, "lon": -0.106285,
+    "opLines": {"GN": ("great-northern", "Great Northern"), "TL": ("thameslink", "Thameslink")},
+}]
+NR_DEST_LAT = {   # destination CRS -> latitude; "in" iff south of Finsbury Park (51.5643)
+    "MOG": 51.5186, "KGX": 51.5308, "STP": 51.5320, "LBG": 51.5050, "BFR": 51.5117,  # central (in)
+    "BTN": 50.8291, "HRH": 51.0648, "TBD": 51.1172, "GTW": 51.1565, "SEV": 51.2769,  # south (in)
+    "SUO": 51.3596, "ORP": 51.3479, "RAI": 51.3610,
+    "WGC": 51.8017, "SVG": 51.9017, "LET": 51.9789, "HIT": 51.9500, "GDN": 51.6559,  # north (out)
+    "HFN": 51.7990, "CBG": 52.1943, "PBO": 52.5747, "KLN": 52.7510, "ELY": 52.3993,
+    "LTN": 51.8783, "BDM": 52.1360, "ALX": 51.5980,
+}
+
 UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TFL_KEY = re.search(r'TFL_APP_KEY="?([^"\n]+)"?', (ROOT / ".dev.vars").read_text()).group(1)
@@ -280,20 +306,44 @@ for s in board:
     lines = sorted({names[k.split('|')[0]] for k in primary_ll[s["id"]]})
     print(f"  {s['cyc_min']:>4}min  {s['name'][:24]:<25} {', '.join(lines)}")
 
+# ---------- 3b. National Rail stations (Darwin at runtime, no live pins) ----------
+nr_min = {}
+if NR_STATIONS:
+    for st, secs in zip(NR_STATIONS, cycle_times([(s["lat"], s["lon"]) for s in NR_STATIONS])):
+        nr_min[st["crs"]] = round(secs / 60, 1)
+        lines = ", ".join(n for _, n in st["opLines"].values())
+        print(f"  {nr_min[st['crs']]:>4}min  {st['name'][:24]:<25} {lines}  (Darwin/{st['crs']})")
+
+# Every station carries the same keys so cycle.ts sees one shape. TfL stations
+# fill the National-Rail fields with empties; NR stations fill serve with empties.
+station_objs = [{
+    "id": s["id"], "name": s["name"], "lat": s["lat"], "lon": s["lon"],
+    "cycMin": s["cyc_min"], "modes": s["modes"],
+    # arrival.lineId + "|" + arrival.direction -> "in" / "out". A live train is
+    # shown here only if this map has its key.
+    "serve": serve[s["id"]],
+    "lineNames": {k.split("|")[0]: names[k.split("|")[0]] for k in primary_ll[s["id"]]},
+    "nr": False, "crs": "", "opLines": {}, "destDir": {},
+} for s in board]
+for st in NR_STATIONS:
+    dest_dir = {crs: ("in" if lat < st["lat"] else "out") for crs, lat in NR_DEST_LAT.items()}
+    station_objs.append({
+        "id": st["naptan"], "name": st["name"], "lat": st["lat"], "lon": st["lon"],
+        "cycMin": nr_min[st["crs"]], "modes": ["national-rail"],
+        "serve": {}, "lineNames": {lid: nm for lid, nm in st["opLines"].values()},
+        # Darwin returns operatorCode + destination CRS, no line or direction.
+        "nr": True, "crs": st["crs"],
+        "opLines": {op: {"lineId": lid, "name": nm} for op, (lid, nm) in st["opLines"].items()},
+        "destDir": dest_dir,
+    })
+
 # ---------- 4. write ----------
 (ROOT / "src").mkdir(exist_ok=True)
 (ROOT / "src" / "cycle-stops.json").write_text(json.dumps({
     "home": {"lat": HOME[0], "lon": HOME[1]},
     "mode": "cycle",
     "limitMin": CYCLE_LIMIT_S // 60,
-    "stations": [{
-        "id": s["id"], "name": s["name"], "lat": s["lat"], "lon": s["lon"],
-        "cycMin": s["cyc_min"], "modes": s["modes"],
-        # arrival.lineId + "|" + arrival.direction -> "in" / "out". A live train
-        # is shown here only if this map has its key.
-        "serve": serve[s["id"]],
-        "lineNames": {k.split("|")[0]: names[k.split("|")[0]] for k in primary_ll[s["id"]]},
-    } for s in board],
+    "stations": station_objs,
 }, indent=2) + "\n")
 
 features = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
@@ -307,6 +357,15 @@ for s in near:
         features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
                          "properties": {"kind": "station", "id": s["id"], "name": s["name"],
                                         "cyc_min": s["cyc_min"], "onBoard": False}})
+# National Rail board stations get a labelled dot like the others; no line is
+# drawn (National Rail has no live positions, so nothing rides it).
+for st in NR_STATIONS:
+    features.append({"type": "Feature",
+                     "geometry": {"type": "Point", "coordinates": [round(st["lon"], 5), round(st["lat"], 5)]},
+                     "properties": {"kind": "station", "id": st["naptan"], "name": st["name"],
+                                    "cyc_min": nr_min[st["crs"]], "modes": ["national-rail"],
+                                    "lines": sorted(n for _, n in st["opLines"].values()), "onBoard": True}})
+
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
 

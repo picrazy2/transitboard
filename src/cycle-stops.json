@@ -22,7 +22,11 @@
       },
       "lineNames": {
         "weaver": "Weaver"
-      }
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
     },
     {
       "id": "910GDALSKLD",
@@ -39,7 +43,11 @@
       },
       "lineNames": {
         "mildmay": "Mildmay"
-      }
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
     },
     {
       "id": "910GDALS",
@@ -56,7 +64,11 @@
       },
       "lineNames": {
         "windrush": "Windrush"
-      }
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
     },
     {
       "id": "940GZZLUSVS",
@@ -73,7 +85,11 @@
       },
       "lineNames": {
         "victoria": "Victoria"
-      }
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
     },
     {
       "id": "940GZZLUMRH",
@@ -90,7 +106,11 @@
       },
       "lineNames": {
         "piccadilly": "Piccadilly"
-      }
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
     },
     {
       "id": "910GSTOTNHM",
@@ -107,6 +127,65 @@
       },
       "lineNames": {
         "suffragette": "Suffragette"
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {}
+    },
+    {
+      "id": "910GFNPK",
+      "name": "Finsbury Park",
+      "lat": 51.564302,
+      "lon": -0.106285,
+      "cycMin": 9.3,
+      "modes": [
+        "national-rail"
+      ],
+      "serve": {},
+      "lineNames": {
+        "great-northern": "Great Northern",
+        "thameslink": "Thameslink"
+      },
+      "nr": true,
+      "crs": "FPK",
+      "opLines": {
+        "GN": {
+          "lineId": "great-northern",
+          "name": "Great Northern"
+        },
+        "TL": {
+          "lineId": "thameslink",
+          "name": "Thameslink"
+        }
+      },
+      "destDir": {
+        "MOG": "in",
+        "KGX": "in",
+        "STP": "in",
+        "LBG": "in",
+        "BFR": "in",
+        "BTN": "in",
+        "HRH": "in",
+        "TBD": "in",
+        "GTW": "in",
+        "SEV": "in",
+        "SUO": "in",
+        "ORP": "in",
+        "RAI": "in",
+        "WGC": "out",
+        "SVG": "out",
+        "LET": "out",
+        "HIT": "out",
+        "GDN": "out",
+        "HFN": "out",
+        "CBG": "out",
+        "PBO": "out",
+        "KLN": "out",
+        "ELY": "out",
+        "LTN": "out",
+        "BDM": "out",
+        "ALX": "out"
       }
     }
   ]
