@@ -6,7 +6,17 @@
   "background_color": "#0f1115",
   "theme_color": "#0f1115",
   "icons": [
-    { "src": "tube.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "tube.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/stratford/icon-512.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/stratford/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }
