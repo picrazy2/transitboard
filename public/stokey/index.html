@@ -676,25 +676,12 @@ function focusedSide(){
 }
 
 let layoutClass = "";
-// Rows a direction currently shows, after chip/table filtering — the same set
-// renderDirection will draw.
-function directionCount(dir){
-  return [...railGroups(board.rail ?? [], dir), ...busGroups(board.buses ?? [], dir)]
-    .filter(shown).length;
-}
-const SPARSE_COLUMN = 5;   // below this, two side-by-side columns waste the space
-
 function applyLayout(){
   const side = focusedSide();
-  const stopFocus = focus && focus.kind === "stop";
-  let next;
-  if(side) next = `solo-${side}`;
-  else if(stopFocus || expanded()) next = "stacked";
-  // Two full columns earn their width only when both are full. Once either
-  // direction thins out — late evening, night — stack them and give the map the
-  // room instead.
-  else if(directionCount("in") < SPARSE_COLUMN || directionCount("out") < SPARSE_COLUMN) next = "stacked";
-  else next = "";
+  // Never two columns side by side. A focused direction gets its own column
+  // (solo); everything else stacks into-London over out-of-London with the map
+  // beside — one tall list is more glanceable, and the map keeps the width.
+  const next = side ? `solo-${side}` : "stacked";
   if(next === layoutClass) return;
   cols.classList.remove("solo-in", "solo-out", "stacked");
   if(next) cols.classList.add(next);
