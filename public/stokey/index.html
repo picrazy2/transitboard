@@ -48,6 +48,9 @@
   .clock .ampm{font-size:.32em;font-weight:700;opacity:.85;margin-left:4px}
   .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
   .stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .modetog{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px;margin-bottom:6px;align-self:flex-end}
+  .modetog a{font:700 11px/1 system-ui;color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:999px}
+  .modetog a.on{background:var(--ink);color:var(--bg)}
   .stamp.stale{color:var(--warn)}
   .stamp.err{color:var(--bad)}
 
@@ -236,6 +239,10 @@
 <header>
   <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
   <div class="headmeta">
+    <div class="modetog">
+      <a href="/stokey/" class="on" data-mode="walk">Walk</a>
+      <a href="/stokey/cycle/" data-mode="cycle">Cycle</a>
+    </div>
     <div class="wx" id="wx"></div>
   </div>
 </header>
@@ -312,6 +319,8 @@ function tickClock(){
     + `<span class="ampm"> ${ampm}</span>`;
 }
 setInterval(tickClock, 1000); tickClock();
+for(const a of document.querySelectorAll(".modetog a"))
+  a.addEventListener("click",()=>{ try{ localStorage.setItem("boardMode", a.dataset.mode); }catch{} });
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 

@@ -27,6 +27,7 @@ export async function tflJson<T = any>(
 
 export interface Prediction {
   lineName: string;
+  lineId?: string;
   modeName: string;
   destinationName?: string;
   towards?: string;

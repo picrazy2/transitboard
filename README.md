@@ -299,3 +299,25 @@ The original FastAPI backend was removed once the port was verified. To read it:
 ```sh
 git show 6bfaa9c:app.py
 ```
+
+## Cycle mode
+
+A second board, trains only, at `/stokey/cycle/` — the same "nearest station per
+(line, direction)" dedup as the walk board, but on a 10-minute *cycle* time
+(Valhalla bicycle) over rail. A global Walk | Cycle toggle in both headers
+switches between them and remembers the choice.
+
+`tools/build-cycle-data.py` finds every rail station within cycle range, keeps a
+station only if no nearer one serves one of its (line, direction) pairs, and
+classifies into/out of London per station by whether the next stop that way is
+closer to Charing Cross — which is correct for lines that run *through* the
+centre (Piccadilly, Victoria), where a nearest-terminus rule mislabels. It stores
+a `serve` map (arrival lineId + TfL direction -> in/out) so the API classifies
+live trains without re-deriving direction. Result at Stoke Newington: 8 stations,
+9 lines; 15 minutes was measured to add distance but no new lines.
+
+TfL lists lines that pass through a station without stopping (Greater Anglia at
+the Weaver stations). Those simply return no departures and their chip greys out,
+so no special handling is needed. Warnings fire when the countdown drops below
+the cycle time to the station. v1 shows station dots on the map, not live train
+positions or route geometry.

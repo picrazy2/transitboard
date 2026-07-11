@@ -1,0 +1,152 @@
+{
+  "home": {
+    "lat": 51.5611161,
+    "lon": -0.0739865
+  },
+  "mode": "cycle",
+  "limitMin": 10,
+  "stations": [
+    {
+      "id": "910GSTKNWNG",
+      "name": "Stoke Newington",
+      "lat": 51.565233,
+      "lon": -0.072887,
+      "cycMin": 1.6,
+      "modes": [
+        "national-rail",
+        "overground"
+      ],
+      "serve": {
+        "greater-anglia|inbound": "in",
+        "greater-anglia|outbound": "out",
+        "weaver|inbound": "in",
+        "weaver|outbound": "out"
+      },
+      "lineNames": {
+        "weaver": "Weaver",
+        "greater-anglia": "Greater Anglia"
+      }
+    },
+    {
+      "id": "910GDALSKLD",
+      "name": "Dalston Kingsland",
+      "lat": 51.548148,
+      "lon": -0.075701,
+      "cycMin": 7.6,
+      "modes": [
+        "overground"
+      ],
+      "serve": {
+        "mildmay|inbound": "out",
+        "mildmay|outbound": "in"
+      },
+      "lineNames": {
+        "mildmay": "Mildmay"
+      }
+    },
+    {
+      "id": "910GDALS",
+      "name": "Dalston Junction",
+      "lat": 51.546116,
+      "lon": -0.075137,
+      "cycMin": 8.2,
+      "modes": [
+        "overground"
+      ],
+      "serve": {
+        "windrush|inbound": "in",
+        "windrush|outbound": "in"
+      },
+      "lineNames": {
+        "windrush": "Windrush"
+      }
+    },
+    {
+      "id": "940GZZLUSVS",
+      "name": "Seven Sisters",
+      "lat": 51.58333,
+      "lon": -0.072584,
+      "cycMin": 8.3,
+      "modes": [
+        "tube"
+      ],
+      "serve": {
+        "victoria|inbound": "in",
+        "victoria|outbound": "out"
+      },
+      "lineNames": {
+        "victoria": "Victoria"
+      }
+    },
+    {
+      "id": "910GCNNB",
+      "name": "Canonbury",
+      "lat": 51.548732,
+      "lon": -0.092191,
+      "cycMin": 8.4,
+      "modes": [
+        "overground"
+      ],
+      "serve": {
+        "windrush|outbound": "out"
+      },
+      "lineNames": {
+        "windrush": "Windrush"
+      }
+    },
+    {
+      "id": "940GZZLUMRH",
+      "name": "Manor House",
+      "lat": 51.570738,
+      "lon": -0.096118,
+      "cycMin": 8.5,
+      "modes": [
+        "tube"
+      ],
+      "serve": {
+        "piccadilly|inbound": "in",
+        "piccadilly|outbound": "out"
+      },
+      "lineNames": {
+        "piccadilly": "Piccadilly"
+      }
+    },
+    {
+      "id": "910GFNPK",
+      "name": "Finsbury Park",
+      "lat": 51.564302,
+      "lon": -0.106285,
+      "cycMin": 9.3,
+      "modes": [
+        "national-rail"
+      ],
+      "serve": {
+        "great-northern|inbound": "out",
+        "great-northern|outbound": "out",
+        "thameslink|inbound": "out",
+        "thameslink|outbound": "out"
+      },
+      "lineNames": {
+        "great-northern": "Great Northern",
+        "thameslink": "Thameslink"
+      }
+    },
+    {
+      "id": "910GSTOTNHM",
+      "name": "South Tottenham",
+      "lat": 51.580372,
+      "lon": -0.072103,
+      "cycMin": 9.9,
+      "modes": [
+        "overground"
+      ],
+      "serve": {
+        "suffragette|inbound": "in",
+        "suffragette|outbound": "out"
+      },
+      "lineNames": {
+        "suffragette": "Suffragette"
+      }
+    }
+  ]
+}

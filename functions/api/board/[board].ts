@@ -1,9 +1,11 @@
 import { Env } from "../../../src/tfl";
 import { stokeyBoard } from "../../../src/stokey";
 import { stratfordBoard } from "../../../src/stratford";
+import { cycleBoard } from "../../../src/cycle";
 
 const BOARDS: Record<string, (env: Env) => Promise<unknown>> = {
   stokey: stokeyBoard,
+  cycle: cycleBoard,
   stratford: stratfordBoard,
 };
 

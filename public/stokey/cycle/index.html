@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stoke Newington · Cycle</title>
+<meta name="description" content="Trains within a 10-minute cycle of Stoke Newington, into and out of London.">
+<link rel="manifest" href="/stokey/cycle/manifest.webmanifest">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/stokey/cycle/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/stokey/cycle/icon-512.png" sizes="512x512" type="image/png">
+<link rel="apple-touch-icon" href="/stokey/cycle/icon-512.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Stoke Newington · Cycle">
+<meta property="og:description" content="Trains within a 10-minute cycle, into and out of London.">
+<meta property="og:url" content="https://board.akguo.com/stokey/cycle">
+<meta property="og:image" content="https://board.akguo.com/stokey/cycle/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://board.akguo.com/stokey/cycle/og.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root{
+    --bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22;--row:#111523;
+    --ok:#20c05b;--warn:#f2c94c;--bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;
+    display:flex;flex-direction:column;min-height:100dvh;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+  header{padding:6px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
+  .clock{font-size:clamp(48px,5.6vw,88px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
+  .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
+  .clock .ampm{font-size:.32em;font-weight:700;opacity:.85;margin-left:4px}
+  .headmeta{flex:1;display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
+  .wx{display:flex;align-items:center;gap:14px}
+  .wx .now{display:flex;align-items:baseline;gap:8px}
+  .wx .temp{font-size:52px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .wx .icon{font-size:40px;line-height:1}
+  .wx .meta{font-size:13px;color:var(--muted);text-align:right;line-height:1.4}
+  .wx .hilo .hi{color:#ffb26b;font-weight:700}.wx .hilo .lo{color:#79b8ff;font-weight:700}
+
+  /* global Walk | Cycle toggle */
+  .modetog{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px;margin-bottom:6px}
+  .modetog a{font:700 11px/1 system-ui;color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:999px}
+  .modetog a.on{background:var(--ink);color:var(--bg)}
+
+  .chiprow{display:flex;align-items:center;gap:12px;padding:8px 14px 0}
+  .filters{display:flex;flex-wrap:wrap;gap:7px;flex:1;min-width:0}
+  .chip{font:800 11.5px/1 system-ui;color:#fff;border:1px solid transparent;border-radius:999px;
+        padding:6px 11px;cursor:pointer;opacity:.32;transition:opacity .12s ease}
+  .chip.on{opacity:1}
+  .chip:disabled{opacity:.14!important;filter:grayscale(.7);cursor:default;pointer-events:none}
+  .stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .stamp.stale{color:var(--warn)} .stamp.err{color:var(--bad)}
+
+  .wrap{padding:12px;display:flex;flex:1;min-height:0}
+  .cols{display:grid;gap:12px;width:100%;grid-template-columns:1.15fr 2.1fr;grid-template-rows:1fr 1fr;
+        grid-template-areas:"in map" "out map"}
+  #inPanel{grid-area:in}#outPanel{grid-area:out}#mapPanel{grid-area:map}
+  .panel{background:var(--panel);border-radius:14px;padding:9px 12px;display:flex;flex-direction:column;min-height:0}
+  .panel h2{margin:0 0 7px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
+  .list{display:flex;flex-direction:column;gap:6px;overflow:auto;flex:1;min-height:0;padding-right:4px}
+  .empty{color:var(--muted);font-size:14px;padding:14px 4px}
+
+  .row{border:1px solid var(--rule);border-radius:11px;padding:7px 10px;background:var(--row);
+       display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .badge{max-width:112px;height:26px;border-radius:7px;padding:0 9px;display:flex;align-items:center;
+         font:800 12px/1 system-ui;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mid{min-width:0}
+  .to{font-size:14px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .from{font-size:10.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .etas{display:grid;grid-template-columns:56px 44px;gap:5px;align-items:baseline;font-variant-numeric:tabular-nums}
+  .etas .n{font-size:20px;font-weight:800;text-align:right;letter-spacing:-.01em}
+  .etas .n.due{font-size:16px;color:var(--ok)}
+  .etas .rest{font-size:13px;color:var(--muted);text-align:right}
+  .warn{display:none;color:var(--warn)}
+  .row.unreachable .warn{display:inline}
+  .row.unreachable{border-color:#4a3a1c;background:#191509}
+  .row.unreachable .etas .n{color:var(--warn)}
+
+  #mapPanel{padding:0;overflow:hidden;position:relative}
+  #map{flex:1;min-height:0;background:#0b0d11;border-radius:14px}
+  .leaflet-container{background:#0b0d11}
+  .maplabel{background:rgba(15,17,21,.82)!important;border:none!important;box-shadow:none!important;
+            color:var(--ink)!important;font:700 10px system-ui;padding:2px 5px!important;border-radius:4px}
+  .maplabel::before{display:none!important}
+  .leaflet-control-attribution{background:rgba(15,17,21,.75)!important;color:#6c7484!important}
+  .leaflet-control-attribution a{color:#8a93a5!important}
+
+  @media (max-width:760px){
+    html,body{height:auto;overflow:auto}body{min-height:100dvh}
+    header{flex-wrap:wrap;gap:6px;padding:8px 12px}.clock{font-size:38px}
+    .headmeta{align-items:flex-start;text-align:left}.wx .temp{font-size:32px}.wx .icon{font-size:26px}
+    .chiprow{flex-wrap:wrap}.stamp{order:2;width:100%}
+    .wrap{display:block;padding:8px}
+    .cols{display:flex!important;flex-direction:column;gap:10px;height:auto}
+    .cols .panel{width:auto;min-height:0}
+    .list{overflow:visible;flex:none;max-height:none}
+    #mapPanel{order:-1;height:48vh;min-height:260px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="clock" id="clock">--:--<span class="sec">:--</span><span class="ampm"> --</span></div>
+  <div class="headmeta">
+    <div class="modetog">
+      <a href="/stokey/" data-mode="walk">Walk</a>
+      <a href="/stokey/cycle/" class="on" data-mode="cycle">Cycle</a>
+    </div>
+    <div class="wx" id="wx"></div>
+    <div class="stamp" id="stamp">Loading&hellip;</div>
+  </div>
+</header>
+<div class="chiprow"><div class="filters" id="filters"></div></div>
+
+<div class="wrap">
+  <div class="cols" id="cols">
+    <section class="panel" id="inPanel">
+      <h2>Into London <span class="count" id="inCount"></span></h2>
+      <div class="list" id="inList"><div class="empty">Loading&hellip;</div></div>
+    </section>
+    <section class="panel" id="outPanel">
+      <h2>Out of London <span class="count" id="outCount"></span></h2>
+      <div class="list" id="outList"><div class="empty">Loading&hellip;</div></div>
+    </section>
+    <section class="panel" id="mapPanel"><div id="map"></div></section>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const API = "/api/board/cycle";
+const REFRESH_MS = 60000;
+const HOME = [51.5611161, -0.0739865];
+let CYC_MIN = 10;
+
+// Each line's brand colour; unknown lines fall back to a neutral rail grey.
+const LINE_COLOR = {
+  "Weaver":"#823a62", "Mildmay":"#3a6ea5", "Windrush":"#dc241f", "Suffragette":"#57ad6d",
+  "Lioness":"#c99e28", "Liberty":"#5d6067", "Victoria":"#0098d4", "Piccadilly":"#0a338c",
+  "Northern":"#111", "Central":"#e32017", "Elizabeth line":"#6950a1",
+  "Greater Anglia":"#d70428", "Great Northern":"#0a493e", "Thameslink":"#e05aa6",
+};
+const colorOf = l => LINE_COLOR[l] || "#5a6472";
+
+const pad = n => String(n).padStart(2,"0");
+const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function tickClock(){
+  const d=new Date(); let h=d.getHours(); const ampm=h>=12?"pm":"am"; h=h%12||12;
+  clock.innerHTML=`${h}:${pad(d.getMinutes())}<span class="sec">:${pad(d.getSeconds())}</span><span class="ampm"> ${ampm}</span>`;
+}
+setInterval(tickClock,1000); tickClock();
+
+// remember the last chosen mode so the PWA/root can honour it
+for(const a of document.querySelectorAll(".modetog a"))
+  a.addEventListener("click",()=>{ try{ localStorage.setItem("boardMode", a.dataset.mode); }catch{} });
+
+// ---------- weather ----------
+const WMO={0:["☀️","🌙","Clear"],1:["🌤️","🌙","Mostly clear"],2:["⛅","☁️","Partly cloudy"],3:["☁️","☁️","Overcast"],
+ 45:["🌫️","🌫️","Fog"],48:["🌫️","🌫️","Fog"],51:["🌦️","🌦️","Drizzle"],53:["🌦️","🌦️","Drizzle"],55:["🌦️","🌦️","Drizzle"],
+ 61:["🌦️","🌦️","Light rain"],63:["🌧️","🌧️","Rain"],65:["🌧️","🌧️","Heavy rain"],71:["🌨️","🌨️","Snow"],73:["🌨️","🌨️","Snow"],
+ 75:["❄️","❄️","Snow"],80:["🌦️","🌦️","Showers"],81:["🌧️","🌧️","Showers"],82:["⛈️","⛈️","Showers"],95:["⛈️","⛈️","Storm"]};
+const wIcon=(c,day)=>(WMO[c]||["🌡️","🌡️","—"])[day?0:1];
+const wLabel=c=>(WMO[c]||["","","—"])[2];
+function renderWeather(w){
+  if(!w){ wx.innerHTML=""; return; }
+  wx.innerHTML=`<div class="now"><span class="icon">${wIcon(w.code,w.isDay)}</span>
+    <span class="temp">${Math.round(w.tempC)}°</span></div>
+    <div class="meta">${esc(wLabel(w.code))}${w.maxC!=null?`<br><span class="hilo">
+      <span class="hi">H ${Math.round(w.maxC)}°</span>&nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>`:""}</div>`;
+}
+
+// ---------- departures ----------
+const CYC_S = () => CYC_MIN*60;
+function countdown(iso, fallbackMin){
+  if(!iso) return {text:fallbackMin===0?"Due":`${fallbackMin} min`, secs:fallbackMin*60};
+  const secs=Math.round((Date.parse(iso)-Date.now())/1000);
+  if(secs<=0) return {text:"Due", secs:0};
+  return {text:`${Math.floor(secs/60)}:${pad(secs%60)}`, secs};
+}
+const reachable = secs => secs >= CYC_S();
+
+let board=null;
+const SERVICES=["Weaver","Greater Anglia","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink"];
+let selected=new Set(SERVICES);
+const shown = r => selected.has(r.line);
+
+// group a direction's rows per (line, destination, station); show soonest + next
+function groups(dir){
+  const rows=(board?.[dir]||[]).filter(shown);
+  const m=new Map();
+  for(const r of rows){
+    const k=`${r.line}|${r.to}|${r.stationId}`;
+    if(!m.has(k)) m.set(k,{...r, etas:[]});
+    m.get(k).etas.push({min:r.etaMin, exp:r.expected});
+  }
+  return [...m.values()].sort((a,b)=>a.etas[0].min-b.etas[0].min);
+}
+
+function rowHTML(g){
+  const c=colorOf(g.line);
+  const first=g.etas[0];
+  const cd=countdown(first.exp, first.min);
+  const miss=!reachable(cd.secs);
+  const rest=g.etas.slice(1,3).map(e=>countdown(e.exp,e.min).text.replace(/:\d\d$/, m=>m)).map(t=>t.split(":")[0]||t);
+  const restTxt=g.etas.slice(1,3).map(e=>e.min).join(" · ");
+  return `<div class="row ${miss?"unreachable":""}" data-line="${esc(g.line)}">
+    <div class="badge" style="background:${c}">${esc(g.line)}</div>
+    <div class="mid">
+      <div class="to">${esc(g.to)}</div>
+      <div class="from">${WARN}${esc(g.station)} · ${g.cycMin} min cycle${g.plat&&g.plat!=="—"?` · ${esc(g.plat)}`:""}</div>
+    </div>
+    <div class="etas">
+      <span class="n ${cd.secs===0?"due":""}" data-exp="${first.exp||""}" data-min="${first.min}">${cd.text}</span>
+      <span class="rest">${restTxt}</span>
+    </div>
+  </div>`;
+}
+const WARN=`<span class="warn" title="Not enough time to cycle there">⚠ </span>`;
+
+function renderDir(dir, listEl, countEl){
+  const gs=groups(dir);
+  countEl.textContent=gs.length?`${gs.length} routes`:"";
+  listEl.innerHTML=gs.length?gs.map(rowHTML).join(""):'<div class="empty">Nothing due.</div>';
+}
+
+function tick(){
+  for(const el of document.querySelectorAll(".etas .n[data-exp]")){
+    const c=countdown(el.dataset.exp||null, +el.dataset.min);
+    el.textContent=c.text; el.classList.toggle("due", c.secs===0);
+    const row=el.closest(".row"); if(row) row.classList.toggle("unreachable", !reachable(c.secs));
+  }
+}
+setInterval(tick,1000);
+
+// ---------- filter chips ----------
+function linesLive(){
+  if(!board) return new Set(SERVICES);
+  return new Set([...board.into, ...board.out].map(r=>r.line));
+}
+function renderFilters(){
+  const live=linesLive();
+  filters.innerHTML=SERVICES.map(l=>{
+    const short=l.replace("Greater Anglia","Gtr Anglia").replace("Great Northern","Gt Northern");
+    return `<button class="chip ${selected.has(l)?"on":""}" data-line="${esc(l)}"
+       style="background:${colorOf(l)}" ${live.has(l)?"":"disabled"}>${esc(short)}</button>`;
+  }).join("");
+}
+filters.addEventListener("click",e=>{
+  const b=e.target.closest(".chip"); if(!b||b.disabled) return;
+  const l=b.dataset.line;
+  if(selected.size===SERVICES.length) selected=new Set([l]);
+  else if(selected.has(l)){ selected.delete(l); if(!selected.size) selected=new Set(SERVICES); }
+  else selected.add(l);
+  renderFilters(); renderAll();
+});
+
+// ---------- map ----------
+const map=L.map("map",{zoomControl:false,attributionControl:true});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{subdomains:"abcd",maxZoom:19,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+map.setView(HOME,13);
+const stationMarkers=[];
+fetch("/stokey/cycle/geo.json").then(r=>r.json()).then(geo=>{
+  const of=k=>geo.features.filter(f=>f.properties.kind===k);
+  for(const f of of("station")){
+    const p=f.properties,[lon,lat]=f.geometry.coordinates,on=p.onBoard;
+    const m=L.circleMarker([lat,lon],{radius:on?7:3.5,color:on?"#fff":"#5a6472",weight:on?2:1.5,
+      fillColor:"#0f1115",fillOpacity:1})
+      .bindPopup(`<b>${esc(p.name)}</b><br>${p.cyc_min} min cycle${p.lines?"<br>"+esc(p.lines.join(", ")):""}`).addTo(map);
+    if(on) m.bindTooltip(esc(p.name),{permanent:true,direction:"right",offset:[7,0],className:"maplabel"});
+    stationMarkers.push({marker:m, lines:p.lines||[], onBoard:on});
+  }
+  const [hlon,hlat]=of("home")[0].geometry.coordinates;
+  L.marker([hlat,hlon],{icon:L.divIcon({className:"",iconSize:[17,17],
+    html:`<div style="width:17px;height:17px;background:#20c05b;border:3px solid #0f1115;border-radius:50%;box-shadow:0 0 0 2px #20c05b"></div>`})})
+    .bindPopup("<b>Home</b><br>149 Stoke Newington High St").addTo(map);
+  const pts=of("station").filter(f=>f.properties.onBoard).map(f=>[f.geometry.coordinates[1],f.geometry.coordinates[0]]);
+  map.fitBounds(L.latLngBounds(pts).extend([hlat,hlon]).pad(0.12),{maxZoom:14});
+  applyMapFilter();
+}).catch(e=>console.error("geo",e));
+
+function applyMapFilter(){
+  const narrowed=selected.size!==SERVICES.length;
+  for(const s of stationMarkers){
+    const serves=!narrowed || s.lines.some(l=>selected.has(l));
+    const o=s.onBoard?(serves?1:.2):(narrowed?.1:.5);
+    s.marker.setStyle({opacity:o,fillOpacity:o});
+    const t=s.marker.getTooltip&&s.marker.getTooltip();
+    if(t&&t.getElement()) t.getElement().style.opacity=serves?1:.2;
+  }
+}
+
+// ---------- poll ----------
+function renderAll(){
+  if(!board) return;
+  renderFilters();
+  renderDir("into", inList, inCount);
+  renderDir("out", outList, outCount);
+  applyMapFilter();
+}
+let lastOk=0;
+async function refresh(){
+  try{
+    const res=await fetch(API,{cache:"no-store"});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    board=await res.json(); CYC_MIN=board.cycMin||10;
+    renderWeather(board.weather); renderAll();
+    lastOk=Date.now(); stamp.className="stamp";
+    stamp.textContent=`Updated ${new Date(board.ts*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
+  }catch(e){
+    stamp.className="stamp "+(lastOk?"stale":"err");
+    stamp.textContent=lastOk?`Stale — ${Math.round((Date.now()-lastOk)/1000)}s ago`:`Cannot reach board API (${e.message})`;
+  }
+}
+refresh();
+setInterval(refresh,REFRESH_MS);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refresh(); });
+let _rt; addEventListener("resize",()=>{ clearTimeout(_rt); _rt=setTimeout(()=>map.invalidateSize(),200); });
+</script>
+</body>
+</html>
