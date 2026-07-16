@@ -1,6 +1,7 @@
 export interface Env {
   TFL_APP_KEY: string;
   DARWIN_TOKEN?: string;
+  RTT_TOKEN?: string;
 }
 
 const TFL = "https://api.tfl.gov.uk";

@@ -164,6 +164,7 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .etas .rest{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap}
 .etas .rest s{opacity:.6;text-decoration-thickness:1px}
 .etas .rest .late{font-weight:800}
+.etas .rest .delay{display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.12}
 
 .warn{display:none;color:var(--warn)}
 .row.unreachable .warn{display:inline}

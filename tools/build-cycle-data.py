@@ -54,31 +54,17 @@ BRANCHES = {
     "windrush":    [959677, 660463, 660462, 2755611, 10028997],  # Crystal Palace/New Cross/W Croydon/Clapham Jn/Battersea
 }
 
-# National Rail has no live TfL predictions and no vehicle positions anywhere in
-# the public feeds, so those lines get departures from Darwin (LDBWS) at runtime
-# and no live pins — there is nothing to place. Within a 10-minute cycle only one
-# National Rail station is genuinely useful: Finsbury Park (Great Northern +
-# Thameslink). Every other in-range "National Rail" line TfL lists is a phantom —
-# checked against Darwin, Stoke Newington etc. only ever run London Overground.
-#
-# Direction is decided geographically: Finsbury Park is in north London, so a
-# train is heading *into* London exactly when its destination lies south of the
-# station (toward the central termini, or through them for Thameslink). Latitudes
-# of the destinations Darwin actually returns from here — anything not listed
-# defaults to "out", which is almost always right (the unknowns are outer termini).
-NR_STATIONS = [{
-    "crs": "FPK", "naptan": "910GFNPK", "name": "Finsbury Park",
-    "lat": 51.564302, "lon": -0.106285,
-    "opLines": {"GN": ("great-northern", "Great Northern"), "TL": ("thameslink", "Thameslink")},
-}]
-NR_DEST_LAT = {   # destination CRS -> latitude; "in" iff south of Finsbury Park (51.5643)
-    "MOG": 51.5186, "KGX": 51.5308, "STP": 51.5320, "LBG": 51.5050, "BFR": 51.5117,  # central (in)
-    "BTN": 50.8291, "HRH": 51.0648, "TBD": 51.1172, "GTW": 51.1565, "SEV": 51.2769,  # south (in)
-    "SUO": 51.3596, "ORP": 51.3479, "RAI": 51.3610,
-    "WGC": 51.8017, "SVG": 51.9017, "LET": 51.9789, "HIT": 51.9500, "GDN": 51.6559,  # north (out)
-    "HFN": 51.7990, "CBG": 52.1943, "PBO": 52.5747, "KLN": 52.7510, "ELY": 52.3993,
-    "LTN": 51.8783, "BDM": 52.1360, "ALX": 51.5980,
-}
+# National Rail is enumerated live from the Realtime Trains API (data.rtt.io), not
+# hand-curated: for every in-range station we ask RTT which operators genuinely run
+# there, so phantoms (TfL lists NR where no train actually stops) fall out on their
+# own. Direction is geographic — a destination south of the station heads "into
+# London". Station and destination coordinates come from a public CRS dataset.
+# See the rtt-api / transitboard-data-sources memories.
+NR_TOC = {"GN": ("great-northern", "Great Northern"),
+          "TL": ("thameslink", "Thameslink"),
+          "LE": ("greater-anglia", "Greater Anglia")}   # LO (Overground) / XR (Elizabeth) are TfL-served
+STATIONS_CSV = "https://raw.githubusercontent.com/davwheat/uk-railway-stations/refs/heads/main/stations.csv"
+RTT_REFRESH = re.search(r'RTT_TOKEN="?([^"\n]+)', (pathlib.Path(__file__).resolve().parent.parent / ".dev.vars").read_text()).group(1)
 
 UA = {"User-Agent": "transitboard/1.0 (+https://board.akguo.com)"}
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -201,6 +187,64 @@ def snap(poly, cum, lat, lon):
             best = (perp, cum[i] + t * math.sqrt(seg2))
     return best[1], best[0]
 
+
+# ---------- National Rail via Realtime Trains ----------
+def get_bytes(url):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return r.read()
+
+
+def rtt_access_token():
+    return get_json("https://data.rtt.io/api/get_access_token",
+                    headers={"Authorization": f"Bearer {RTT_REFRESH}"})["token"]
+
+
+def norm_name(s):
+    s = re.sub(r"\(.*?\)", "", s or "").lower()
+    s = re.sub(r"[^a-z ]", " ", s)
+    return re.sub(r"\s+", " ", s).replace("rail station", "").strip()
+
+
+def load_crs_ref():
+    """davwheat CRS dataset -> (list of (crs,name,lat,lon), norm_name->lat)."""
+    import csv
+    cache = ROOT / "tools" / "cache" / "uk-stations.csv"
+    if not cache.exists():
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(get_bytes(STATIONS_CSV))
+    ref, name2lat = [], {}
+    for r in csv.DictReader(cache.open()):
+        if not r["crsCode"]:
+            continue
+        lat, lon = float(r["lat"]), float(r["long"])
+        ref.append((r["crsCode"], r["stationName"], lat, lon))
+        name2lat[norm_name(r["stationName"])] = lat
+    return ref, name2lat
+
+
+def nearest_crs(lat, lon, ref):
+    best = min(ref, key=lambda c: haversine_km((lat, lon), (c[2], c[3])))
+    return best[0] if haversine_km((lat, lon), (best[2], best[3])) * 1000 < 250 else None
+
+
+def nr_services(crs, at):
+    """RTT location board -> [(opCode, opName, destDescription)], genuine NR only."""
+    try:
+        d = get_json(f"https://data.rtt.io/gb-nr/location?code={crs}",
+                     headers={"Authorization": f"Bearer {at}"})
+    except Exception:
+        return []
+    out = []
+    for svc in (d.get("services") or []):
+        op = (svc.get("scheduleMetadata") or {}).get("operator") or {}
+        if op.get("code") not in NR_TOC:
+            continue
+        dest = ((svc.get("destination") or [{}])[0].get("location") or {})
+        out.append((op["code"], op.get("name"), dest.get("description") or ""))
+    return out
+
+
 # TfL only serves live predictions for tube / Overground / DLR / Elizabeth. National
 # Rail lines (Greater Anglia, Great Northern, Thameslink) come back empty from
 # StopPoint/Arrivals — they need Darwin — so cycle mode leaves them out.
@@ -229,6 +273,43 @@ for s, secs in zip(stations, cycle_times([(s["lat"], s["lon"]) for s in stations
 
 near = sorted([s for s in stations if s["cyc_s"] <= CYCLE_LIMIT_S], key=lambda s: (s["cyc_s"], s["id"]))
 print(f"  {len(near)}/{len(stations)} within {CYCLE_LIMIT_S // 60} min cycle")
+
+# ---------- 1b. National Rail stations, enumerated live from Realtime Trains ----------
+# For every in-range NR station we ask RTT which operators actually run: phantoms
+# (TfL lists NR at Overground-only stations) return nothing and drop out. Each real
+# service classifies into/out of London by whether its destination is south of us.
+print("National Rail (Realtime Trains) ...", flush=True)
+crs_ref, name2lat = load_crs_ref()
+rtt_at = rtt_access_token()
+nr_raw = tfl("/StopPoint", lat=HOME[0], lon=HOME[1], stopTypes="NaptanRailStation",
+             radius=SEARCH_RADIUS_M, modes="national-rail", returnLines="true")["stopPoints"]
+nr_pts = [{"id": s["naptanId"], "name": s["commonName"].replace(" Rail Station", "").strip(),
+           "lat": s["lat"], "lon": s["lon"], "modes": ["national-rail"]} for s in nr_raw]
+for s, secs in zip(nr_pts, cycle_times([(p["lat"], p["lon"]) for p in nr_pts])):
+    s["cyc_s"], s["cyc_min"] = secs, round(secs / 60, 1)
+
+nr_stations = []   # in-range stations with genuine NR service
+for s in sorted([p for p in nr_pts if p["cyc_s"] <= CYCLE_LIMIT_S], key=lambda p: p["cyc_s"]):
+    crs = nearest_crs(s["lat"], s["lon"], crs_ref)
+    if not crs:
+        continue
+    op_lines, dest_dir, served = {}, {}, set()   # served = {(lineId, london)}
+    for code, opname, destname in nr_services(crs, rtt_at):
+        lid, lname = NR_TOC[code]
+        dlat = name2lat.get(norm_name(destname))
+        if dlat is None:
+            continue                                  # unknown destination — can't place a direction
+        london = "in" if dlat < s["lat"] else "out"
+        op_lines[code] = {"lineId": lid, "name": lname}
+        dest_dir[destname] = london
+        served.add((lid, london))
+    if not served:
+        continue                                      # phantom: no genuine NR departures
+    s.update({"crs": crs, "opLines": op_lines, "destDir": dest_dir, "served": served,
+              "names": {NR_TOC[c][0]: NR_TOC[c][1] for c in op_lines}})
+    nr_stations.append(s)
+    print(f"  {s['cyc_min']:>4}min  {s['name'][:22]:<23} {crs}  {sorted({l for l, _ in served})}")
+print(f"  {len(nr_stations)} National Rail stations with live service")
 
 # ---------- 2. per line: where each station sits, and which way is "in" ----------
 LINES = {}   # line id -> {"name", "seq": {naptan: index}, "dist": {naptan: km_to_CC}, ...}
@@ -296,58 +377,56 @@ for s in near:
                 candidates.append((s, lid, lname, d, lon))
 
 # ---------- 3. dedup: nearest station per (line, into/out of London) ----------
-nearest = {}   # "lineId|london" -> station id  (first seen = nearest, `near` is sorted)
-for s, lid, lname, d, lon in candidates:
-    nearest.setdefault(f"{lid}|{lon}", s["id"])
+# TfL (tube/Overground) and National Rail candidates compete in one pool; the
+# nearest station by cycle time wins each (line, direction).
+names, sta, tfl_dir, nearest = {}, {}, {}, {}
+def offer(sid, lid, london, cyc_s):
+    k = f"{lid}|{london}"
+    if k not in nearest or cyc_s < nearest[k][0]:
+        nearest[k] = (cyc_s, sid)
 
-# what each kept station serves: the arrival's (lineId, tfl-direction) -> london,
-# but only the pairs it actually won the dedup for.
-serve = {}       # station id -> { "lineId|inbound": "in", ... }
-primary_ll = {}  # station id -> ["lineId|in", ...]  (line, london) it is nearest for
-names = {}
-for s, lid, lname, d, lon in candidates:
-    if nearest.get(f"{lid}|{lon}") != s["id"]:
-        continue
-    serve.setdefault(s["id"], {})[f"{lid}|{d}"] = lon
-    primary_ll.setdefault(s["id"], set()).add(f"{lid}|{lon}")
-    names[lid] = lname
+for s, lid, lname, d, lon in candidates:               # TfL
+    sta[s["id"]] = s; names[lid] = lname; tfl_dir[(s["id"], lid, lon)] = d
+    offer(s["id"], lid, lon, s["cyc_s"])
+for s in nr_stations:                                  # National Rail (RTT)
+    sta[s["id"]] = s
+    for lid, lon in s["served"]:
+        names[lid] = s["names"][lid]
+        offer(s["id"], lid, lon, s["cyc_s"])
+nearest = {k: v[1] for k, v in nearest.items()}
+nr_ids = {s["id"] for s in nr_stations}
 
-board = [s for s in near if s["id"] in serve]
-print(f"  {len(near)} stations -> {len(board)} after dedup, "
-      f"{len({p.split('|')[0] for p in nearest})} lines")
+serve, primary_ll = {}, {}
+for k, sid in nearest.items():
+    lid, lon = k.split("|")
+    primary_ll.setdefault(sid, set()).add(k)
+    serve.setdefault(sid, {})
+    if sid not in nr_ids and (d := tfl_dir.get((sid, lid, lon))):
+        serve[sid][f"{lid}|{d}"] = lon
+
+board = sorted((sta[i] for i in primary_ll), key=lambda s: s["cyc_s"])
+print(f"  dedup -> {len(board)} stations, {len({p.split('|')[0] for p in nearest})} lines")
 for s in board:
     lines = sorted({names[k.split('|')[0]] for k in primary_ll[s["id"]]})
-    print(f"  {s['cyc_min']:>4}min  {s['name'][:24]:<25} {', '.join(lines)}")
+    print(f"  {'NR' if s['id'] in nr_ids else '  '} {s['cyc_min']:>4}min  {s['name'][:22]:<23} {', '.join(lines)}")
 
-# ---------- 3b. National Rail stations (Darwin at runtime, no live pins) ----------
-nr_min = {}
-if NR_STATIONS:
-    for st, secs in zip(NR_STATIONS, cycle_times([(s["lat"], s["lon"]) for s in NR_STATIONS])):
-        nr_min[st["crs"]] = round(secs / 60, 1)
-        lines = ", ".join(n for _, n in st["opLines"].values())
-        print(f"  {nr_min[st['crs']]:>4}min  {st['name'][:24]:<25} {lines}  (Darwin/{st['crs']})")
-
-# Every station carries the same keys so cycle.ts sees one shape. TfL stations
-# fill the National-Rail fields with empties; NR stations fill serve with empties.
-station_objs = [{
-    "id": s["id"], "name": s["name"], "lat": s["lat"], "lon": s["lon"],
-    "cycMin": s["cyc_min"], "modes": s["modes"],
-    # arrival.lineId + "|" + arrival.direction -> "in" / "out". A live train is
-    # shown here only if this map has its key.
-    "serve": serve[s["id"]],
-    "lineNames": {k.split("|")[0]: names[k.split("|")[0]] for k in primary_ll[s["id"]]},
-    "nr": False, "crs": "", "opLines": {}, "destDir": {},
-} for s in board]
-for st in NR_STATIONS:
-    dest_dir = {crs: ("in" if lat < st["lat"] else "out") for crs, lat in NR_DEST_LAT.items()}
+# Every station carries the same keys so cycle.ts sees one shape. An NR station
+# fills opLines/destDir/nrServe and leaves serve empty; a TfL station the reverse.
+station_objs = []
+for s in board:
+    sid = s["id"]; is_nr = sid in nr_ids
+    won = sorted({k.split("|")[0] for k in primary_ll[sid]})
     station_objs.append({
-        "id": st["naptan"], "name": st["name"], "lat": st["lat"], "lon": st["lon"],
-        "cycMin": nr_min[st["crs"]], "modes": ["national-rail"],
-        "serve": {}, "lineNames": {lid: nm for lid, nm in st["opLines"].values()},
-        # Darwin returns operatorCode + destination CRS, no line or direction.
-        "nr": True, "crs": st["crs"],
-        "opLines": {op: {"lineId": lid, "name": nm} for op, (lid, nm) in st["opLines"].items()},
-        "destDir": dest_dir,
+        "id": sid, "name": s["name"], "lat": s["lat"], "lon": s["lon"],
+        "cycMin": s["cyc_min"], "modes": s.get("modes", []),
+        "serve": serve.get(sid, {}),
+        "lineNames": {lid: names[lid] for lid in won},
+        "nr": is_nr, "crs": s.get("crs", ""),
+        # RTT runtime: operatorCode -> line, destination name -> in/out, and the
+        # (line, london) pairs actually won (so a station shows only those).
+        "opLines": {op: v for op, v in s.get("opLines", {}).items() if v["lineId"] in won} if is_nr else {},
+        "destDir": s.get("destDir", {}) if is_nr else {},
+        "nrServe": sorted(primary_ll[sid]) if is_nr else [],
     })
 
 # ---------- 4. write ----------
@@ -370,15 +449,6 @@ for s in near:
         features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(s["lon"], 5), round(s["lat"], 5)]},
                          "properties": {"kind": "station", "id": s["id"], "name": s["name"],
                                         "cyc_min": s["cyc_min"], "onBoard": False}})
-# National Rail board stations get a labelled dot like the others; no line is
-# drawn (National Rail has no live positions, so nothing rides it).
-for st in NR_STATIONS:
-    features.append({"type": "Feature",
-                     "geometry": {"type": "Point", "coordinates": [round(st["lon"], 5), round(st["lat"], 5)]},
-                     "properties": {"kind": "station", "id": st["naptan"], "name": st["name"],
-                                    "cyc_min": nr_min[st["crs"]], "modes": ["national-rail"],
-                                    "lines": sorted(n for _, n in st["opLines"].values()), "onBoard": True}})
-
 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [HOME[1], HOME[0]]},
                  "properties": {"kind": "home", "name": "149 Stoke Newington High St"}})
 

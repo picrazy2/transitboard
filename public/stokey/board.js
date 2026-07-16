@@ -34,10 +34,10 @@ const CFG = {
   },
   cycle: {
     api:"/api/board/cycle", geo:"/stokey/cycle/geo.json", fleet:null,
-    lines:["Weaver","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink"],
+    lines:["Weaver","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink","Greater Anglia"],
     // Every line is a train you might take, so the default lists them all (grouped);
     // tapping a chip narrows to one line and expands to one card per vehicle.
-    defaultLines:["Weaver","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink"],
+    defaultLines:["Weaver","Victoria","Piccadilly","Mildmay","Windrush","Suffragette","Great Northern","Thameslink","Greater Anglia"],
     hasBuses:false, hasFleet:false, hasArrows:false, status:true,
     openZoom:14,
   },
@@ -147,13 +147,13 @@ function normalize(mode, p){
     const pins = (p.vehicles ?? []).map(v => ({...v, serving:true}));
     return {rows, pins, status:p.status ?? [], weather:p.weather, ts:p.ts};
   }
-  // cycle
-  const cyc = (p.cycMin || 10) * 60;
+  // cycle. Reachability is the cycle time to THIS station, not the board's radius,
+  // so a train 4:41 away at a 1.6-min-cycle station is not flagged unreachable.
   const mk = (r, london) => ({
     line:r.line, lineId:r.lineId, mode:"rail", to:r.to, london,
     stopId:r.stationId, station:r.station, cycMin:r.cycMin, walkMin:null, plat:r.plat,
     dir:r.dir, etaMin:r.etaMin, expected:r.expected, vehicleId:r.vehicleId,
-    key:`${r.lineId}|${r.to}|${r.stationId}`, reachSecs:cyc,
+    key:`${r.lineId}|${r.to}|${r.stationId}`, reachSecs:Math.round((r.cycMin || 0) * 60),
   });
   const rows = [...(p.into ?? []).map(r => mk(r, "in")), ...(p.out ?? []).map(r => mk(r, "out"))];
   const pins = (p.pins ?? []).map(v => ({...v, mode:"rail", serving:true,
@@ -237,8 +237,9 @@ function badgeHTML(g){
 function railTimeHTML(g){
   if(!g.scheduled) return clockTime(g.expected);
   const sched = clockTime(g.scheduled);
-  if(g.cancelled) return `<s>${sched}</s> <span class="cancelled">Cancelled</span>`;
-  if(g.delayMin >= 1) return `<s>${sched}</s> <span class="late">${clockTime(g.expected)}</span>`;
+  // Delay: scheduled (struck) stacked above the new time, so it stays one time wide.
+  if(g.cancelled) return `<span class="delay"><s>${sched}</s><span class="cancelled">Canc.</span></span>`;
+  if(g.delayMin >= 1) return `<span class="delay"><s>${sched}</s><span class="late">${clockTime(g.expected)}</span></span>`;
   return `<span class="ontime">${sched}</span>`;
 }
 

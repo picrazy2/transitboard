@@ -26,7 +26,8 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
+      "destDir": {},
+      "nrServe": []
     },
     {
       "id": "910GDALSKLD",
@@ -47,7 +48,38 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
+      "destDir": {},
+      "nrServe": []
+    },
+    {
+      "id": "910GHAKNYNM",
+      "name": "Hackney Downs",
+      "lat": 51.548757,
+      "lon": -0.060819,
+      "cycMin": 7.9,
+      "modes": [
+        "national-rail"
+      ],
+      "serve": {},
+      "lineNames": {
+        "greater-anglia": "Greater Anglia"
+      },
+      "nr": true,
+      "crs": "HAC",
+      "opLines": {
+        "LE": {
+          "lineId": "greater-anglia",
+          "name": "Greater Anglia"
+        }
+      },
+      "destDir": {
+        "Hertford East": "out",
+        "London Liverpool Street": "in"
+      },
+      "nrServe": [
+        "greater-anglia|in",
+        "greater-anglia|out"
+      ]
     },
     {
       "id": "910GDALS",
@@ -68,7 +100,8 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
+      "destDir": {},
+      "nrServe": []
     },
     {
       "id": "940GZZLUSVS",
@@ -89,7 +122,8 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
+      "destDir": {},
+      "nrServe": []
     },
     {
       "id": "940GZZLUMRH",
@@ -110,7 +144,51 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
+      "destDir": {},
+      "nrServe": []
+    },
+    {
+      "id": "910GFNPK",
+      "name": "Finsbury Park",
+      "lat": 51.564302,
+      "lon": -0.106285,
+      "cycMin": 9.3,
+      "modes": [
+        "national-rail"
+      ],
+      "serve": {},
+      "lineNames": {
+        "great-northern": "Great Northern",
+        "thameslink": "Thameslink"
+      },
+      "nr": true,
+      "crs": "FPK",
+      "opLines": {
+        "TL": {
+          "lineId": "thameslink",
+          "name": "Thameslink"
+        },
+        "GN": {
+          "lineId": "great-northern",
+          "name": "Great Northern"
+        }
+      },
+      "destDir": {
+        "Horsham": "in",
+        "Cambridge": "out",
+        "Moorgate": "in",
+        "Welwyn Garden City": "out",
+        "London Kings Cross": "in",
+        "Brighton": "in",
+        "Peterborough": "out",
+        "Stevenage": "out"
+      },
+      "nrServe": [
+        "great-northern|in",
+        "great-northern|out",
+        "thameslink|in",
+        "thameslink|out"
+      ]
     },
     {
       "id": "910GSTOTNHM",
@@ -131,62 +209,8 @@
       "nr": false,
       "crs": "",
       "opLines": {},
-      "destDir": {}
-    },
-    {
-      "id": "910GFNPK",
-      "name": "Finsbury Park",
-      "lat": 51.564302,
-      "lon": -0.106285,
-      "cycMin": 9.3,
-      "modes": [
-        "national-rail"
-      ],
-      "serve": {},
-      "lineNames": {
-        "great-northern": "Great Northern",
-        "thameslink": "Thameslink"
-      },
-      "nr": true,
-      "crs": "FPK",
-      "opLines": {
-        "GN": {
-          "lineId": "great-northern",
-          "name": "Great Northern"
-        },
-        "TL": {
-          "lineId": "thameslink",
-          "name": "Thameslink"
-        }
-      },
-      "destDir": {
-        "MOG": "in",
-        "KGX": "in",
-        "STP": "in",
-        "LBG": "in",
-        "BFR": "in",
-        "BTN": "in",
-        "HRH": "in",
-        "TBD": "in",
-        "GTW": "in",
-        "SEV": "in",
-        "SUO": "in",
-        "ORP": "in",
-        "RAI": "in",
-        "WGC": "out",
-        "SVG": "out",
-        "LET": "out",
-        "HIT": "out",
-        "GDN": "out",
-        "HFN": "out",
-        "CBG": "out",
-        "PBO": "out",
-        "KLN": "out",
-        "ELY": "out",
-        "LTN": "out",
-        "BDM": "out",
-        "ALX": "out"
-      }
+      "destDir": {},
+      "nrServe": []
     }
   ]
 }

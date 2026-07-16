@@ -37,55 +37,77 @@ export interface CycleRow {
 const cleanDest = (name?: string) =>
   (name ?? "—").replace(/\s+(Rail|Underground)?\s*Station$/i, "").replace(/^London /, "");
 
-// ---------- National Rail via Darwin (LDBWS) ----------
-// TfL serves no live predictions for National Rail, so Great Northern / Thameslink
-// at Finsbury Park come from Darwin. Darwin gives a scheduled/expected time and a
-// destination CRS but no line, direction, or vehicle — so the line is the operator
-// code, the direction is the pre-computed destDir map, and there are no live pins.
-const DARWIN_BASE = "https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120";
+// ---------- National Rail via Realtime Trains (data.rtt.io) ----------
+// RTT gives per-service realtime forecast times, the operator, and — via the
+// service detail — every calling point's actual time, which is what positions an
+// approaching train. See the rtt-api memory. The token is a long-life refresh
+// token exchanged for a ~20-minute access token, cached per isolate.
+const RTT_BASE = "https://data.rtt.io";
+let rttTok: { token: string; exp: number } | null = null;
 
-/** Minutes until a Darwin "HH:MM" time, read as Europe/London wall-clock. */
+async function rttAccessToken(env: Env): Promise<string | null> {
+  if (!env.RTT_TOKEN) return null;
+  if (rttTok && rttTok.exp > Date.now() + 30000) return rttTok.token;
+  const res = await fetch(`${RTT_BASE}/api/get_access_token`, { headers: { Authorization: `Bearer ${env.RTT_TOKEN}` } });
+  if (!res.ok) return null;
+  const d: any = await res.json();
+  rttTok = { token: d.token, exp: Date.parse(d.validUntil) || Date.now() + 900000 };
+  return d.token;
+}
+async function rttGet(path: string, env: Env, ttl = 20): Promise<any> {
+  const at = await rttAccessToken(env);
+  if (!at) throw new Error("no rtt token");
+  const res = await fetch(`${RTT_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${at}` }, cf: { cacheTtl: ttl, cacheEverything: true },
+  });
+  if (!res.ok) throw new Error(`rtt ${res.status}`);
+  return res.json();
+}
+
+/** Minutes until a "HH:MM" time read as Europe/London wall-clock, plus a UTC ISO. */
 function londonEta(hhmm: string, nowMs: number): { min: number; iso: string } | null {
-  const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
+  const m = /(\d{2}):(\d{2})/.exec(hhmm);
   if (!m) return null;
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(nowMs);
   const nh = +(parts.find((p) => p.type === "hour")?.value ?? "0");
   const nm = +(parts.find((p) => p.type === "minute")?.value ?? "0");
   let diff = (+m[1] * 60 + +m[2]) - (nh * 60 + nm);
-  if (diff < -720) diff += 1440; // a time before "now" is tomorrow morning
+  if (diff < -720) diff += 1440;
   diff = Math.max(0, diff);
   return { min: diff, iso: new Date(Math.floor(nowMs / 60000) * 60000 + diff * 60000).toISOString() };
 }
 
-async function darwinRows(env: Env, st: (typeof data.stations)[number]): Promise<CycleRow[]> {
-  if (!env.DARWIN_TOKEN) return [];
+async function rttRows(env: Env, st: (typeof data.stations)[number]): Promise<CycleRow[]> {
   let d: any;
   try {
-    const qs = new URLSearchParams({ numRows: "40", timeWindow: "120" });
-    const res = await fetch(`${DARWIN_BASE}/GetDepartureBoard/${st.crs}?${qs}`, {
-      headers: { "x-apikey": env.DARWIN_TOKEN }, cf: { cacheTtl: 20, cacheEverything: true },
-    });
-    if (!res.ok) return [];
-    d = await res.json();
+    d = await rttGet(`/gb-nr/location?code=${st.crs}`, env);
   } catch {
     return [];
   }
   const opLines = st.opLines as Record<string, { lineId: string; name: string }>;
   const destDir = st.destDir as Record<string, Towards>;
+  const nrServe = new Set(st.nrServe as string[]);
   const now = Date.now();
   const rows: CycleRow[] = [];
-  for (const s of (d.trainServices ?? []) as any[]) {
-    const op = opLines[s.operatorCode ?? ""];
-    if (!op || String(s.etd ?? "").toLowerCase() === "cancelled") continue;
-    const raw = s.destination;
-    const loc = Array.isArray(raw) ? raw[0] : raw?.location ? [].concat(raw.location)[0] : raw;
-    const eta = londonEta(/^\d/.test(s.etd ?? "") ? s.etd : s.std, now);
+  for (const svc of (d.services ?? []) as any[]) {
+    const meta = svc.scheduleMetadata ?? {};
+    const op = opLines[meta.operator?.code ?? ""];
+    if (!op) continue;
+    const dep = svc.temporalData?.departure ?? {};
+    if (dep.isCancelled) continue;
+    const destName = svc.destination?.[0]?.location?.description ?? "";
+    const london = destDir[destName];
+    if (!london || !nrServe.has(`${op.lineId}|${london}`)) continue; // not a (line,dir) this station won
+    const eta = londonEta(dep.realtimeForecast ?? dep.scheduleAdvertised ?? "", now);
     if (!eta) continue;
+    const plat = svc.locationMetadata?.platform;
     rows.push({
-      line: op.name, lineId: op.lineId, dir: "", london: destDir[loc?.crs ?? ""] ?? "out",
-      to: cleanDest(loc?.locationName), station: st.name, stationId: st.id, cycMin: st.cycMin,
-      plat: s.platform && s.platform !== "Unknown" ? s.platform : "—",
-      etaMin: eta.min, expected: eta.iso, vehicleId: "",
+      line: op.name, lineId: op.lineId, dir: "", london,
+      to: cleanDest(destName), station: st.name, stationId: st.id, cycMin: st.cycMin,
+      plat: (plat?.forecast ?? plat?.planned) || "—",
+      etaMin: eta.min, expected: eta.iso,
+      // identity|date lets trainPins fetch the service detail to position it.
+      vehicleId: `${meta.identity}|${meta.departureDate}`,
     });
   }
   return rows.sort((a, b) => a.etaMin - b.etaMin).slice(0, 12);
@@ -258,7 +280,7 @@ async function lineStatus(env: Env): Promise<LineStatus[]> {
 
 export async function cycleBoard(env: Env) {
   const [rowsPerStation, wx, status] = await Promise.all([
-    Promise.all(data.stations.map((s) => (s.nr ? darwinRows(env, s) : stationRows(env, s)))),
+    Promise.all(data.stations.map((s) => (s.nr ? rttRows(env, s) : stationRows(env, s)))),
     weather(data.home.lat, data.home.lon).catch(() => null),
     lineStatus(env).catch(() => [] as LineStatus[]),
   ]);
