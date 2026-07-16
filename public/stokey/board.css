@@ -57,7 +57,6 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .chip.on{opacity:1}
 .chip:disabled{opacity:.14!important;filter:grayscale(.7);cursor:default;pointer-events:none}
 .chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
-.chip.disrupted{box-shadow:0 0 0 2px #f2c94c inset}
 /* Default/All: a two-state switch that never leaves the row, so chips don't shuffle. */
 .seg{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px}
 .seg button{font:700 11px/1 system-ui;color:var(--muted);background:transparent;border:0;cursor:pointer;

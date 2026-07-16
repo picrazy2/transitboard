@@ -342,7 +342,7 @@ function renderFilters(){
   const disr = new Set((MB?.status ?? []).filter(s => !s.good).map(s => s.line));
   filters.innerHTML = seg + SERVICES.map(id => {
     const short = id.replace("Greater Anglia","Gtr Anglia").replace("Great Northern","Gt Northern");
-    return `<button class="chip ${selected.has(id) ? "on" : ""} ${disr.has(id) ? "disrupted" : ""}"
+    return `<button class="chip ${selected.has(id) ? "on" : ""}"
               data-line="${esc(id)}" style="background:${colorOf(id)}"
               ${live.has(id) ? "" : "disabled"}>${esc(short)}</button>`;
   }).join("");
@@ -402,7 +402,6 @@ function syncChips(){
   const disr = new Set((MB?.status ?? []).filter(s => !s.good).map(s => s.line));
   for(const b of document.querySelectorAll(".chip[data-line]")){
     b.disabled = !live.has(b.dataset.line);
-    b.classList.toggle("disrupted", disr.has(b.dataset.line));
   }
 }
 function syncToggle(){
