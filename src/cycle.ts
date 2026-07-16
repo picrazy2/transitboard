@@ -32,6 +32,11 @@ export interface CycleRow {
   etaMin: number;
   expected: string | null;
   vehicleId: string;
+  // National Rail (RTT) has a timetable, so it can be on time or late. Tube /
+  // Overground live predictions carry no schedule, so these stay null there.
+  scheduled?: string | null;
+  delayMin?: number | null;
+  cancelled?: boolean;
 }
 
 const cleanDest = (name?: string) =>
@@ -98,14 +103,20 @@ async function rttRows(env: Env, st: (typeof data.stations)[number]): Promise<Cy
     const destName = svc.destination?.[0]?.location?.description ?? "";
     const london = destDir[destName];
     if (!london || !nrServe.has(`${op.lineId}|${london}`)) continue; // not a (line,dir) this station won
-    const eta = londonEta(dep.realtimeForecast ?? dep.scheduleAdvertised ?? "", now);
+    const rt = dep.realtimeForecast ?? dep.scheduleAdvertised ?? "";
+    const eta = londonEta(rt, now);
     if (!eta) continue;
+    // Delay from schedule vs realtime (both London-naive, so the diff is tz-free);
+    // scheduled as a UTC ISO the frontend can format, derived from the delay.
+    const sched = dep.scheduleAdvertised as string | undefined;
+    const delayMin = sched ? Math.round((Date.parse(rt) - Date.parse(sched)) / 60000) : null;
+    const scheduled = delayMin != null ? new Date(Date.parse(eta.iso) - delayMin * 60000).toISOString() : null;
     const plat = svc.locationMetadata?.platform;
     rows.push({
       line: op.name, lineId: op.lineId, dir: "", london,
       to: cleanDest(destName), station: st.name, stationId: st.id, cycMin: st.cycMin,
       plat: (plat?.forecast ?? plat?.planned) || "—",
-      etaMin: eta.min, expected: eta.iso,
+      etaMin: eta.min, expected: eta.iso, scheduled, delayMin, cancelled: false,
       // identity|date lets trainPins fetch the service detail to position it.
       vehicleId: `${meta.identity}|${meta.departureDate}`,
     });
@@ -188,22 +199,25 @@ function pointAt(key: string, s: number) {
 }
 
 export interface Pin {
-  line: string; lineId: string; london: Towards; to: string; station: string;
+  line: string; lineId: string; london: Towards; to: string; station: string; stationId: string;
   lat: number; lon: number; bearing: number; etaMin: number; expected: string | null;
   vehicleId: string; estimated: true;
 }
 
 const MIN_SPEED = 3, MAX_SPEED = 45, FALLBACK_SPEED = 16; // m/s; rail runs faster than road
 
-/** Place the next train per board row from its own forward predictions. */
+const MAX_PINS = 24; // one per vehicle, capped so the /Vehicle fan-out stays fast
+
+/** Place every board train from its own forward predictions — one pin per vehicle. */
 async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
-  // one train per (station,line,london) — the soonest, which the board shows
-  const first = new Map<string, CycleRow>();
+  // one row per vehicle; only TfL lines have route geometry here (National Rail is
+  // positioned separately from RTT), so skip anything without a route.
+  const byVeh = new Map<string, CycleRow>();
   for (const r of rows) {
-    const k = `${r.stationId}|${r.lineId}|${r.london}`;
-    if (r.vehicleId && !first.has(k)) first.set(k, r);
+    if (!r.vehicleId || !ROUTES[`${r.lineId}|${r.dir}`]) continue;
+    if (!byVeh.has(r.vehicleId)) byVeh.set(r.vehicleId, r);
   }
-  const wanted = [...first.values()];
+  const wanted = [...byVeh.values()].slice(0, MAX_PINS);
   const ids = [...new Set(wanted.map((r) => r.vehicleId))];
   if (!ids.length) return [];
 
@@ -244,7 +258,7 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     const at = pointAt(key, s);
 
     pins.push({
-      line: r.line, lineId: r.lineId, london: r.london, to: r.to, station: r.station,
+      line: r.line, lineId: r.lineId, london: r.london, to: r.to, station: r.station, stationId: r.stationId,
       lat: at.lat, lon: at.lon, bearing: at.bearing, etaMin: r.etaMin, expected: r.expected,
       vehicleId: r.vehicleId, estimated: true,
     });

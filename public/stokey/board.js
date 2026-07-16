@@ -94,7 +94,8 @@ const WMO = {
 const wmoIcon = (code, isDay) => (WMO[code] ?? ["🌡️","🌡️","—"])[isDay ? 0 : 1];
 const wmoLabel = code => (WMO[code] ?? ["","","—"])[2];
 function renderWeather(w){
-  if(!w){ wx.innerHTML = ""; return; }
+  if(w === undefined){ wx.innerHTML = ""; return; }          // not loaded yet
+  if(!w){ wx.innerHTML = `<div class="meta" style="color:var(--bad)">⚠ weather unavailable</div>`; return; }
   wx.innerHTML = `
     <div class="now"><span class="icon">${wmoIcon(w.code, w.isDay)}</span>
       <span class="temp">${Math.round(w.tempC)}°</span></div>
@@ -153,11 +154,13 @@ function normalize(mode, p){
     line:r.line, lineId:r.lineId, mode:"rail", to:r.to, london,
     stopId:r.stationId, station:r.station, cycMin:r.cycMin, walkMin:null, plat:r.plat,
     dir:r.dir, etaMin:r.etaMin, expected:r.expected, vehicleId:r.vehicleId,
+    scheduled:r.scheduled ?? null, delayMin:r.delayMin ?? null, cancelled:!!r.cancelled,
     key:`${r.lineId}|${r.to}|${r.stationId}`, reachSecs:Math.round((r.cycMin || 0) * 60),
   });
   const rows = [...(p.into ?? []).map(r => mk(r, "in")), ...(p.out ?? []).map(r => mk(r, "out"))];
+  // Pin key matches its row's group key so focus/stop/vehicle taps resolve it.
   const pins = (p.pins ?? []).map(v => ({...v, mode:"rail", serving:true,
-    key:`${v.lineId}|${v.to}|`}));   // pins have no stationId; keyed loosely
+    key:`${v.lineId}|${v.to}|${v.stationId ?? ""}`}));
   return {rows, pins, status:p.status ?? [], weather:p.weather, ts:p.ts, cycMin:p.cycMin};
 }
 
@@ -281,6 +284,9 @@ function renderDirection(dir, listEl, countEl){
   const atStop = focus && focus.kind === "stop" ? focus.id : null;
   const groups = groupsFor(dir)
     .filter(g => !atStop || g.stopId === atStop)
+    // Drop anything already "Due" — you can't reach it, so it's just clutter.
+    // (The live vehicle still shows as a pin on the map.)
+    .filter(g => countdown(g.etas[0].exp, g.etas[0].min).secs > 0)
     .sort((a,b) => departsAt(a) - departsAt(b));
   countEl.textContent = groups.length ? `${groups.length} ${expanded() ? "departures" : "routes"}` : "";
   listEl.innerHTML = groups.length ? groups.map(rowHTML).join("") : '<div class="empty">Nothing due.</div>';
@@ -293,8 +299,10 @@ function tickETAs(){
   }
   for(const el of document.querySelectorAll(".etas .n[data-exp]")){
     const c = countdown(el.dataset.exp || null, +el.dataset.min);
+    const row = el.closest(".row");
+    if(c.secs <= 0){ if(row) row.remove(); continue; }   // ticked to Due — drop it
     el.textContent = c.text; el.classList.toggle("due", c.secs === 0);
-    const row = el.closest(".row"); if(row) row.classList.toggle("unreachable", !reachable(c.secs, +el.dataset.walk));
+    if(row) row.classList.toggle("unreachable", !reachable(c.secs, +el.dataset.walk));
   }
 }
 setInterval(tickETAs, 1000);
@@ -319,9 +327,13 @@ function applyLayout(){
 }
 
 // ---------- chips ----------
+// Sticky: once a line has shown departures this session its chip stays enabled,
+// so a transient empty/slow fetch doesn't flash half the chips grey.
+let everLive = new Set();
 function linesWithDepartures(){
   if(!MB) return new Set(SERVICES);
-  return new Set((MB.rows ?? []).map(r => r.line));
+  for(const r of (MB.rows ?? [])) everLive.add(r.line);
+  return everLive;
 }
 function renderFilters(){
   const dead = mapNarrowed();
@@ -467,6 +479,23 @@ function operating(line, now = new Date()){
 }
 const onMap = line => selected.has(line) && (mapNarrowed() || operating(line));
 
+// Click a drawn route to filter by it, exactly like tapping its chip. On a shared
+// corridor (several routes overlaid) every line within a few pixels is selected.
+function filterToLinesNear(latlng){
+  const p = map.latLngToLayerPoint(latlng);
+  const hit = new Set();
+  for(const l of lineLayers){
+    let near = false;
+    const check = ll => { if(!near && p.distanceTo(map.latLngToLayerPoint(ll)) < 12) near = true; };
+    const walk = a => { if(Array.isArray(a)) a.forEach(walk); else check(a); };
+    l.poly.eachLayer(sub => sub.getLatLngs && walk(sub.getLatLngs()));
+    if(near) hit.add(l.line);
+  }
+  if(!hit.size) return;
+  selected = hit; tableAll = false; focus = null;
+  renderFilters(); renderAll();
+}
+
 function clearMapLayers(){
   for(const l of lineLayers) map.removeLayer(l.poly);
   for(const n of nodeMarkers) map.removeLayer(n.marker);
@@ -500,12 +529,14 @@ function buildMap(){
     const p = f.properties;
     const poly = L.geoJSON(f, {style:{color: p.night ? "#5b6ed6" : "#e1251b",
       weight: p.night ? 2.5 : 3.5, opacity: p.night ? .45 : .6, dashArray: p.night ? "3 6" : null}}).addTo(map);
+    poly.on("click", e => { L.DomEvent.stopPropagation(e); filterToLinesNear(e.latlng); });
     lineLayers.push({poly, line:p.line, pair:`${p.line}|${p.dir}`, night:p.night});
   }
   for(const f of of("rail")){
     const line = f.properties.line ?? "Weaver", col = colorOf(line);
     const poly = L.geoJSON(f, {style:{color:col, weight: MODE === "cycle" ? 3.5 : 5, opacity:.9,
       lineCap:"round", lineJoin:"round"}}).addTo(map);
+    poly.on("click", e => { L.DomEvent.stopPropagation(e); filterToLinesNear(e.latlng); });
     lineLayers.push({poly, line, rail:true});
   }
 
@@ -566,7 +597,14 @@ function activeLines(){
   if(!mapNarrowed() && !focus && !isFull()) return new Set();
   if(focus && (focus.kind === "route" || focus.kind === "vehicle")){
     const g = allGroups().find(x => x.key === focus.key);
-    return new Set(g ? [g.line] : []);
+    if(g) return new Set([g.line]);
+    // A focused vehicle may have no board row (gone past, or a different dest);
+    // fall back to the pin's own line so the line never vanishes underneath it.
+    if(focus.kind === "vehicle"){
+      const p = allPins().find(v => v.vehicleId === focus.id);
+      if(p) return new Set([p.line]);
+    }
+    return new Set();
   }
   if(focus && (focus.kind === "dir" || focus.kind === "stop")){
     const s = new Set();
@@ -590,7 +628,8 @@ function allPins(){
 }
 function renderPins(){
   pinLayer.clearLayers();
-  const keep = v => onMap(v.line) && (v.serving !== false || isFull());
+  // Show every vehicle on a visible line — no "already passed / only full-screen" gate.
+  const keep = v => onMap(v.line);
   for(const v of allPins().filter(keep)){
     const rail = v.mode === "rail";
     const night = String(v.line).startsWith("N");
@@ -777,7 +816,7 @@ async function refresh(){
 // ---------- mode toggle (in place, no reload) ----------
 function reconfigure(mode){
   MODE = mode; C = CFG[mode]; SERVICES = C.lines; DEFAULT_LINES = C.defaultLines;
-  selected = new Set(SERVICES); tableAll = false; focus = null; layoutClass = ""; fleet = [];
+  selected = new Set(SERVICES); tableAll = false; focus = null; layoutClass = ""; fleet = []; everLive = new Set();
   map.setZoom(C.openZoom, {animate:false});
   for(const a of document.querySelectorAll(".modetog a"))
     a.classList.toggle("on", a.dataset.mode === mode);

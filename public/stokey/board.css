@@ -166,11 +166,9 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .etas .rest .late{font-weight:800}
 .etas .rest .delay{display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.12}
 
+/* Unreachable: just the warning glyph, no border/background/colour change. */
 .warn{display:none;color:var(--warn)}
 .row.unreachable .warn{display:inline}
-.row.unreachable{border-color:#4a3a1c;background:#191509}
-.row.unreachable .etas .n{color:var(--warn)}
-.row.unreachable .to{color:#cfc39a}
 
 /* ---------- map ---------- */
 #mapPanel{padding:0;overflow:hidden;position:relative}
@@ -195,6 +193,11 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .mapinfo b{font-size:14px}
 .infoclose{position:absolute;right:6px;top:4px;background:none;border:0;color:var(--muted);
            font-size:17px;line-height:1;cursor:pointer;padding:2px 5px}
+/* Small persistent key, bottom-right: what the warning glyph means. */
+.warnkey{position:absolute;right:10px;bottom:10px;z-index:500;background:rgba(15,17,21,.86);
+         border:1px solid var(--rule);border-radius:8px;padding:4px 8px;font-size:11px;color:var(--muted);
+         display:flex;align-items:center;gap:5px;backdrop-filter:blur(4px);pointer-events:none}
+.warnkey b{color:var(--warn);font-weight:800}
 .maplegend[hidden]{display:none}
 .maplegend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(15,17,21,.86);
            border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
