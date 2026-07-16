@@ -95,17 +95,12 @@ const wmoIcon = (code, isDay) => (WMO[code] ?? ["🌡️","🌡️","—"])[isDa
 const wmoLabel = code => (WMO[code] ?? ["","","—"])[2];
 function renderWeather(w){
   if(!w){ wx.innerHTML = ""; return; }
-  const hours = (w.next ?? []).slice(0, 4).map(h => `
-    <div class="hour">${hhmm(h.at).replace(/:\d\d/, "")}
-      <span class="hicon">${wmoIcon(h.code, h.isDay)}</span>
-      <b>${Math.round(h.tempC)}°</b></div>`).join("");
   wx.innerHTML = `
     <div class="now"><span class="icon">${wmoIcon(w.code, w.isDay)}</span>
       <span class="temp">${Math.round(w.tempC)}°</span></div>
     <div class="meta">${esc(wmoLabel(w.code))}
       ${w.maxC != null ? `<br><span class="hilo"><span class="hi">H ${Math.round(w.maxC)}°</span>
-        &nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>` : ""}</div>
-    ${hours ? `<div class="hours">${hours}</div>` : ""}`;
+        &nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>` : ""}</div>`;
 }
 
 // ---------- countdown ----------
@@ -668,44 +663,41 @@ function applyMapFilter(){
 }
 
 // ---------- fit ----------
-// Frame what the map is about: the board's stop(s) plus ALL live vehicles on the
-// active lines. When no live vehicle exists, frame the whole line geometry.
+// Two behaviours, by the user's steer:
+//   - vehicle focus: frame just that train and the stop it's heading for.
+//   - anything else (chip filter, route/direction focus): frame the whole
+//     geometry of the active line(s), always.
+function fitTo(pts, sig){
+  if(sig === lastFit) return;
+  if(!pts.length){ return; }
+  lastFit = sig;
+  if(pts.length < 2){ if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate:true}); return; }
+  map.fitBounds(L.latLngBounds(pts), {...FIT, animate:true});
+}
 function fitFocus(){
   if(!focus && !mapNarrowed()){
     if(lastFit !== null){ lastFit = null; if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate:true}); }
     return;
   }
   const active = activeLines();
+  if(FS.veh){
+    const pts = [];
+    const v = allPins().find(v => v.vehicleId === FS.veh);
+    for(const s of nodeMarkers) if(FS.stops.has(s.id)) pts.push(s.marker.getLatLng());
+    if(v) pts.push(L.latLng(v.lat, v.lon));
+    fitTo(pts, `veh:${FS.veh}|${v ? "p" : "n"}`);
+    return;
+  }
+  // Whole line(s): the full drawn geometry of every active line.
   const pts = [];
-  // board stops for the focus
+  for(const l of lineLayers) if(active.has(l.line) && onMap(l.line)){
+    try{ const b = l.poly.getBounds(); if(b.isValid()) pts.push(b.getNorthEast(), b.getSouthWest()); }catch{}
+  }
+  // A tapped bus stop has no line geometry of its own — anchor on the stop.
   if(focus && focus.kind === "stop"){
     const n = nodeMarkers.find(s => s.id === focus.id); if(n) pts.push(n.marker.getLatLng());
-  }else{
-    for(const s of nodeMarkers) if(s.onBoard && FS.stops.has(s.id)) pts.push(s.marker.getLatLng());
-    if(!pts.length) for(const s of nodeMarkers) if(s.onBoard && s.lines.some(l => active.has(l))) pts.push(s.marker.getLatLng());
   }
-  // all live vehicles on the active lines / focused vehicle
-  const vehPts = [];
-  for(const v of allPins()){
-    if(v.serving === false || v.etaMin == null) continue;
-    const hit = FS.veh ? v.vehicleId === FS.veh
-              : FS.active ? FS.keys.has(v.key) || active.has(v.line)
-              : active.has(v.line);
-    if(hit && onMap(v.line)) vehPts.push(L.latLng(v.lat, v.lon));
-  }
-  pts.push(...vehPts);
-
-  // No live vehicle to anchor on: frame the whole geometry of the active lines.
-  if(!vehPts.length && active.size){
-    for(const l of lineLayers) if(active.has(l.line) && onMap(l.line)){
-      try{ const b = l.poly.getBounds(); if(b.isValid()) pts.push(b.getNorthEast(), b.getSouthWest()); }catch{}
-    }
-  }
-  const sig = `${[...active].sort().join(",")}|${FS.veh || ""}|${focus?.kind || ""}|${focus?.id || focus?.key || focus?.dir || ""}|${vehPts.length}|${pts.length}`;
-  if(!pts.length || sig === lastFit) return;
-  lastFit = sig;
-  if(pts.length < 2){ if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate:true}); return; }
-  map.fitBounds(L.latLngBounds(pts), {...FIT, animate:true});
+  fitTo(pts, `lines:${[...active].sort().join(",")}|${focus?.kind || ""}|${focus?.id || ""}`);
 }
 
 // ---------- fleet (walk only) ----------
