@@ -41,6 +41,19 @@ SPINE = {
 }
 SNAP_M = 220                        # a stop further than this from the spine is off-branch
 
+# For *drawing* the whole line, every branch — not just the spine. One relation
+# per distinct branch; shared trunk ways are de-duplicated by OSM way id, so
+# overlap is free. The spine above still positions the pins (a train near us is
+# on the trunk, so one polyline is enough). Discovered from OSM route relations.
+BRANCHES = {
+    "victoria":    [6354920],                              # no branches
+    "suffragette": [419512],                               # no branches
+    "weaver":      [9105028, 9105027],                     # Enfield Town + Cheshunt
+    "mildmay":     [6413186, 9674325],                     # Richmond + Clapham Junction
+    "piccadilly":  [102788, 7703380, 7703382],             # Heathrow T5 + T4 loop + Uxbridge
+    "windrush":    [959677, 660463, 660462, 2755611, 10028997],  # Crystal Palace/New Cross/W Croydon/Clapham Jn/Battersea
+}
+
 # National Rail has no live TfL predictions and no vehicle positions anywhere in
 # the public feeds, so those lines get departures from Darwin (LDBWS) at runtime
 # and no live pins — there is nothing to place. Within a 10-minute cycle only one
@@ -372,22 +385,38 @@ features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates":
 # ---------- OSM spine geometry: one polyline per line, drawn and snapped ----------
 # The same polyline is drawn on the map (LineString features above) and used to
 # position live trains (src/cycle.ts), so a pin is always exactly on the line.
-print("rail geometry (OpenStreetMap spines) ...", flush=True)
+print("rail geometry (OpenStreetMap) ...", flush=True)
 kept_lines = {k.split("|")[0] for k in nearest}
-spine_poly = {}   # lineId -> [[lon,lat], ...]  (undirected, as digitised)
+rel_cache = {}   # rel id -> overpass element (each fetched once, reused)
+
+
+def get_rel(rel_id):
+    if rel_id not in rel_cache:
+        rel_cache[rel_id] = overpass(f"[out:json][timeout:120];rel({rel_id});out geom;")["elements"][0]
+    return rel_cache[rel_id]
+
+
+spine_poly = {}   # lineId -> [[lon,lat], ...] trunk, for positioning pins
 for lid in sorted(kept_lines):
-    rel_id = SPINE.get(lid)
-    if not rel_id:
+    if lid not in SPINE:
         print(f"  !! {lid}: no SPINE relation configured, skipping geometry")
         continue
-    rel = overpass(f"[out:json][timeout:120];rel({rel_id});out geom;")["elements"][0]
-    poly = stitch(rel["members"], (HOME[1], HOME[0]))
+    # draw every branch: emit each distinct OSM way once as a LineString
+    seen_ways, drawn = set(), 0
+    for rel_id in BRANCHES.get(lid, [SPINE[lid]]):
+        for m in get_rel(rel_id)["members"]:
+            if m["type"] == "way" and m.get("geometry") and m["ref"] not in seen_ways and len(m["geometry"]) >= 2:
+                seen_ways.add(m["ref"])
+                features.append({"type": "Feature",
+                                 "geometry": {"type": "LineString",
+                                              "coordinates": [[round(n["lon"], 5), round(n["lat"], 5)] for n in m["geometry"]]},
+                                 "properties": {"kind": "rail", "line": names[lid], "lineId": lid}})
+                drawn += 1
+    # spine for positioning
+    poly = stitch(get_rel(SPINE[lid])["members"], (HOME[1], HOME[0]))
     spine_poly[lid] = poly
-    km = cumulate(poly)[-1] / 1000 if len(poly) > 1 else 0
-    features.append({"type": "Feature",
-                     "geometry": {"type": "LineString", "coordinates": [[round(x, 5), round(y, 5)] for x, y in poly]},
-                     "properties": {"kind": "rail", "line": names[lid], "lineId": lid}})
-    print(f"  {names[lid]:<12} rel {rel_id}: {len(poly)} vertices, {km:.1f} km")
+    print(f"  {names[lid]:<12} {len(BRANCHES.get(lid, [1]))} branch(es), {drawn} ways drawn, "
+          f"spine {len(poly)} vertices")
 
 out = ROOT / "public" / "stokey" / "cycle" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)

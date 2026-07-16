@@ -338,8 +338,11 @@ const WMO = {
   85:["🌨️","🌨️","Snow showers"], 86:["❄️","❄️","Snow showers"],
   95:["⛈️","⛈️","Thunderstorm"], 96:["⛈️","⛈️","Thunder, hail"], 99:["⛈️","⛈️","Thunder, hail"],
 };
-const hhmm = epoch => new Date(epoch * 1000).toLocaleTimeString("en-GB",
-  {hour:"2-digit", minute:"2-digit", timeZone:"Europe/London"});
+// 12-hour clock everywhere, e.g. "1:27pm" — matches the big header clock.
+const to12h = d => d.toLocaleTimeString("en-US",
+  {hour:"numeric", minute:"2-digit", hour12:true, timeZone:"Europe/London"})
+  .replace(" ", "").replace("AM", "am").replace("PM", "pm");
+const hhmm = epoch => to12h(new Date(epoch * 1000));
 
 const wmoIcon = (code, isDay) => (WMO[code] ?? ["🌡️","🌡️","—"])[isDay ? 0 : 1];
 const wmoLabel = code => (WMO[code] ?? ["","","—"])[2];
@@ -384,12 +387,14 @@ const etaHTML = (first, rest, exp, walkS) => {
 /** Can you still walk to the stop in time? Re-evaluated every second. */
 const reachable = (secs, walkS) => secs >= walkS;
 
-/** Whole minutes remaining, floored, so "11:03" on a row reads "11m" on its pin. */
+/** Whole minutes remaining, rounded to nearest, so a "2:53" row reads "3m" on
+ *  its pin rather than a floored "2m" that looks like it disagrees. */
 function pinEta(iso, fallbackMin){
   if(fallbackMin == null && !iso) return "";
   if(!iso) return fallbackMin === 0 ? "Due" : `${fallbackMin}m`;
   const secs = Math.round((Date.parse(iso) - Date.now()) / 1000);
-  return secs <= 0 ? "Due" : `${Math.floor(secs / 60)}m`;
+  const m = Math.round(secs / 60);
+  return m <= 0 ? "Due" : `${m}m`;
 }
 
 function tickETAs(){
@@ -452,7 +457,7 @@ const railGroups = (rows, dir) => {
 // time for buses, and there is no supported way to join a live bus to a
 // timetabled trip — so a bus row never claims to know its delay.
 const clockTime = iso => iso
-  ? new Date(iso).toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit", timeZone:"Europe/London"})
+  ? to12h(new Date(iso))
   : "";
 
 function statusHTML(g){
@@ -1003,7 +1008,14 @@ fetch("/stokey/geo.json").then(r => r.json()).then(geo => {
   applyMapFilter();
 }).catch(e => console.error("geo.json", e));
 
-map.on("click", () => { hideInfo(); if(focus){ focus = null; renderAll(); } });
+// Tapping empty map clears attention entirely: drop any focus and reset the
+// chips back to all lines, the same as the "reset" affordance.
+map.on("click", () => {
+  hideInfo();
+  const had = focus || selected.size !== SERVICES.length || tableAll;
+  focus = null; selected = new Set(SERVICES); tableAll = false;
+  if(had){ renderFilters(); renderAll(); }
+});
 recentre.addEventListener("click", () => homeBounds && map.fitBounds(homeBounds, FIT));
 
 function showInfo(html){
@@ -1190,8 +1202,10 @@ function applyMapFilter(){
   }
   labelTermini(act);
 
-  tiles.setOpacity(focused ? DIM.tiles : 1);
-  if(homeMarker) homeMarker.setOpacity(focused ? DIM.home : 1);
+  // Focus dims the overlays (other lines, stops, pins) but never the basemap or
+  // home — same as a chip filter. You keep your bearings; only the routes recede.
+  tiles.setOpacity(1);
+  if(homeMarker) homeMarker.setOpacity(1);
   fitFocus();
 }
 
@@ -1303,7 +1317,7 @@ async function refresh(){
     renderAll();
     lastOk = Date.now();
     stamp.className = "stamp";
-    stamp.textContent = `Updated ${new Date(board.ts * 1000).toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}`;
+    stamp.textContent = `Updated ${to12h(new Date(board.ts * 1000))}`;
   }catch(e){
     const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
     stamp.className = "stamp " + (lastOk ? "stale" : "err");

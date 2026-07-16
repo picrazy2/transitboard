@@ -369,7 +369,7 @@ async function refresh(){
     board=await res.json(); CYC_MIN=board.cycMin||10;
     renderWeather(board.weather); renderAll();
     lastOk=Date.now(); stamp.className="stamp";
-    stamp.textContent=`Updated ${new Date(board.ts*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`;
+    stamp.textContent=`Updated ${new Date(board.ts*1000).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"Europe/London"}).replace(" ","").replace("AM","am").replace("PM","pm")}`;
   }catch(e){
     stamp.className="stamp "+(lastOk?"stale":"err");
     stamp.textContent=lastOk?`Stale — ${Math.round((Date.now()-lastOk)/1000)}s ago`:`Cannot reach board API (${e.message})`;
