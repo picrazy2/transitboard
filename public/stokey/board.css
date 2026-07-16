@@ -1,0 +1,209 @@
+/* Shared styles for both boards (walk + cycle). One file, edited once.
+   Colours that vary per line (chips, badges, map lines, pins) are set inline
+   from JS via colorOf(), so this sheet is line-agnostic. */
+:root{
+  --bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22;--row:#111523;
+  --weaver:#823a62;--bus:#e1251b;--night:#1b2a6b;
+  --ok:#20c05b;--warn:#f2c94c;--bad:#ff6b6b;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;
+  display:flex;flex-direction:column;min-height:100dvh;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
+  padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);
+}
+
+/* ---------- header ---------- */
+header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16px;align-items:flex-end;justify-content:space-between}
+.clock{font-size:clamp(48px,6vw,92px);font-weight:800;line-height:1;letter-spacing:.5px;font-variant-numeric:tabular-nums}
+.clock .sec{font-size:.45em;font-weight:600;opacity:.85}
+.clock .ampm{font-size:.32em;font-weight:700;opacity:.85;margin-left:4px}
+/* The middle of the header used to be empty; the disruption notes live there. */
+.headmid{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:2px 4px}
+.headmeta{display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
+
+.wx{display:flex;align-items:center;gap:14px;margin-top:8px}
+.wx .now{display:flex;align-items:baseline;gap:8px}
+.wx .temp{font-size:52px;font-weight:800;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.wx .icon{font-size:40px;line-height:1}
+.wx .meta{font-size:13px;color:var(--muted);text-align:right;line-height:1.4}
+.wx .hilo{font-variant-numeric:tabular-nums}
+.wx .hilo .hi{color:#ffb26b;font-weight:700}
+.wx .hilo .lo{color:#79b8ff;font-weight:700}
+.hours{display:flex;gap:12px;border-left:1px solid var(--rule);padding-left:14px}
+.hour{text-align:center;font-size:12px;color:var(--muted);line-height:1.35}
+.hour .hicon{display:block;font-size:17px;line-height:1.25}
+.hour b{display:block;color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
+
+/* disruption notes — in the header middle, one line each, linking to TfL status */
+.disrupt{display:flex;flex-direction:column;gap:3px;font-size:12.5px;overflow:hidden}
+.disrupt a{display:flex;align-items:center;gap:7px;color:#ffcf70;text-decoration:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.disrupt a:hover{text-decoration:underline}
+.disrupt .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.disrupt b{color:var(--ink)}
+.disrupt .reason{color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.disrupt .ok{color:var(--muted)}
+.disrupt .ok .dot{background:var(--ok)}
+
+/* ---------- chip row (line filters + Default/All + updated stamp + mode toggle) ---------- */
+.chiprow{display:flex;align-items:center;gap:12px;padding:9px 14px 0}
+.filters{display:flex;flex-wrap:wrap;gap:7px;flex:1;min-width:0}
+.chip{font:800 12px/1 system-ui;color:#fff;border:1px solid transparent;border-radius:999px;
+      padding:6px 11px;cursor:pointer;opacity:.32;background:#5a6472;transition:opacity .12s ease}
+.chip.on{opacity:1}
+.chip:disabled{opacity:.14!important;filter:grayscale(.7);cursor:default;pointer-events:none}
+.chip:focus-visible{outline:2px solid #fff;outline-offset:1px}
+.chip.disrupted{box-shadow:0 0 0 2px #f2c94c inset}
+/* Default/All: a two-state switch that never leaves the row, so chips don't shuffle. */
+.seg{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px}
+.seg button{font:700 11px/1 system-ui;color:var(--muted);background:transparent;border:0;cursor:pointer;
+            padding:5px 10px;border-radius:999px;transition:background .16s ease,color .16s ease}
+.seg button.on{background:var(--ink);color:var(--bg)}
+.seg.dead{opacity:.38}
+.seg.dead button{cursor:default}
+.chipsep{width:1px;align-self:stretch;background:var(--rule);margin:0 5px}
+/* right-hand cluster on the chip row: updated stamp, then Walk|Cycle toggle */
+.chipend{display:flex;align-items:center;gap:12px;flex:none}
+.stamp{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.stamp.stale{color:var(--warn)}
+.stamp.err{color:var(--bad)}
+.modetog{display:inline-flex;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px}
+.modetog a{font:700 11px/1 system-ui;color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:999px;cursor:pointer}
+.modetog a.on{background:var(--ink);color:var(--bg)}
+
+/* ---------- track lists ---------- */
+.wrap{padding:12px;display:flex;flex:1;min-height:0}
+.cols{display:grid;gap:12px;width:100%;
+      grid-template-columns:1.15fr 1.15fr 0.95fr;
+      grid-template-rows:1fr;
+      grid-template-areas:"in out map";
+      transition:grid-template-columns .34s cubic-bezier(.4,0,.2,1),
+                 grid-template-rows .34s cubic-bezier(.4,0,.2,1)}
+#inPanel{grid-area:in} #outPanel{grid-area:out} #mapPanel{grid-area:map}
+
+.cols.solo-in {grid-template-columns:1.15fr 0fr 2.1fr}
+.cols.solo-out{grid-template-columns:0fr 1.15fr 2.1fr}
+.cols.stacked{grid-template-columns:1.15fr 0fr 2.1fr;grid-template-rows:1fr 1fr;
+              grid-template-areas:"in . map" "out . map"}
+.cols.stacked .panel.novalue{display:none}
+.cols.stacked.one-row{grid-template-rows:1fr}
+
+.panel{min-width:0;transition:opacity .22s ease,padding .34s cubic-bezier(.4,0,.2,1)}
+.cols.solo-in  #outPanel,
+.cols.solo-out #inPanel{opacity:0;pointer-events:none;overflow:hidden;
+                        padding-left:0;padding-right:0;border:0}
+
+@media (prefers-reduced-motion:reduce){ .cols,.panel{transition:none} }
+
+@media (max-aspect-ratio:1/1){
+  .cols{grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;
+        grid-template-areas:"in out" "map map"}
+  #mapPanel{min-height:340px}
+}
+
+/* Phones. The iPad Air (820 portrait / 1180 landscape) is always wider than
+   this, so none of it applies there — no regression to the wallboard. */
+@media (max-width: 760px){
+  html,body{height:auto;overflow:auto}
+  body{min-height:100dvh}
+  header{flex-wrap:wrap;gap:6px;padding:8px 12px;align-items:center}
+  .clock{font-size:38px}
+  .headmid{flex-basis:100%;order:3}
+  .headmeta{align-items:flex-start;text-align:left}
+  .wx{gap:10px;margin-top:2px}
+  .wx .temp{font-size:32px} .wx .icon{font-size:26px}
+  .wx .hours{display:none}
+  .chiprow{flex-wrap:wrap;padding:8px 12px 0}
+  .chipend{width:100%;order:2;justify-content:space-between}
+  .wrap{display:block;flex:none;padding:8px}
+  .cols{display:flex!important;flex-direction:column;gap:10px;height:auto}
+  .cols .panel{opacity:1!important;pointer-events:auto!important;overflow:visible;
+               width:auto;min-height:0;padding:10px 12px!important}
+  .cols .panel.novalue{display:none!important}
+  .list{overflow:visible;flex:none;max-height:none;padding-right:0}
+  #mapPanel{order:-1;height:52vh;min-height:260px;padding:0!important}
+  #map{min-height:0}
+  .mapinfo{max-width:min(78vw,300px)}
+}
+.panel{background:var(--panel);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;min-height:0}
+.panel h2{margin:0 0 10px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.panel h2 .count{color:var(--muted);font-weight:600;font-size:13px}
+.panel h2 .only{margin-left:auto;font:700 10.5px/1 system-ui;color:var(--muted);cursor:pointer;
+                background:transparent;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
+.panel h2 .only[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
+.empty{color:var(--muted);font-size:14px;padding:16px 4px}
+
+.row{border:1px solid var(--rule);border-radius:12px;padding:8px 11px;background:var(--row);
+     display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+     cursor:pointer;transition:opacity .12s ease}
+.row.dim{opacity:.3}
+/* Bus badge: fixed width so numbers line up. */
+.badge{min-width:42px;height:31px;border-radius:8px;display:grid;place-items:center;
+       font-weight:800;font-size:16px;color:#fff;background:var(--bus);font-variant-numeric:tabular-nums}
+/* Line-name pill: variable width, colour set inline. */
+.badge.pill{min-width:0;max-width:118px;padding:0 9px;display:flex;align-items:center;
+            font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge.glyph{padding:0}
+.mid{min-width:0}
+.late{color:var(--bad);font-weight:700}
+.ontime{color:var(--ok);font-weight:700}
+.cancelled{color:var(--bad);font-weight:700}
+.from s{opacity:.65;text-decoration-thickness:1px}
+.row.off{opacity:.55}
+.row.off .etas .n{text-decoration:line-through;color:var(--bad)}
+.to{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.from{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.etas{display:grid;grid-template-columns:58px auto;gap:6px;align-items:baseline;
+      font-variant-numeric:tabular-nums;justify-content:end}
+.etas .n{font-size:20px;font-weight:800;text-align:right;letter-spacing:-.01em}
+.etas .n.due{font-size:17px;color:var(--ok)}
+.etas .rest{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap}
+.etas .rest s{opacity:.6;text-decoration-thickness:1px}
+.etas .rest .late{font-weight:800}
+
+.warn{display:none;color:var(--warn)}
+.row.unreachable .warn{display:inline}
+.row.unreachable{border-color:#4a3a1c;background:#191509}
+.row.unreachable .etas .n{color:var(--warn)}
+.row.unreachable .to{color:#cfc39a}
+
+/* ---------- map ---------- */
+#mapPanel{padding:0;overflow:hidden;position:relative}
+#map{flex:1;min-height:0;background:#0b0d11;border-radius:14px}
+.leaflet-container{background:#0b0d11}
+.mapctl{position:absolute;right:10px;top:10px;z-index:600;display:flex;flex-direction:column;gap:6px}
+.mapctl button{width:32px;height:32px;background:rgba(15,17,21,.86);color:var(--ink);
+               border:1px solid var(--rule);border-radius:8px;font-size:15px;cursor:pointer;line-height:1}
+.mapctl button[aria-expanded="true"]{background:var(--ink);color:var(--bg)}
+#mapPanel.full{position:fixed;left:0;right:0;bottom:0;top:var(--chrome,0px);
+               z-index:2000;border-radius:0;background:var(--bg)}
+#mapPanel.full #map{border-radius:0}
+.maplabel{background:rgba(15,17,21,.82)!important;border:none!important;box-shadow:none!important;
+          color:var(--ink)!important;font:700 10px system-ui;padding:2px 5px!important;
+          border-radius:4px;transition:opacity .12s ease}
+.maplabel::before{display:none!important}
+.maplabel.rail{color:#e8c6dd!important}
+.mapinfo[hidden]{display:none}
+.mapinfo{position:absolute;left:12px;top:12px;z-index:700;max-width:260px;
+         background:rgba(15,17,21,.92);border:1px solid var(--rule);border-radius:10px;
+         padding:10px 12px;font-size:13px;line-height:1.5;backdrop-filter:blur(6px)}
+.mapinfo b{font-size:14px}
+.infoclose{position:absolute;right:6px;top:4px;background:none;border:0;color:var(--muted);
+           font-size:17px;line-height:1;cursor:pointer;padding:2px 5px}
+.maplegend[hidden]{display:none}
+.maplegend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(15,17,21,.86);
+           border:1px solid var(--rule);border-radius:10px;padding:8px 10px;font-size:12px;
+           display:flex;flex-direction:column;gap:5px;backdrop-filter:blur(4px)}
+.maplegend div{display:flex;align-items:center;gap:7px;color:var(--muted)}
+.swatch{width:16px;height:3.5px;border-radius:2px}
+.dot{width:9px;height:9px;border-radius:50%;border:2px solid #fff;background:#0f1115}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#1b2030;color:var(--ink)}
+.leaflet-popup-content{margin:9px 12px;font-size:13px;line-height:1.5}
+.leaflet-popup-content b{font-size:14px}
+.leaflet-control-attribution{background:rgba(15,17,21,.75)!important;color:#6c7484!important}
+.leaflet-control-attribution a{color:#8a93a5!important}
