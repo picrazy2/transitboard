@@ -202,16 +202,39 @@ async function rail(env: Env, preds: Prediction[]): Promise<RailRow[]> {
     .map(({ _has, ...r }) => r);
 }
 
+// Line status for the board's lines (Weaver + the buses), same shape the cycle
+// board uses so the shared frontend banner and chip rings just work.
+interface LineStatus { line: string; lineId: string; severity: string; reason: string; good: boolean; }
+const STATUS_LINES = ["weaver", "67", "73", "76", "106", "149", "243", "276", "393", "476", "n73"];
+async function lineStatus(env: Env): Promise<LineStatus[]> {
+  try {
+    const raw = await tflJson<any[]>(`/Line/${STATUS_LINES.join(",")}/Status`, env, {}, 60);
+    return raw.map((l) => {
+      const st = (l.lineStatuses ?? [])
+        .sort((a: any, b: any) => (a.statusSeverity ?? 10) - (b.statusSeverity ?? 10))[0] ?? {};
+      return {
+        line: l.name, lineId: l.id,
+        severity: st.statusSeverityDescription ?? "Unknown",
+        reason: (st.reason ?? "").replace(/^[A-Z ]+:\s*/, ""),
+        good: (st.statusSeverity ?? 10) >= 10,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function stokeyBoard(env: Env) {
-  const [bus, wx, preds] = await Promise.all([
+  const [bus, wx, preds, status] = await Promise.all([
     buses(env),
     weather(data.home.lat, data.home.lon).catch(() => null),
     weaverArrivals(env).catch(() => [] as Prediction[]),
+    lineStatus(env).catch(() => [] as LineStatus[]),
   ]);
   const train = await rail(env, preds).catch(() => [] as RailRow[]);
 
   const wanted = [...nextBuses(bus), ...trainPins(preds, train)];
   const vehicles: Pin[] = wanted.length ? await vehiclePins(env, wanted) : [];
 
-  return { buses: bus, rail: train, weather: wx, vehicles, ts: Math.floor(Date.now() / 1000) };
+  return { buses: bus, rail: train, weather: wx, vehicles, status, ts: Math.floor(Date.now() / 1000) };
 }

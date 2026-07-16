@@ -150,7 +150,7 @@ function normalize(mode, p){
       key:`bus|${r.line}|${r.dir}`, dir:r.dir, reachSecs:Math.round(r.walkMin*60),
     });
     const pins = (p.vehicles ?? []).map(v => ({...v, serving:true}));
-    return {rows, pins, status:[], weather:p.weather, ts:p.ts};
+    return {rows, pins, status:p.status ?? [], weather:p.weather, ts:p.ts};
   }
   // cycle
   const cyc = (p.cycMin || 10) * 60;
@@ -365,10 +365,13 @@ filters.addEventListener("click", e => {
 });
 
 // ---------- disruptions (header middle) ----------
+// Worst first: an actual service problem outranks a bus route diversion.
+const SEV_RANK = ["Suspended","Part Suspended","Closure","Part Closure","Severe Delays","Reduced Service","Minor Delays","Special Service"];
+const sevRank = s => { const i = SEV_RANK.indexOf(s.severity); return i < 0 ? 50 : i; };
 function renderStatus(){
   const el = document.getElementById("disrupt");
   if(!el) return;
-  const bad = (MB?.status ?? []).filter(s => !s.good);
+  const bad = (MB?.status ?? []).filter(s => !s.good).sort((a,b) => sevRank(a) - sevRank(b));
   if(!bad.length){ el.innerHTML = ""; return; }
   el.innerHTML = bad.slice(0, 3).map(s => {
     const url = `https://tfl.gov.uk/tube-dlr-overground/status/`;
