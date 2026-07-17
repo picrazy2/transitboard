@@ -227,13 +227,21 @@ function focusStillVisible(){
 const TRAIN_GLYPH = `<svg viewBox="0 0 24 24" width="19" height="19" fill="#fff" aria-hidden="true"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3.5-7H6V6h5v4Zm2 0V6h5v4h-5Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>`;
 const WARN_GLYPH = `<span class="warn" title="Not enough time to get there">⚠</span> `;
 
-// Two badge types only: a rail line is a coloured name pill (Weaver included), a
-// bus is a fixed-width number. Same everywhere, both modes.
+// Fixed-width badges so the columns line up. Walk's Weaver is the train glyph;
+// a bus is its number; a cycle rail line is a short colour-coded abbreviation.
+const ABBR = {
+  "Weaver":"Weav", "Victoria":"Vic", "Piccadilly":"Picc", "Mildmay":"Mild",
+  "Windrush":"Wind", "Suffragette":"Suff", "Lioness":"Lion", "Liberty":"Lib",
+  "Great Northern":"GN", "Thameslink":"TL", "Greater Anglia":"GA",
+  "Northern":"Nor", "Central":"Cen", "Elizabeth line":"Liz",
+};
 function badgeHTML(g){
   const col = colorOf(g.line);
-  return g.mode === "rail"
-    ? `<div class="badge pill" style="background:${col}">${esc(g.line)}</div>`
-    : `<div class="badge" style="background:${col}">${esc(g.line)}</div>`;
+  if(g.mode === "rail" && MODE === "walk")
+    return `<div class="badge glyph" style="background:${col}" title="${esc(g.line)}">${TRAIN_GLYPH}</div>`;
+  if(g.mode === "rail")
+    return `<div class="badge abbr" style="background:${col}" title="${esc(g.line)}">${esc(ABBR[g.line] ?? g.line.slice(0,4))}</div>`;
+  return `<div class="badge" style="background:${col}">${esc(g.line)}</div>`;
 }
 
 // The delay treatment (struck schedule, late in red) for the right-hand column.
@@ -261,9 +269,11 @@ function rowHTML(g){
   const miss = !reachable(cd.secs, walkS);
   // Right column. One-per-vehicle: the clock time (rail shows delay struck through);
   // grouped: the next couple of ETAs in minutes.
+  // Grouped: always two "next" slots, dashed when absent, so the big ETA column
+  // stays vertically aligned down the list.
   const rest = g.one
     ? (g.mode === "rail" ? railTimeHTML(g) : clockTime(first.exp))
-    : esc(g.etas.slice(1, 3).map(e => e.min).join(" · "));
+    : `${g.etas[1] ? g.etas[1].min : "–"} · ${g.etas[2] ? g.etas[2].min : "–"}`;
   return `
     <div class="row ${g.cancelled ? "off" : ""} ${miss ? "unreachable" : ""} ${focusMatchesRow(g) ? "" : "dim"}"
          data-key="${esc(g.key)}" data-stop="${esc(g.stopId ?? "")}"
@@ -381,8 +391,11 @@ function renderStatus(){
   if(!el) return;
   const bad = (MB?.status ?? []).filter(s => !s.good).sort((a,b) => sevRank(a) - sevRank(b));
   if(!bad.length){ el.innerHTML = ""; return; }
+  const NR = new Set(["great-northern","thameslink","greater-anglia","southeastern"]);
   el.innerHTML = bad.slice(0, 3).map(s => {
-    const url = `https://tfl.gov.uk/tube-dlr-overground/status/`;
+    const url = NR.has(s.lineId)
+      ? "https://www.nationalrail.co.uk/status-and-disruptions/"
+      : "https://tfl.gov.uk/tube-dlr-overground/status/";
     return `<a href="${url}" target="_blank" rel="noopener" title="${esc(s.reason || s.severity)}">
       <span class="dot"></span><b>${esc(s.line)}</b>&nbsp;${esc(s.severity)}${s.reason ? ` <span class="reason">— ${esc(s.reason)}</span>` : ""}</a>`;
   }).join("");
@@ -446,11 +459,11 @@ function focusPin(v){
 }
 
 // ---------- map (shared shell, mode-branched layers) ----------
-const map = L.map("map", {zoomControl:false, attributionControl:true, zoomSnap:0.25});
+const map = L.map("map", {zoomControl:false, attributionControl:false, zoomSnap:0.25});
 const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
   subdomains:"abcd", maxZoom:19,
-  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
 }).addTo(map);
+let showPassed = false;   // toggled by the map FAB; passed/Due vehicles are grey
 map.setView(HOME, C.openZoom);
 
 const DIM = {line:.06, stop:.1, pin:.12};
@@ -626,15 +639,17 @@ function allPins(){
   const seen = new Set(rows.map(v => v.vehicleId));
   return rows.concat(fleet.filter(v => !seen.has(v.vehicleId)).map(v => ({...v, serving:false})));
 }
+// Passed = a fleet vehicle already gone by, OR a train now Due (dropped from the
+// table). Passed pins are grey and hidden unless the map's toggle is on.
+const isPassed = v => v.serving === false || countdown(v.expected, v.etaMin).secs <= 0;
 function renderPins(){
   pinLayer.clearLayers();
-  // Show every vehicle on a visible line — no "already passed / only full-screen" gate.
-  const keep = v => onMap(v.line);
+  const keep = v => onMap(v.line) && (showPassed || !isPassed(v));
   for(const v of allPins().filter(keep)){
     const rail = v.mode === "rail";
     const night = String(v.line).startsWith("N");
     const mine = !FS.active ? true : FS.veh ? v.vehicleId === FS.veh : FS.keys.has(v.key);
-    const gone = v.serving === false;
+    const gone = isPassed(v);
     const col = colorOf(v.line);
     const bg = gone ? GONE : col;
     const arrow = gone ? "#8a90a0" : col;
@@ -765,6 +780,11 @@ map.on("click", () => {
 });
 if(typeof recentre !== "undefined") recentre.addEventListener("click", () => homeBounds && (lastFit = null, map.fitBounds(homeBounds, FIT)));
 if(typeof infoclose !== "undefined") infoclose.addEventListener("click", e => { e.stopPropagation(); hideInfo(); });
+if(typeof passedBtn !== "undefined") passedBtn.addEventListener("click", () => {
+  showPassed = !showPassed;
+  passedBtn.setAttribute("aria-pressed", String(showPassed));
+  renderPins();
+});
 if(typeof legendBtn !== "undefined") legendBtn.addEventListener("click", () => {
   const open = maplegend.hidden; maplegend.hidden = !open; legendBtn.setAttribute("aria-expanded", String(open));
 });

@@ -266,6 +266,72 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
   return pins;
 }
 
+// ---------- National Rail pins (RTT service detail) ----------
+// RTT times are Europe/London wall-clock without a zone; convert to real ms using
+// London's current offset (constant across the short window we care about).
+function londonOffsetMs(nowMs: number): number {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(nowMs);
+  const lh = +(p.find((x) => x.type === "hour")?.value ?? "0"), lm = +(p.find((x) => x.type === "minute")?.value ?? "0");
+  const u = new Date(nowMs);
+  let diff = (lh * 60 + lm) - (u.getUTCHours() * 60 + u.getUTCMinutes());
+  if (diff > 720) diff -= 1440; if (diff < -720) diff += 1440;
+  return diff * 60000;
+}
+
+const NR_MAX_PINS = 16;
+
+/** Position National Rail trains from their RTT calling-point actual/forecast times. */
+async function nrPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
+  // Positioning each NR train needs a per-service RTT call, so — unlike the tube —
+  // only the soonest per (station, line, direction) is placed, to stay well under
+  // the rate limit and the subrequest budget. (rows arrive soonest-first per station.)
+  const first = new Map<string, CycleRow>();
+  for (const r of rows) {
+    if (!r.vehicleId.includes("|") || !(ROUTES as any)[r.lineId]?.crs) continue; // NR rows with geometry
+    const k = `${r.stationId}|${r.lineId}|${r.london}`;
+    if (!first.has(k)) first.set(k, r);
+  }
+  const wanted = [...first.values()].slice(0, NR_MAX_PINS);
+  if (!wanted.length) return [];
+  const now = Date.now(), off = londonOffsetMs(now);
+  const ms = (iso?: string) => (iso ? Date.parse(iso + "Z") - off : NaN);
+
+  const details = await Promise.all(wanted.map((r) => {
+    const [identity, date] = r.vehicleId.split("|");
+    return rttGet(`/gb-nr/service?identity=${identity}&departureDate=${date}`, env, 30).catch(() => null);
+  }));
+  const pins: Pin[] = [];
+  for (let i = 0; i < wanted.length; i++) {
+    const r = wanted[i], d: any = details[i];
+    const locs = d?.service?.locations as any[] | undefined;
+    const route = (ROUTES as any)[r.lineId] as { track: [number, number][]; crs: Record<string, number> };
+    if (!locs || !route) continue;
+    // (offset along track, real ms) for calling points we have geometry for
+    const pts: { o: number; t: number }[] = [];
+    for (const l of locs) {
+      const crs = l.location?.shortCodes?.[0];
+      const o = crs ? route.crs[crs] : undefined;
+      if (o == null) continue;
+      const td = l.temporalData ?? {};
+      const time = td.departure ?? td.arrival ?? {};
+      const t = ms(time.realtimeActual ?? time.realtimeForecast ?? time.scheduleAdvertised);
+      if (Number.isFinite(t)) pts.push({ o, t });
+    }
+    if (pts.length < 2) continue;
+    pts.sort((a, b) => a.t - b.t);
+    let a = pts[0], b = pts[1];
+    for (let k = 0; k < pts.length - 1; k++) if (pts[k].t <= now && pts[k + 1].t >= now) { a = pts[k]; b = pts[k + 1]; break; }
+    const frac = b.t > a.t ? Math.min(1, Math.max(0, (now - a.t) / (b.t - a.t))) : 0;
+    const at = pointAt(r.lineId, a.o + (b.o - a.o) * frac);
+    pins.push({
+      line: r.line, lineId: r.lineId, london: r.london, to: r.to, station: r.station, stationId: r.stationId,
+      lat: at.lat, lon: at.lon, bearing: at.bearing, etaMin: r.etaMin, expected: r.expected,
+      vehicleId: r.vehicleId, estimated: true,
+    });
+  }
+  return pins;
+}
+
 // ---------- line status ----------
 interface LineStatus { line: string; lineId: string; severity: string; reason: string; good: boolean; }
 async function lineStatus(env: Env): Promise<LineStatus[]> {
@@ -299,7 +365,14 @@ export async function cycleBoard(env: Env) {
     lineStatus(env).catch(() => [] as LineStatus[]),
   ]);
   const rows = rowsPerStation.flat();
-  const pins = await trainPins(env, rows).catch(() => [] as Pin[]);
+  // Pins are best-effort: never let a slow fan-out hold up the board.
+  const withTimeout = (p: Promise<Pin[]>, ms: number): Promise<Pin[]> =>
+    Promise.race([p.catch(() => [] as Pin[]), new Promise<Pin[]>((res) => setTimeout(() => res([]), ms))]);
+  const [tflP, nrP] = await Promise.all([
+    withTimeout(trainPins(env, rows), 12000),
+    withTimeout(nrPins(env, rows), 9000),
+  ]);
+  const pins = [...tflP, ...nrP];
 
   const soonest = (a: CycleRow, b: CycleRow) => {
     const ta = a.expected ? Date.parse(a.expected) : Date.now() + a.etaMin * 60000;

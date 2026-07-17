@@ -461,8 +461,17 @@ rel_cache = {}   # rel id -> overpass element (each fetched once, reused)
 
 
 def get_rel(rel_id):
+    # Overpass is slow and flaky; cache each relation's geometry to disk (gitignored)
+    # so re-runs are instant and only new relations hit the network.
     if rel_id not in rel_cache:
-        rel_cache[rel_id] = overpass(f"[out:json][timeout:120];rel({rel_id});out geom;")["elements"][0]
+        f = ROOT / "tools" / "cache" / "osm" / f"rel-{rel_id}.json"
+        if f.exists():
+            rel_cache[rel_id] = json.loads(f.read_text())
+        else:
+            el = overpass(f"[out:json][timeout:180];rel({rel_id});out geom;")["elements"][0]
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps(el))
+            rel_cache[rel_id] = el
     return rel_cache[rel_id]
 
 
@@ -487,6 +496,67 @@ for lid in sorted(kept_lines):
     spine_poly[lid] = poly
     print(f"  {names[lid]:<12} {len(BRANCHES.get(lid, [1]))} branch(es), {drawn} ways drawn, "
           f"spine {len(poly)} vertices")
+
+# ---------- National Rail geometry: drawn + snapped by CRS for live pins ----------
+# Great Northern and Greater Anglia are drawn from their OSM spine. Thameslink
+# shares the Great Northern corridor through Finsbury Park (its own route diverges
+# far to the south), so it is positioned on that spine but not drawn separately.
+NR_DRAW = {"great-northern": 6336420, "greater-anglia": 9107254}
+NR_PIN = {"great-northern": 6336420, "greater-anglia": 9107254, "thameslink": 6336420}
+nr_routes = {}   # lineId -> {track: [...], crs: {CRS: offset_m}}
+for lid, rel_id in NR_PIN.items():
+    if lid not in kept_lines:
+        continue
+    rel = get_rel(rel_id)
+    if lid in NR_DRAW:
+        for m in rel["members"]:
+            if m["type"] == "way" and m.get("geometry") and len(m["geometry"]) >= 2:
+                features.append({"type": "Feature",
+                                 "geometry": {"type": "LineString",
+                                              "coordinates": [[round(n["lon"], 5), round(n["lat"], 5)] for n in m["geometry"]]},
+                                 "properties": {"kind": "rail", "line": names[lid], "lineId": lid}})
+    poly = stitch(rel["members"], (HOME[1], HOME[0]))
+    cum = cumulate(poly)
+    crs_off = {crs: round(off) for crs, nm, lat, lon in crs_ref
+               for off, perp in [snap(poly, cum, lat, lon)] if perp <= 400}
+    nr_routes[lid] = {"track": [[round(x, 5), round(y, 5)] for x, y in poly], "crs": crs_off}
+    print(f"  {names[lid]:<14} NR spine {len(poly)} vertices, {len(crs_off)} CRS snapped")
+
+# ---------- all stops on every line (faint dots), like the walk board ----------
+print("all stops on each line ...", flush=True)
+board_ids = {s["id"] for s in board}
+seen_ids = {f["properties"].get("id") for f in features if f["properties"].get("kind") == "station"}
+allstops = {}   # id -> {lat, lon, name, lines:set}
+for lid in sorted(kept_lines):
+    if lid in NR_PIN:
+        continue
+    try:
+        sps = tfl(f"/Line/{lid}/StopPoints")
+    except Exception:
+        continue
+    for sp in sps:
+        nid = sp.get("naptanId")
+        if not nid or sp.get("lat") is None:
+            continue
+        e = allstops.setdefault(nid, {"lat": sp["lat"], "lon": sp["lon"], "lines": set(),
+            "name": sp["commonName"].replace(" Underground Station", "").replace(" Rail Station", "").replace(" Station", "").strip()})
+        e["lines"].add(names.get(lid, lid))
+for lid in NR_DRAW:                          # National Rail stations along the spine
+    for crs in nr_routes.get(lid, {}).get("crs", {}):
+        row = next((c for c in crs_ref if c[0] == crs), None)
+        if not row:
+            continue
+        e = allstops.setdefault(f"crs:{crs}", {"lat": row[2], "lon": row[3], "lines": set(),
+            "name": row[1].replace(" Rail Station", "").strip()})
+        e["lines"].add(names.get(lid, lid))
+n_added = 0
+for nid, e in allstops.items():
+    if nid in seen_ids or nid in board_ids:
+        continue
+    features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(e["lon"], 5), round(e["lat"], 5)]},
+                     "properties": {"kind": "station", "id": nid, "name": e["name"], "lines": sorted(e["lines"]), "onBoard": False}})
+    n_added += 1
+print(f"  {n_added} additional line stops drawn")
 
 out = ROOT / "public" / "stokey" / "cycle" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)
@@ -521,8 +591,10 @@ for (lid, d), order in seq_of.items():
     if len(dedup) >= 2:
         routes[f"{lid}|{d}"] = {"track": [[round(x, 5), round(y, 5)] for x, y in poly], "stops": dedup}
 
+# National Rail routes are keyed by lineId alone (no direction): {track, crs offsets}.
+routes.update(nr_routes)
 (ROOT / "src" / "cycle-routes.json").write_text(json.dumps(routes, separators=(",", ":")) + "\n")
-print(f"wrote src/cycle-routes.json ({len(routes)} route-directions, "
-      f"{sum(len(r['stops']) for r in routes.values())} snapped stops)")
+print(f"wrote src/cycle-routes.json ({len(routes)} routes, "
+      f"{sum(len(r.get('stops', r.get('crs', []))) for r in routes.values())} snapped points)")
 print(f"wrote src/cycle-stops.json ({len(board)} stations)")
 print(f"wrote {out.relative_to(ROOT)} ({len(features)} features)")

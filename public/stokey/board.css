@@ -144,9 +144,8 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 /* Bus badge: fixed width so numbers line up. */
 .badge{min-width:42px;height:31px;border-radius:8px;display:grid;place-items:center;
        font-weight:800;font-size:16px;color:#fff;background:var(--bus);font-variant-numeric:tabular-nums}
-/* Line-name pill: variable width, colour set inline. */
-.badge.pill{min-width:0;max-width:118px;padding:0 9px;display:flex;align-items:center;
-            font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Cycle rail: short abbreviation in the same fixed-width badge. */
+.badge.abbr{font-size:11.5px;letter-spacing:.02em}
 .badge.glyph{padding:0}
 .mid{min-width:0}
 .late{color:var(--bad);font-weight:700}
@@ -166,9 +165,10 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .etas .rest .late{font-weight:800}
 .etas .rest .delay{display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.12}
 
-/* Unreachable: just the warning glyph, no border/background/colour change. */
+/* Unreachable: the warning glyph and a yellow ETA, but no border/background tint. */
 .warn{display:none;color:var(--warn)}
 .row.unreachable .warn{display:inline}
+.row.unreachable .etas .n{color:var(--warn)}
 
 /* ---------- map ---------- */
 #mapPanel{padding:0;overflow:hidden;position:relative}
