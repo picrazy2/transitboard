@@ -315,7 +315,8 @@ print(f"  {len(nr_stations)} National Rail stations with live service")
 LINES = {}   # line id -> {"name", "seq": {naptan: index}, "dist": {naptan: km_to_CC}, ...}
 line_ids = {lid for s in near for lid, _ in s["lines"]}
 print(f"resolving {len(line_ids)} rail lines ...", flush=True)
-seq_of = {}   # (lineId, direction) -> [naptanId in order]
+seq_of = {}       # (lineId, direction) -> [(naptan, lat, lon) in order]  (branches flattened)
+branches_of = {}  # (lineId, direction) -> [ branch block [(naptan, lat, lon), ...], ... ]
 name_of = {}
 for lid in sorted(line_ids):
     for d in ("inbound", "outbound"):
@@ -324,14 +325,16 @@ for lid in sorted(line_ids):
         except Exception:
             continue
         name_of[lid] = r.get("lineName", lid)
-        order = []
+        order, blocks = [], []
         for block in r.get("stopPointSequences") or []:
-            for p in block.get("stopPoint") or []:
-                nid = p.get("id") or p.get("stationId")
-                if nid:
-                    order.append((nid, p.get("lat"), p.get("lon")))
+            stops = [(p.get("id") or p.get("stationId"), p.get("lat"), p.get("lon"))
+                     for p in (block.get("stopPoint") or []) if p.get("id") or p.get("stationId")]
+            order += stops
+            if len(stops) >= 2:
+                blocks.append(stops)
         if len(order) >= 2:
             seq_of[(lid, d)] = order
+            branches_of[(lid, d)] = blocks
 
 
 def direction_at(lid, d, naptan):
@@ -362,50 +365,62 @@ def direction_at(lid, d, naptan):
     return "in" if m > i else "out"
 
 
-# Every (station, line, tfl-direction) that stops here, with the "into/out of
-# London" sense of that direction *at this station*. `london` can differ between
-# the two ends of a through-line, which is why it is computed per stop.
-candidates = []   # (station, lineId, lineName, tflDir, london)
+# Every (station, line, tfl-direction, branch-terminus) the station can catch a
+# train for. `london` (into/out of London) is computed per stop for the panel
+# split; the terminus is what the dedup keys on, so a branch station a nearer
+# station doesn't reach survives.
+candidates = []   # (station, lineId, lineName, tflDir, london, terminus)
 for s in near:
     for lid, lname in s["lines"]:
         for d in ("inbound", "outbound"):
-            order = seq_of.get((lid, d))
-            if not order or s["id"] not in [n for n, _, _ in order]:
-                continue
             lon = direction_at(lid, d, s["id"])
-            if lon:
-                candidates.append((s, lid, lname, d, lon))
+            if not lon:
+                continue
+            for block in branches_of.get((lid, d), []):
+                ids = [n for n, _, _ in block]
+                if s["id"] in ids and len(ids) >= 2:
+                    candidates.append((s, lid, lname, d, lon, ids[-1]))
 
-# ---------- 3. dedup: nearest station per (line, into/out of London) ----------
-# TfL (tube/Overground) and National Rail candidates compete in one pool; the
-# nearest station by cycle time wins each (line, direction).
-names, sta, tfl_dir, nearest = {}, {}, {}, {}
-def offer(sid, lid, london, cyc_s):
-    k = f"{lid}|{london}"
-    if k not in nearest or cyc_s < nearest[k][0]:
-        nearest[k] = (cyc_s, sid)
+# ---------- 3. dedup: nearest station per (line, direction, branch terminus) ----------
+# Keying on the terminus, not just into/out of London, keeps a branch station a
+# nearer one never reaches — e.g. Clapton for the Weaver's Chingford branch, which
+# Stoke Newington (Enfield/Cheshunt) can't catch. National Rail keeps its simpler
+# (line, direction) key — RTT gives no branch topology — and competes in the same
+# pool by cycle time.
+names, sta, dir_london, nearest = {}, {}, {}, {}
+nr_ids = {s["id"] for s in nr_stations}
+def offer(key, sid, cyc_s):
+    if key not in nearest or cyc_s < nearest[key][0]:
+        nearest[key] = (cyc_s, sid)
 
-for s, lid, lname, d, lon in candidates:               # TfL
-    sta[s["id"]] = s; names[lid] = lname; tfl_dir[(s["id"], lid, lon)] = d
-    offer(s["id"], lid, lon, s["cyc_s"])
-for s in nr_stations:                                  # National Rail (RTT)
+for s, lid, lname, d, lon, term in candidates:
+    if s["id"] in nr_ids:
+        continue                       # a National Rail station is served via RTT, not TfL
+    sta[s["id"]] = s; names[lid] = lname; dir_london[(s["id"], lid, d)] = lon
+    offer(f"{lid}|{d}|{term}", s["id"], s["cyc_s"])
+for s in nr_stations:
     sta[s["id"]] = s
     for lid, lon in s["served"]:
         names[lid] = s["names"][lid]
-        offer(s["id"], lid, lon, s["cyc_s"])
+        offer(f"nr|{lid}|{lon}", s["id"], s["cyc_s"])
 nearest = {k: v[1] for k, v in nearest.items()}
 nr_ids = {s["id"] for s in nr_stations}
 
 serve, primary_ll = {}, {}
-for k, sid in nearest.items():
-    lid, lon = k.split("|")
-    primary_ll.setdefault(sid, set()).add(k)
+for key, sid in nearest.items():
     serve.setdefault(sid, {})
-    if sid not in nr_ids and (d := tfl_dir.get((sid, lid, lon))):
+    if key.startswith("nr|"):
+        _, lid, lon = key.split("|")
+        primary_ll.setdefault(sid, set()).add(f"{lid}|{lon}")
+    else:
+        lid, d, _term = key.split("|", 2)
+        lon = dir_london[(sid, lid, d)]
         serve[sid][f"{lid}|{d}"] = lon
+        primary_ll.setdefault(sid, set()).add(f"{lid}|{lon}")
 
 board = sorted((sta[i] for i in primary_ll), key=lambda s: s["cyc_s"])
-print(f"  dedup -> {len(board)} stations, {len({p.split('|')[0] for p in nearest})} lines")
+lines_won = {k.split("|")[0] for pl in primary_ll.values() for k in pl}
+print(f"  dedup -> {len(board)} stations, {len(lines_won)} lines")
 for s in board:
     lines = sorted({names[k.split('|')[0]] for k in primary_ll[s["id"]]})
     print(f"  {'NR' if s['id'] in nr_ids else '  '} {s['cyc_min']:>4}min  {s['name'][:22]:<23} {', '.join(lines)}")

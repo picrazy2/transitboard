@@ -30,6 +30,28 @@
       "nrServe": []
     },
     {
+      "id": "910GCLAPTON",
+      "name": "Clapton",
+      "lat": 51.561644,
+      "lon": -0.057025,
+      "cycMin": 5.1,
+      "modes": [
+        "national-rail",
+        "overground"
+      ],
+      "serve": {
+        "weaver|outbound": "out"
+      },
+      "lineNames": {
+        "weaver": "Weaver"
+      },
+      "nr": false,
+      "crs": "",
+      "opLines": {},
+      "destDir": {},
+      "nrServe": []
+    },
+    {
       "id": "910GDALSKLD",
       "name": "Dalston Kingsland",
       "lat": 51.548148,
@@ -174,13 +196,12 @@
         }
       },
       "destDir": {
-        "London Kings Cross": "in",
         "Cambridge": "out",
-        "Finsbury Park": "out",
         "Welwyn Garden City": "out",
-        "Moorgate": "in",
+        "London Kings Cross": "in",
         "Brighton": "in",
         "Peterborough": "out",
+        "Moorgate": "in",
         "Stevenage": "out",
         "Horsham": "in"
       },
