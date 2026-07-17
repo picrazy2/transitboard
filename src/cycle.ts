@@ -206,7 +206,7 @@ export interface Pin {
 
 const MIN_SPEED = 3, MAX_SPEED = 45, FALLBACK_SPEED = 16; // m/s; rail runs faster than road
 
-const MAX_PINS = 24; // one per vehicle, capped so the /Vehicle fan-out stays fast
+const MAX_PINS = 60; // positioning is cheap now (per-line fetch), so show plenty
 
 /** Place every board train from its own forward predictions — one pin per vehicle. */
 async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
@@ -218,15 +218,20 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     if (!byVeh.has(r.vehicleId)) byVeh.set(r.vehicleId, r);
   }
   const wanted = [...byVeh.values()].slice(0, MAX_PINS);
-  const ids = [...new Set(wanted.map((r) => r.vehicleId))];
-  if (!ids.length) return [];
+  if (!wanted.length) return [];
 
-  // Tube set-numbers repeat across lines, so a /Vehicle response mixes lines;
-  // we filter each vehicle's predictions to the row's own lineId.
-  const preds = await Promise.all(ids.map((id) =>
-    tflJson<Prediction[]>(`/Vehicle/${id}/Arrivals`, env, {}, 15).catch(() => [] as Prediction[])));
+  // One /Line/{id}/Arrivals per line returns every vehicle's forward predictions in
+  // a single call — far fewer subrequests than /Vehicle per train. Grouped by
+  // vehicleId; the per-row filter below keeps each train to its own line + direction.
+  const lines = [...new Set(wanted.map((r) => r.lineId))];
+  const perLine = await Promise.all(lines.map((lid) =>
+    tflJson<Prediction[]>(`/Line/${lid}/Arrivals`, env, {}, 15).catch(() => [] as Prediction[])));
   const byId = new Map<string, Prediction[]>();
-  ids.forEach((id, i) => byId.set(id, preds[i]));
+  for (const p of perLine.flat()) {
+    const id = p.vehicleId ?? "";
+    if (!id) continue;
+    (byId.get(id) ?? byId.set(id, []).get(id)!).push(p);
+  }
 
   const pins: Pin[] = [];
   for (const r of wanted) {
@@ -369,7 +374,7 @@ export async function cycleBoard(env: Env) {
   const withTimeout = (p: Promise<Pin[]>, ms: number): Promise<Pin[]> =>
     Promise.race([p.catch(() => [] as Pin[]), new Promise<Pin[]>((res) => setTimeout(() => res([]), ms))]);
   const [tflP, nrP] = await Promise.all([
-    withTimeout(trainPins(env, rows), 12000),
+    withTimeout(trainPins(env, rows), 15000),
     withTimeout(nrPins(env, rows), 9000),
   ]);
   const pins = [...tflP, ...nrP];

@@ -134,7 +134,11 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .panel h2 .only{margin-left:auto;font:700 10.5px/1 system-ui;color:var(--muted);cursor:pointer;
                 background:transparent;border:1px solid var(--rule);border-radius:999px;padding:4px 9px}
 .panel h2 .only[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px}
+.list{display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1;min-height:0;padding-right:4px;
+      scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+.list::-webkit-scrollbar{width:6px;height:6px}
+.list::-webkit-scrollbar-thumb{background:var(--rule);border-radius:3px}
+.list::-webkit-scrollbar-track{background:transparent}
 .empty{color:var(--muted);font-size:14px;padding:16px 4px}
 
 .row{border:1px solid var(--rule);border-radius:12px;padding:8px 11px;background:var(--row);
@@ -156,7 +160,9 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .row.off .etas .n{text-decoration:line-through;color:var(--bad)}
 .to{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .from{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.etas{display:grid;grid-template-columns:58px auto;gap:6px;align-items:baseline;
+/* Both columns fixed so the big ETA lines up down the list regardless of what the
+   right slot holds (two numbers, dashes, a clock time or a stacked delay). */
+.etas{display:grid;grid-template-columns:56px 52px;gap:6px;align-items:baseline;
       font-variant-numeric:tabular-nums;justify-content:end}
 .etas .n{font-size:20px;font-weight:800;text-align:right;letter-spacing:-.01em}
 .etas .n.due{font-size:17px;color:var(--ok)}
