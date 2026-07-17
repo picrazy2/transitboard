@@ -95,8 +95,8 @@
         }
       },
       "destDir": {
-        "London Liverpool Street": "in",
-        "Hertford East": "out"
+        "Hertford East": "out",
+        "London Liverpool Street": "in"
       },
       "nrServe": [
         "greater-anglia|in",
@@ -196,14 +196,18 @@
         }
       },
       "destDir": {
-        "Horsham": "in",
+        "Cambridge": "out",
+        "Hertford North": "out",
+        "Moorgate": "in",
+        "Welwyn Garden City": "out",
         "London Kings Cross": "in",
         "Brighton": "in",
+        "Gordon Hill": "out",
         "Peterborough": "out",
-        "Moorgate": "in",
         "Stevenage": "out",
-        "Cambridge": "out",
-        "Welwyn Garden City": "out"
+        "Sevenoaks": "in",
+        "Horsham": "in",
+        "Royston": "out"
       },
       "nrServe": [
         "great-northern|in",

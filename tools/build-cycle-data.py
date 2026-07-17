@@ -490,7 +490,9 @@ features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates":
 # The same polyline is drawn on the map (LineString features above) and used to
 # position live trains (src/cycle.ts), so a pin is always exactly on the line.
 print("rail geometry (OpenStreetMap) ...", flush=True)
-kept_lines = {k.split("|")[0] for k in nearest}
+# lineIds actually on the board (nearest keys are "lid|d|term" for TfL and
+# "nr|lid|lon" for National Rail, so derive lineIds from primary_ll instead).
+kept_lines = {k.split("|")[0] for pl in primary_ll.values() for k in pl}
 rel_cache = {}   # rel id -> overpass element (each fetched once, reused)
 
 
