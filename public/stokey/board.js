@@ -671,7 +671,10 @@ function renderPins(){
        </div>`});
     const when = v.etaMin == null ? "already past your stop"
       : `${eta === "Due" ? "Due" : eta.replace("m"," min")} at ${esc(shortStop(v.stop ?? v.station ?? "your stop"))}`;
-    const marker = L.marker([v.lat, v.lon], {icon, zIndexOffset: dim ? 500 : gone ? 800 : 1000, vehicleId:v.vehicleId}).addTo(pinLayer);
+    // Soonest on top: among live vehicles the one with the lowest ETA wins, so
+    // several stacked at a terminus show the next-to-depart in front.
+    const z = gone ? 300 : dim ? 600 : 2000 - Math.min(v.etaMin ?? 999, 999);
+    const marker = L.marker([v.lat, v.lon], {icon, zIndexOffset: z, vehicleId:v.vehicleId}).addTo(pinLayer);
     infoOn(marker, `<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>${when}<br>
       <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`);
     marker.on("click", () => focusPin(v));

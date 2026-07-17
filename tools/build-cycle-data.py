@@ -130,36 +130,55 @@ def overpass(query, attempts=8):
 
 
 def stitch(members, start_near):
-    """One contiguous polyline through a route relation, oriented from `start_near`.
+    """One polyline through a route relation, oriented from `start_near`.
 
-    Ways arrive in member order and are endpoint-contiguous, though a way may be
-    digitised backwards. Cut at any discontinuity and keep the longest single run.
-    (Lifted from build-stokey-data.py, which does the same for the Weaver line.)
+    Two phases. First, chain ways that actually touch (small threshold) into
+    maximal contiguous *runs* — this alone gives the right line for a cleanly
+    mapped relation, ignoring spurs and sidings. Then merge only *substantial*
+    runs across bigger gaps, to bridge genuine OSM mapping breaks (e.g. Piccadilly
+    has a ~2 km gap around Wood Green) without vacuuming up nearby junk the way a
+    single large threshold did (it ballooned Mildmay and Suffragette).
     """
     ways = [[[n["lon"], n["lat"]] for n in m["geometry"]]
             for m in members if m["type"] == "way" and m.get("geometry") and len(m["geometry"]) >= 2]
     if not ways:
         return []
     gap = lambda a, b: haversine_km((a[1], a[0]), (b[1], b[0])) * 1000
-    joins = lambda a, b: gap(a, b) < 8
-
-    poly = ways[0][:]
-    if len(ways) > 1:
-        nxt = ways[1]
-        if min(gap(poly[0], nxt[0]), gap(poly[0], nxt[-1])) < min(gap(poly[-1], nxt[0]), gap(poly[-1], nxt[-1])):
-            poly.reverse()
-    runs = [poly]
-    for w in ways[1:]:
-        cur = runs[-1]
-        if joins(cur[-1], w[-1]) and not joins(cur[-1], w[0]):
-            w = w[::-1]
-        if joins(cur[-1], w[0]):
-            cur.extend(w[1:])
-        else:
-            runs.append(w[:])
     length = lambda r: sum(gap(r[i], r[i + 1]) for i in range(len(r) - 1))
-    best = max(runs, key=length)
-    if gap(best[-1], start_near) < gap(best[0], start_near):
+    SMALL, BRIDGE, SUBSTANTIAL = 40, 2600, 800  # metres
+
+    # phase 1: contiguous runs
+    pool, runs = ways[:], []
+    while pool:
+        chain = pool.pop(0)
+        grew = True
+        while grew and pool:
+            grew = False
+            for i, w in enumerate(pool):
+                if gap(chain[-1], w[0]) < SMALL: chain = chain + w[1:]
+                elif gap(chain[-1], w[-1]) < SMALL: chain = chain + w[::-1][1:]
+                elif gap(chain[0], w[-1]) < SMALL: chain = w[:-1] + chain
+                elif gap(chain[0], w[0]) < SMALL: chain = w[::-1][:-1] + chain
+                else: continue
+                pool.pop(i); grew = True; break
+        runs.append(chain)
+
+    # phase 2: merge substantial runs across bigger gaps
+    runs = sorted((r for r in runs if length(r) > SUBSTANTIAL), key=length, reverse=True)
+    best = runs.pop(0) if runs else []
+    grew = True
+    while grew and runs:
+        grew = False
+        bi, bd, bmerge = -1, BRIDGE, None
+        for i, r in enumerate(runs):
+            for cand in (r, r[::-1]):
+                if gap(best[-1], cand[0]) < bd: bd, bi, bmerge = gap(best[-1], cand[0]), i, ("tail", cand)
+                if gap(best[0], cand[-1]) < bd: bd, bi, bmerge = gap(best[0], cand[-1]), i, ("head", cand)
+        if bi < 0: break
+        runs.pop(bi); side, cand = bmerge
+        best = best + cand[1:] if side == "tail" else cand[:-1] + best
+        grew = True
+    if best and gap(best[-1], start_near) < gap(best[0], start_near):
         best.reverse()
     return best
 

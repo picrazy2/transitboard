@@ -95,8 +95,8 @@
         }
       },
       "destDir": {
-        "Hertford East": "out",
-        "London Liverpool Street": "in"
+        "London Liverpool Street": "in",
+        "Hertford East": "out"
       },
       "nrServe": [
         "greater-anglia|in",
@@ -186,24 +186,24 @@
       "nr": true,
       "crs": "FPK",
       "opLines": {
-        "GN": {
-          "lineId": "great-northern",
-          "name": "Great Northern"
-        },
         "TL": {
           "lineId": "thameslink",
           "name": "Thameslink"
+        },
+        "GN": {
+          "lineId": "great-northern",
+          "name": "Great Northern"
         }
       },
       "destDir": {
-        "Cambridge": "out",
-        "Welwyn Garden City": "out",
+        "Horsham": "in",
         "London Kings Cross": "in",
         "Brighton": "in",
         "Peterborough": "out",
         "Moorgate": "in",
         "Stevenage": "out",
-        "Horsham": "in"
+        "Cambridge": "out",
+        "Welwyn Garden City": "out"
       },
       "nrServe": [
         "great-northern|in",
