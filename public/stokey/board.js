@@ -433,20 +433,40 @@ filters.addEventListener("click", e => {
 // Worst first: an actual service problem outranks a bus route diversion.
 const SEV_RANK = ["Suspended","Part Suspended","Closure","Part Closure","Severe Delays","Reduced Service","Minor Delays","Special Service"];
 const sevRank = s => { const i = SEV_RANK.indexOf(s.severity); return i < 0 ? 50 : i; };
+let disruptOpen = false;
 function renderStatus(){
   const el = document.getElementById("disrupt");
   if(!el) return;
   const bad = (MB?.status ?? []).filter(s => !s.good).sort((a,b) => sevRank(a) - sevRank(b));
-  if(!bad.length){ el.innerHTML = ""; return; }
+  if(!bad.length){ el.innerHTML = ""; disruptOpen = false; return; }
   const NR = new Set(["great-northern","thameslink","greater-anglia","southeastern"]);
-  el.innerHTML = bad.slice(0, 3).map(s => {
+  const items = bad.map(s => {
     const url = NR.has(s.lineId)
       ? "https://www.nationalrail.co.uk/status-and-disruptions/"
       : "https://tfl.gov.uk/tube-dlr-overground/status/";
     return `<a href="${url}" target="_blank" rel="noopener" title="${esc(s.reason || s.severity)}">
       <span class="dot"></span><b>${esc(s.line)}</b>&nbsp;${esc(s.severity)}${s.reason ? ` <span class="reason">— ${esc(s.reason)}</span>` : ""}</a>`;
   }).join("");
+  el.innerHTML = `<button class="disruptbtn" aria-expanded="${disruptOpen}" title="Service disruptions">
+      <span class="dot"></span>${bad.length} ${bad.length === 1 ? "alert" : "alerts"}</button>
+    <div class="disruptpanel"${disruptOpen ? "" : " hidden"}>${items}</div>`;
+  el.querySelector(".disruptbtn").onclick = (e) => {
+    e.stopPropagation();
+    disruptOpen = !disruptOpen;
+    el.querySelector(".disruptpanel").hidden = !disruptOpen;
+    el.querySelector(".disruptbtn").setAttribute("aria-expanded", String(disruptOpen));
+  };
 }
+// Tapping anywhere outside closes the open disruptions dropdown.
+document.addEventListener("click", (e) => {
+  if(disruptOpen && !e.target.closest("#disrupt")){
+    disruptOpen = false;
+    const p = document.querySelector(".disruptpanel");
+    if(p) p.hidden = true;
+    const b = document.querySelector(".disruptbtn");
+    if(b) b.setAttribute("aria-expanded", "false");
+  }
+});
 
 // ---------- render ----------
 function renderAll(){

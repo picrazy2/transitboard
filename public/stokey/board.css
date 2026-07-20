@@ -22,7 +22,7 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .clock .sec{font-size:.45em;font-weight:600;opacity:.85}
 .clock .ampm{font-size:.32em;font-weight:700;opacity:.85;margin-left:4px}
 /* The middle of the header used to be empty; the disruption notes live there. */
-.headmid{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:2px 4px}
+.headmid{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:2px 4px 0}
 .headmeta{display:flex;flex-direction:column;align-items:flex-end;text-align:right;min-width:0}
 
 .wx{display:flex;align-items:center;gap:14px;margin-top:8px}
@@ -39,7 +39,16 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .hour b{display:block;color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
 
 /* disruption notes — in the header middle, one line each, linking to TfL status */
-.disrupt{display:flex;flex-direction:column;gap:3px;font-size:12.5px;overflow:hidden}
+.disrupt{position:relative;display:flex;font-size:12.5px}
+.disruptbtn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12.5px;
+  color:#ffcf70;background:rgba(255,207,112,.12);border:1px solid rgba(255,207,112,.32);
+  border-radius:999px;padding:4px 12px;cursor:pointer;white-space:nowrap}
+.disruptbtn .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.disruptpanel{position:absolute;top:calc(100% + 6px);left:0;z-index:800;
+  display:flex;flex-direction:column;gap:8px;max-width:min(90vw,380px);
+  background:rgba(15,17,21,.97);border:1px solid var(--rule);border-radius:12px;
+  padding:11px 13px;box-shadow:0 10px 28px rgba(0,0,0,.55)}
+.disruptpanel[hidden]{display:none}
 .disrupt a{display:flex;align-items:center;gap:7px;color:#ffcf70;text-decoration:none;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .disrupt a:hover{text-decoration:underline}
@@ -84,10 +93,12 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
                  grid-template-rows .34s cubic-bezier(.4,0,.2,1)}
 #inPanel{grid-area:in} #outPanel{grid-area:out} #mapPanel{grid-area:map}
 
-.cols.solo-in {grid-template-columns:1.15fr 0fr 2.1fr}
+/* stacked/solo-in have a 0-width middle column, so the card→map gap is TWO
+   column-gaps; halve it there so it matches the 12px row-gap between the cards. */
+.cols.solo-in {grid-template-columns:1.15fr 0fr 2.1fr;column-gap:6px}
 .cols.solo-out{grid-template-columns:0fr 1.15fr 2.1fr}
 .cols.stacked{grid-template-columns:1.15fr 0fr 2.1fr;grid-template-rows:1fr 1fr;
-              grid-template-areas:"in . map" "out . map"}
+              grid-template-areas:"in . map" "out . map";column-gap:6px}
 .cols.stacked .panel.novalue{display:none}
 .cols.stacked.one-row{grid-template-rows:1fr}
 
