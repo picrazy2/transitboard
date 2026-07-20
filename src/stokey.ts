@@ -81,16 +81,22 @@ async function buses(env: Env): Promise<BusRow[]> {
   return rows.flat().sort((a, b) => at(a) - at(b));
 }
 
-/** The soonest departure per (line, direction) — one board row, one map pin. */
+/**
+ * One pin per live bus — every vehicle, not just the soonest per direction. A bus
+ * shows up as a departure at several of our stops, so dedup on vehicleId (rows are
+ * time-sorted, so the first kept is its nearest stop). Pins share the row's
+ * `bus|line|dir` key, so a whole direction's buses group under one focus, as the
+ * cycle board's trains do.
+ */
 const nextBuses = (rows: BusRow[]): PinInput[] => {
-  const first = new Map<string, BusRow>();
+  const byVeh = new Map<string, BusRow>();
   for (const r of rows) {
-    const k = `bus|${r.line}|${r.dir}`;
-    if (!first.has(k)) first.set(k, r);
+    if (!r.vehicleId || byVeh.has(r.vehicleId)) continue;
+    byVeh.set(r.vehicleId, r);
   }
-  return [...first.entries()].map(([key, r]) => ({
+  return [...byVeh.values()].map((r) => ({
     vehicleId: r.vehicleId, etaMin: r.etaMin, expected: r.expected, to: r.to, stop: r.stop,
-    key, mode: "bus" as const, london: r.london,
+    key: `bus|${r.line}|${r.dir}`, mode: "bus" as const, london: r.london,
   }));
 };
 

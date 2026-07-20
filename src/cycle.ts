@@ -19,6 +19,13 @@ interface RouteGeo {
 }
 const ROUTES = routes as unknown as Record<string, RouteGeo>;
 
+// stationId -> { "lineId|direction": "in"|"out" }. Direction is geographic (built in
+// tools/build-cycle-data.py), so it's the trustworthy source of into/out once we know
+// a vehicle's true travel direction from the geometry.
+const SERVE: Record<string, Record<string, Towards>> = Object.fromEntries(
+  data.stations.map((s) => [s.id, s.serve as unknown as Record<string, Towards>]),
+);
+
 export interface CycleRow {
   line: string;
   lineId: string;
@@ -206,15 +213,25 @@ export interface Pin {
 
 const MIN_SPEED = 3, MAX_SPEED = 45, FALLBACK_SPEED = 16; // m/s; rail runs faster than road
 
-const MAX_PINS = 60; // positioning is cheap now (per-line fetch), so show plenty
+// Positioning costs one /Line/Arrivals per distinct line (~7), not per vehicle, so
+// this only bounds response size. Keep it above the total live fleet across all
+// stations — a lower cap silently starves whichever station sorts last (Suffragette
+// at South Tottenham was dropped entirely at 60).
+const MAX_PINS = 250;
 
 /** Place every board train from its own forward predictions — one pin per vehicle. */
+// Every directional spine (and branch) a TfL line is drawn on, e.g. weaver ->
+// weaver|inbound, weaver|outbound, weaver|*|chingford. National Rail spines are
+// keyed by bare lineId (no "|"), so this excludes them — RTT positions those.
+const routeKeysFor = (lineId: string) =>
+  Object.keys(ROUTES).filter((k) => k.startsWith(`${lineId}|`)).sort();
+
 async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
   // one row per vehicle; only TfL lines have route geometry here (National Rail is
-  // positioned separately from RTT), so skip anything without a route.
+  // positioned separately from RTT), so skip anything without a drawn spine.
   const byVeh = new Map<string, CycleRow>();
   for (const r of rows) {
-    if (!r.vehicleId || !ROUTES[`${r.lineId}|${r.dir}`]) continue;
+    if (!r.vehicleId || !routeKeysFor(r.lineId).length) continue;
     if (!byVeh.has(r.vehicleId)) byVeh.set(r.vehicleId, r);
   }
   const wanted = [...byVeh.values()].slice(0, MAX_PINS);
@@ -233,38 +250,32 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     (byId.get(id) ?? byId.set(id, []).get(id)!).push(p);
   }
 
-  // Route + any branch variants for this line/direction ("weaver|outbound" plus
-  // "weaver|outbound|chingford"), main spine first.
-  const routeKeys = (lineId: string, dir: string) => {
-    const base = `${lineId}|${dir}`;
-    return Object.keys(ROUTES).filter((k) => k === base || k.startsWith(base + "|") ).sort();
-  };
-
   const pins: Pin[] = [];
   for (const r of wanted) {
-    // Pick the route (main or branch) whose stops the vehicle's predictions land on.
-    let key = "", offOf = new Map<string, number>(), seq: Prediction[] = [];
-    for (const k of routeKeys(r.lineId, r.dir)) {
+    // Position purely from geometry, not TfL's `direction` field (unreliable on the
+    // renamed Overground lines — at Dalston Junction every Windrush train, north- or
+    // southbound, is labelled "outbound"). Try each of the line's spines; the one the
+    // vehicle is really travelling is the one where its time-ordered calling points
+    // run in *increasing* offset. The reverse spine yields only decreasing pairs and
+    // is skipped, so the correct direction (and branch) falls out on its own.
+    let key = "", p0!: Prediction, p1!: Prediction, s0 = -1, s1 = -1;
+    for (const k of routeKeysFor(r.lineId)) {
       if (!ROUTES[k]?.stops) continue;
       const off = new Map(ROUTES[k].stops.map((s) => [s[2], s[3]] as const));
-      const s = (byId.get(r.vehicleId) ?? [])
-        .filter((p) => p.lineId === r.lineId && p.direction === r.dir && off.has(p.naptanId ?? ""))
+      const seq = (byId.get(r.vehicleId) ?? [])
+        .filter((p) => p.lineId === r.lineId && off.has(p.naptanId ?? ""))
         .sort((a, b) => a.timeToStation - b.timeToStation);
-      if (s.length >= 2) { key = k; offOf = off; seq = s; break; }
-    }
-    if (!key) continue;
-
-    // Two predicted stops with increasing offset along the track give the speed;
-    // back-project the train from the nearer one by its remaining time.
-    let p0 = seq[0], p1 = seq[1], s0 = -1, s1 = -1;
-    for (let a = 0; a < seq.length - 1 && s1 < 0; a++) {
-      const oa = offOf.get(seq[a].naptanId ?? "")!;
-      for (let b = a + 1; b < seq.length; b++) {
-        const ob = offOf.get(seq[b].naptanId ?? "")!;
-        if (ob > oa) { s0 = oa; s1 = ob; p0 = seq[a]; p1 = seq[b]; break; }
+      if (seq.length < 2) continue;
+      for (let a = 0; a < seq.length - 1 && s1 < 0; a++) {
+        const oa = off.get(seq[a].naptanId ?? "")!;
+        for (let b = a + 1; b < seq.length; b++) {
+          const ob = off.get(seq[b].naptanId ?? "")!;
+          if (ob > oa) { key = k; s0 = oa; s1 = ob; p0 = seq[a]; p1 = seq[b]; break; }
+        }
       }
+      if (key) break;
     }
-    if (s0 < 0 || s1 < 0) continue;
+    if (!key || s0 < 0 || s1 < 0) continue;
 
     const dt = p1.timeToStation - p0.timeToStation;
     let speed = dt > 0 && s1 > s0 ? (s1 - s0) / dt : FALLBACK_SPEED;
@@ -272,8 +283,16 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     const s = Math.min(s0, Math.max(0, s0 - p0.timeToStation * speed));
     const at = pointAt(key, s);
 
+    // The spine we matched IS the vehicle's real travel direction (TfL's own
+    // `direction` field can't be trusted — see above), so read into/out from it via
+    // the station's serve map rather than from the row, which was built on that bad
+    // field. "windrush|inbound|<branch>" -> serve["windrush|inbound"]. Fixes trains
+    // whose row said "in" but are actually heading out (Windrush at Dalston Junction).
+    const spineDir = key.split("|").slice(0, 2).join("|");
+    const london = SERVE[r.stationId]?.[spineDir] ?? r.london;
+
     pins.push({
-      line: r.line, lineId: r.lineId, london: r.london, to: r.to, station: r.station, stationId: r.stationId,
+      line: r.line, lineId: r.lineId, london, to: r.to, station: r.station, stationId: r.stationId,
       lat: at.lat, lon: at.lon, bearing: at.bearing, etaMin: r.etaMin, expected: r.expected,
       vehicleId: r.vehicleId, estimated: true,
     });
@@ -398,6 +417,15 @@ export async function cycleBoard(env: Env) {
     withTimeout(nrPins(env, rows), 9000),
   ]);
   const pins = [...tflP, ...nrP];
+
+  // Correct each row's into/out from its pin, whose direction we derived from the
+  // geometry rather than TfL's unreliable `direction` field. Only TfL pins carry a
+  // correction; NR rows (RTT, reliable) and unplaced trains keep their own london.
+  const trueLondon = new Map(tflP.map((p) => [p.vehicleId, p.london]));
+  for (const r of rows) {
+    const l = trueLondon.get(r.vehicleId);
+    if (l) r.london = l;
+  }
 
   const soonest = (a: CycleRow, b: CycleRow) => {
     const ta = a.expected ? Date.parse(a.expected) : Date.now() + a.etaMin * 60000;
