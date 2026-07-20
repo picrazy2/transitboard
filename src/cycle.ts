@@ -370,9 +370,12 @@ export async function cycleBoard(env: Env) {
     lineStatus(env).catch(() => [] as LineStatus[]),
   ]);
   const rows = rowsPerStation.flat();
-  // Pins are best-effort: never let a slow fan-out hold up the board.
+  // Pins are best-effort: never let a slow fan-out hold up the board, but tell the
+  // client if a pin pass timed out so it can flag that positions are incomplete.
+  let pinsTimedOut = false;
   const withTimeout = (p: Promise<Pin[]>, ms: number): Promise<Pin[]> =>
-    Promise.race([p.catch(() => [] as Pin[]), new Promise<Pin[]>((res) => setTimeout(() => res([]), ms))]);
+    Promise.race([p.catch(() => [] as Pin[]),
+      new Promise<Pin[]>((res) => setTimeout(() => { pinsTimedOut = true; res([]); }, ms))]);
   const [tflP, nrP] = await Promise.all([
     withTimeout(trainPins(env, rows), 15000),
     withTimeout(nrPins(env, rows), 9000),
@@ -387,6 +390,6 @@ export async function cycleBoard(env: Env) {
   return {
     into: rows.filter((r) => r.london === "in").sort(soonest),
     out: rows.filter((r) => r.london === "out").sort(soonest),
-    pins, status, weather: wx, cycMin: data.limitMin, ts: Math.floor(Date.now() / 1000),
+    pins, pinsTimedOut, status, weather: wx, cycMin: data.limitMin, ts: Math.floor(Date.now() / 1000),
   };
 }

@@ -161,7 +161,7 @@ function normalize(mode, p){
   // Pin key matches its row's group key so focus/stop/vehicle taps resolve it.
   const pins = (p.pins ?? []).map(v => ({...v, mode:"rail", serving:true,
     key:`${v.lineId}|${v.to}|${v.stationId ?? ""}`}));
-  return {rows, pins, status:p.status ?? [], weather:p.weather, ts:p.ts, cycMin:p.cycMin};
+  return {rows, pins, status:p.status ?? [], weather:p.weather, ts:p.ts, cycMin:p.cycMin, pinsTimedOut:!!p.pinsTimedOut};
 }
 
 // ---------- filtering state ----------
@@ -470,6 +470,12 @@ const DIM = {line:.06, stop:.1, pin:.12};
 const FIT = {paddingTopLeft:[16,34], paddingBottomRight:[16,16], maxZoom:19};
 const GONE = "#5a6070";
 const pinLayer = L.layerGroup().addTo(map);
+// Shown when the server flags that positioning timed out, so an empty map reads
+// as "couldn't load" rather than "no trains".
+const pinWarn = document.createElement("div");
+pinWarn.className = "pinwarn"; pinWarn.hidden = true;
+pinWarn.innerHTML = "&#9888; live positions unavailable";
+mapPanel.appendChild(pinWarn);
 const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
 const compass = brg => COMPASS[Math.round((brg % 360) / 45) % 8];
 const isFull = () => mapPanel.classList.contains("full");
@@ -644,6 +650,7 @@ function allPins(){
 const isPassed = v => v.serving === false || countdown(v.expected, v.etaMin).secs <= 0;
 function renderPins(){
   pinLayer.clearLayers();
+  pinWarn.hidden = !(MB && MB.pinsTimedOut);
   const keep = v => onMap(v.line) && (showPassed || !isPassed(v));
   for(const v of allPins().filter(keep)){
     const rail = v.mode === "rail";
