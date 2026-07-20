@@ -104,6 +104,53 @@ function renderWeather(w){
         &nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>` : ""}</div>`;
 }
 
+// ---------- weather modal ----------
+// Tap the header weather to open a fuller forecast: current detail, the next 24
+// hours, and the 7-day outlook.
+const wxModal = document.createElement("div");
+wxModal.className = "wxmodal"; wxModal.hidden = true;
+document.body.appendChild(wxModal);
+wxModal.addEventListener("click", e => {
+  if(e.target === wxModal || e.target.closest(".wxclose")) wxModal.hidden = true;
+});
+document.addEventListener("keydown", e => { if(e.key === "Escape") wxModal.hidden = true; });
+wx.style.cursor = "pointer";
+wx.addEventListener("click", () => { if(MB?.weather){ renderWxModal(MB.weather); wxModal.hidden = false; } });
+
+const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function renderWxModal(w){
+  const hrs = (w.hours ?? []).map(h => `
+    <div class="wxh"><span class="t">${hhmm(h.at).replace(/:\d\d/,"")}</span>
+      <span class="i">${wmoIcon(h.code, h.isDay)}</span>
+      <b>${Math.round(h.tempC)}°</b>
+      <span class="p">${h.pop > 0 ? h.pop + "%" : ""}</span></div>`).join("");
+  const days = (w.days ?? []).map((d, i) => {
+    const dow = DOW[new Date(d.at * 1000).getDay()];
+    return `<div class="wxd"><span class="dn">${i === 0 ? "Today" : dow}</span>
+      <span class="i">${wmoIcon(d.code, true)}</span>
+      <span class="pp">${d.pop > 0 ? d.pop + "%" : ""}</span>
+      <span class="hl"><b>${Math.round(d.maxC)}°</b> <span class="lo">${Math.round(d.minC)}°</span></span></div>`;
+  }).join("");
+  wxModal.innerHTML = `<div class="wxsheet">
+    <button class="wxclose" aria-label="Close">&times;</button>
+    <div class="wxnow">
+      <span class="bigicon">${wmoIcon(w.code, w.isDay)}</span>
+      <div class="bignow"><div class="bigtemp">${Math.round(w.tempC)}°</div>
+        <div class="cond">${esc(wmoLabel(w.code))}</div></div>
+      <div class="wxstats">
+        ${w.feelsC != null ? `<div>Feels like <b>${Math.round(w.feelsC)}°</b></div>` : ""}
+        ${w.windKph != null ? `<div>Wind <b>${w.windKph} km/h</b></div>` : ""}
+        ${w.humidity != null ? `<div>Humidity <b>${w.humidity}%</b></div>` : ""}
+        <div>Today <b>${Math.round(w.maxC)}°</b> / ${Math.round(w.minC)}°</div>
+      </div>
+    </div>
+    <div class="wxsec">Next 24 hours</div>
+    <div class="wxhours">${hrs}</div>
+    <div class="wxsec">7-day forecast</div>
+    <div class="wxdays">${days}</div>
+  </div>`;
+}
+
 // ---------- countdown ----------
 function countdown(iso, fallbackMin){
   if(!iso) return {text: fallbackMin === 0 ? "Due" : `${fallbackMin} min`, secs: fallbackMin * 60};
