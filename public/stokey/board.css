@@ -318,6 +318,7 @@ body.planning .chiprow{display:none}
 .jparrow{color:var(--muted);font-size:12px}
 .jpmeta{font-size:11.5px;color:var(--muted);margin-top:5px}
 .jplegs{margin-top:11px;padding-top:11px;border-top:1px solid var(--rule);display:flex;flex-direction:column}
+.jplegs[hidden],.jptimes[hidden]{display:none}
 .jpleg{display:flex;gap:10px}
 .jplegrail{display:flex;flex-direction:column;align-items:center;flex:none;width:12px}
 .jplegrail::before{content:"";flex:1;width:2px;background:var(--c);opacity:.5}
@@ -339,3 +340,22 @@ body.planning .chiprow{display:none}
   #jpPanel{order:1}
   .jpsearch{width:min(340px,calc(100% - 24px))}
 }
+
+/* Journey planner — Material icons + collapsible options + live times */
+.mi{vertical-align:-.15em;flex:none}
+.jplegchip .mi{vertical-align:-.2em}
+.jpicon{display:inline-flex;color:var(--muted)}
+.jpx{display:inline-flex;align-items:center;color:var(--muted)}
+.jpback{display:inline-flex;align-items:center;justify-content:center}
+.jptabs button{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+.jpopthead{cursor:pointer}
+.jpcaret{margin-left:auto;color:var(--muted);display:inline-flex;align-self:center;transition:transform .18s ease}
+.jpopt.open .jpcaret{transform:rotate(180deg)}
+.jpmore{margin-top:7px;background:transparent;border:1px solid var(--rule);color:var(--ink);
+        border-radius:7px;padding:4px 10px;font:700 11.5px system-ui;cursor:pointer}
+.jpmore:hover{border-color:#3a4356}
+.jptimes{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.jptime{display:flex;align-items:baseline;gap:9px;font-size:12px}
+.jptime b{min-width:48px;color:var(--ink);font-weight:800}
+.jptime span{color:var(--muted);font-size:11.5px}
+.jptime.jpnolive{color:var(--muted)}

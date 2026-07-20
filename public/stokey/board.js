@@ -1007,27 +1007,43 @@ setInterval(() => {
 // mode the left cards + filters are replaced by ranked options; every option is
 // sketched on the map, and tapping one frames it with per-leg styling + an accordion.
 const jpLayer = L.layerGroup().addTo(map);
-const JP = { active:false, dest:null, mode:MODE, options:[], sel:-1, places:[], geoTok:0, loadTok:0 };
-const LEG_ICON = l => l.kind === "walk" ? "🚶" : l.kind === "cycle" ? "🚲" : l.mode === "bus" ? "🚌" : "🚆";
+const JP = { active:false, dest:null, mode:MODE, options:[], sel:-1, expanded:-1, places:[], geoTok:0, loadTok:0 };
+
+// Google Material icons (inline SVG, so no external font — works offline in the PWA).
+const MI = {
+  search:`<path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.49 4.49 0 0 1 9.5 14z"/>`,
+  close:`<path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`,
+  back:`<path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/>`,
+  walk:`<path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9 7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6z"/>`,
+  bike:`<path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm5.8-10 2.4-2.4.8.8c1.3 1.3 3 2.1 5.1 2.1V9c-1.5 0-2.7-.6-3.6-1.5l-1.9-1.9c-.5-.4-1-.6-1.6-.6s-1.1.2-1.4.6L7.8 8.4c-.4.4-.6.9-.6 1.4 0 .6.2 1.1.6 1.4L11 14v5h2v-6.2zM19 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5z"/>`,
+  bus:`<path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM18 11H6V6h12z"/>`,
+  train:`<path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM11 10H6V6h5zm2 0V6h5v4zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>`,
+  expand:`<path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/>`,
+};
+const mi = (name, size = 16) => `<svg class="mi" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${MI[name]}</svg>`;
+const LEG_ICON = l => mi(l.kind === "walk" ? "walk" : l.kind === "cycle" ? "bike" : l.mode === "bus" ? "bus" : "train", 15);
+// Transit legs use the board's own line colours (so Windrush is its real red, etc.);
+// walk/cycle keep the mode colour from the backend.
+const legColor = l => l.kind === "transit" && l.line ? colorOf(l.line) : l.color;
 
 function injectPlanner(){
   const search = document.createElement("div");
   search.className = "jpsearch";
   search.innerHTML =
-    `<div class="jpbar"><span class="jpicon">🔍</span>
+    `<div class="jpbar"><span class="jpicon">${mi("search", 18)}</span>
       <input id="jpInput" type="text" placeholder="Plan a journey — address or postcode" autocomplete="off" spellcheck="false">
-      <button id="jpClear" class="jpx" hidden title="Clear">&times;</button></div>
+      <button id="jpClear" class="jpx" hidden title="Clear">${mi("close", 20)}</button></div>
      <div class="jpresults" id="jpResults" hidden></div>`;
   mapPanel.appendChild(search);
 
   const panel = document.createElement("section");
   panel.className = "panel jppanel"; panel.id = "jpPanel"; panel.hidden = true;
   panel.innerHTML =
-    `<div class="jphead"><button class="jpback" id="jpBack" title="Back to board">&#8592;</button>
+    `<div class="jphead"><button class="jpback" id="jpBack" title="Back to board">${mi("back", 20)}</button>
        <div><div class="jptitle" id="jpTitle"></div><div class="jpsub" id="jpSub"></div></div></div>
      <div class="jptabs" id="jpTabs">
-       <button data-jm="walk">🚶 Walk + transit</button>
-       <button data-jm="cycle">🚲 Cycle + transit</button></div>
+       <button data-jm="walk">${mi("walk", 15)} Walk + transit</button>
+       <button data-jm="cycle">${mi("bike", 15)} Cycle + transit</button></div>
      <div class="jpoptions" id="jpOptions"></div>`;
   cols.insertBefore(panel, mapPanel);
 
@@ -1084,17 +1100,22 @@ function jpPick(place){
   hideInfo();
   renderPins();               // clears board pins while planning
   applyMapFilter();           // hide board stops/lines
+  requestAnimationFrame(() => map.invalidateSize());  // grid switched from 3-col to 2-col
   jpLoad();
 }
 
 function jpExit(){
-  JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1;
+  JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1; JP.expanded = -1; JP.places = [];
   document.body.classList.remove("planning");
   cols.classList.remove("planning");
   document.getElementById("jpPanel").hidden = true;
+  const input = document.getElementById("jpInput");
+  input.value = ""; document.getElementById("jpClear").hidden = true;
+  document.getElementById("jpResults").hidden = true;
+  document.getElementById("jpOptions").innerHTML = "";
   jpLayer.clearLayers();
   renderAll();
-  if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); }
+  requestAnimationFrame(() => { map.invalidateSize(); if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); } });
 }
 
 async function jpLoad(){
@@ -1107,7 +1128,7 @@ async function jpLoad(){
     const d = await r.json();
     if(tok !== JP.loadTok) return;
     JP.options = d.options || [];
-    JP.sel = JP.options.length ? 0 : -1;
+    JP.sel = -1; JP.expanded = -1;    // options start collapsed; overview shows them all on the map
     jpRenderOptions(); jpDrawMap(); jpFit();
   }catch{ if(tok === JP.loadTok) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
@@ -1116,70 +1137,95 @@ function jpRenderOptions(){
   const opts = document.getElementById("jpOptions");
   if(!JP.options.length){ opts.innerHTML = `<div class="jperr">No routes found for this trip.</div>`; return; }
   opts.innerHTML = JP.options.map((o,i) => {
+    const open = i === JP.expanded;
     const chips = o.legs.map(l =>
-      `<span class="jplegchip" style="--c:${l.color}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
+      `<span class="jplegchip" style="--c:${legColor(l)}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
     ).join(`<span class="jparrow">›</span>`);
     const tag = o.kind === "full-walk" ? "Full walk" : o.kind === "full-cycle" ? "Full cycle"
               : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
     const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : ""].filter(Boolean).join(" · ");
     const arr = o.arr ? `arrive ${to12h(new Date(o.arr))}` : "";
-    return `<div class="jpopt ${i === JP.sel ? "sel" : ""}" data-i="${i}">
+    return `<div class="jpopt ${i === JP.sel ? "sel" : ""} ${open ? "open" : ""}" data-i="${i}">
       <div class="jpopthead">
         <div class="jpdur">${o.duration}<span>min</span></div>
         <div class="jpmid"><div class="jpchips">${chips}</div>
           <div class="jpmeta">${tag}${extra ? " · " + extra : ""}${arr ? " · " + arr : ""}</div></div>
+        <span class="jpcaret">${mi("expand", 20)}</span>
       </div>
-      <div class="jplegs" ${i === JP.sel ? "" : "hidden"}>${o.legs.map(jpLegRow).join("")}</div>
+      <div class="jplegs" ${open ? "" : "hidden"}>${o.legs.map((l, li) => jpLegRow(l, i, li)).join("")}</div>
     </div>`;
   }).join("");
   for(const card of opts.querySelectorAll(".jpopt"))
-    card.addEventListener("click", () => jpSelect(+card.dataset.i));
-  const sel = opts.querySelector(".jpopt.sel");
-  if(sel) sel.scrollIntoView({block:"nearest"});
+    card.querySelector(".jpopthead").addEventListener("click", () => jpToggle(+card.dataset.i));
+  for(const b of opts.querySelectorAll(".jpmore"))
+    b.addEventListener("click", e => { e.stopPropagation(); jpSeeMore(+b.dataset.o, +b.dataset.l, b); });
 }
 
-function jpLegRow(l){
+function jpLegRow(l, oi, li){
   const to = shortStop(l.to) || shortDest(l.to);
   const title = l.kind === "transit" ? `${l.label}${l.line ? " " + esc(l.line) : ""} → ${esc(shortDest(l.to))}`
               : l.kind === "cycle" ? `Cycle to ${esc(to)}`
               : `Walk to ${esc(to)}`;
   const dep = l.dep ? to12h(new Date(l.dep)) : "";
-  const time = l.kind === "transit" && dep ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
-  return `<div class="jpleg" style="--c:${l.color}">
+  const meta = l.kind === "transit" && dep
+    ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
+  const more = l.kind === "transit" && l.fromId && l.lineId
+    ? `<button class="jpmore" data-o="${oi}" data-l="${li}">See more times</button><div class="jptimes" hidden></div>` : "";
+  return `<div class="jpleg" style="--c:${legColor(l)}">
     <div class="jplegrail"><span class="jplegdot"></span></div>
     <div class="jplegbody"><div class="jplegtitle">${LEG_ICON(l)} ${title} <span class="jplegdur">${l.duration}m</span></div>
-      ${l.instruction && l.kind !== "transit" ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : ""}${time}</div>
+      ${l.instruction && l.kind !== "transit" ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : ""}${meta}${more}</div>
   </div>`;
 }
 
-function jpSelect(i){
-  JP.sel = (JP.sel === i) ? -1 : i;   // tap selected again to collapse? keep selected, just toggle accordion
-  if(JP.sel < 0) JP.sel = i;          // always keep one selected
+// Tap an option: expand its legs (accordion — one open at a time) and draw + frame it.
+function jpToggle(i){
+  if(JP.expanded === i){ JP.expanded = -1; JP.sel = -1; }   // collapse -> back to overview
+  else { JP.expanded = i; JP.sel = i; }
   jpRenderOptions(); jpDrawMap(); jpFit();
+  if(JP.expanded === i){
+    const card = document.querySelector(`.jpopt[data-i="${i}"]`);
+    if(card) card.scrollIntoView({block:"nearest", behavior:"smooth"});
+  }
+}
+
+// Live upcoming departures for a transit leg's boarding stop.
+async function jpSeeMore(oi, li, btn){
+  const box = btn.nextElementSibling;
+  if(!box.hidden){ box.hidden = true; btn.textContent = "See more times"; return; }
+  const leg = JP.options[oi]?.legs[li]; if(!leg) return;
+  btn.textContent = "Loading…";
+  try{
+    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&line=${encodeURIComponent(leg.lineId)}`);
+    const d = await r.json();
+    const deps = d.departures || [];
+    box.innerHTML = deps.length
+      ? deps.map(x => `<div class="jptime"><b>${x.etaMin === 0 ? "Due" : x.etaMin + " min"}</b><span>${to12h(new Date(x.expected))} → ${esc(shortDest(x.to))}</span></div>`).join("")
+      : `<div class="jptime jpnolive">No live times right now</div>`;
+    box.hidden = false; btn.textContent = "Hide times";
+  }catch{ btn.textContent = "See more times"; }
 }
 
 function jpDrawMap(){
   jpLayer.clearLayers();
-  // Unselected options: faint hint lines. Selected: bold, styled per leg, labelled.
+  // Overview: every option faint. Expanded: that one bold, styled per leg, labelled.
   JP.options.forEach((o,i) => { if(i !== JP.sel) for(const l of o.legs) jpLeg(l, false); });
+  jpEndpoint(homeLatLng(), "#20c05b");
+  jpEndpoint([JP.dest.lat, JP.dest.lon], "#e6e8ee");
   const o = JP.options[JP.sel]; if(!o) return;
   for(const l of o.legs) jpLeg(l, true);
-  // endpoints
-  jpEndpoint(homeLatLng(), "#20c05b", "Home");
-  jpEndpoint([JP.dest.lat, JP.dest.lon], "#e6e8ee", JP.dest.name);
-  // per-leg labels at the midpoint of each drawn leg
   for(const l of o.legs){
     if(l.path.length < 2) continue;
     const mid = l.path[Math.floor(l.path.length / 2)];
     const txt = l.line ? `${LEG_ICON(l)} ${esc(l.line)}` : `${LEG_ICON(l)} ${l.duration}m`;
     L.marker(mid, {interactive:false, icon:L.divIcon({className:"", iconSize:[0,0], html:
-      `<div class="jpleglabel" style="--c:${l.color}">${txt}</div>`})}).addTo(jpLayer);
+      `<div class="jpleglabel" style="--c:${legColor(l)}">${txt}</div>`})}).addTo(jpLayer);
   }
 }
 function jpLeg(l, bold){
   if(l.path.length < 2) return;
   const dash = l.kind === "walk" ? "1 8" : l.kind === "cycle" ? "2 8" : null;
-  L.polyline(l.path, {color:l.color, weight: bold ? 6 : 3, opacity: bold ? .95 : .28,
+  L.polyline(l.path, {color:legColor(l), weight: bold ? 6 : 3, opacity: bold ? .95 : .28,
     dashArray:dash, lineCap:"round", lineJoin:"round"}).addTo(jpLayer);
 }
 function jpEndpoint(latlng, color, label){
@@ -1189,10 +1235,12 @@ function jpEndpoint(latlng, color, label){
 function homeLatLng(){ const h = (geoCache[MODE]?.features || []).find(f => f.properties.kind === "home"); return h ? [h.geometry.coordinates[1], h.geometry.coordinates[0]] : HOME; }
 
 function jpFit(){
-  const o = JP.options[JP.sel]; if(!o) return;
   const pts = [];
-  for(const l of o.legs) for(const p of l.path) pts.push(p);
-  pts.push(homeLatLng(), [JP.dest.lat, JP.dest.lon]);
+  // Expanded: frame that option. Overview (nothing expanded): frame home + dest so
+  // every option is on screen at once.
+  const legs = JP.sel >= 0 ? (JP.options[JP.sel]?.legs ?? []) : JP.options.flatMap(o => o.legs);
+  for(const l of legs) for(const p of l.path) pts.push(p);
+  if(JP.dest) pts.push(homeLatLng(), [JP.dest.lat, JP.dest.lon]);
   if(pts.length >= 2) map.fitBounds(L.latLngBounds(pts), {paddingTopLeft:[16,58], paddingBottomRight:[16,16], maxZoom:16, animate:true});
 }
 

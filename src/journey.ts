@@ -36,6 +36,7 @@ export interface JLeg {
   duration: number;     // minutes
   from: string;
   to: string;
+  fromId: string | null; // boarding-stop naptan, for live "see more" departures
   dep: string | null;   // ISO
   arr: string | null;
   instruction: string;
@@ -75,6 +76,7 @@ function parseLeg(l: any): JLeg {
     duration: Math.round(num(l.duration)),
     from: l.departurePoint?.commonName ?? "",
     to: l.arrivalPoint?.commonName ?? "",
+    fromId: l.departurePoint?.naptanId ?? l.departurePoint?.icsCode ?? null,  // for live "see more" departures
     dep: l.departureTime ?? null,
     arr: l.arrivalTime ?? null,
     instruction: l.instruction?.summary ?? "",
@@ -144,6 +146,25 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   }).sort((a, b) => a.duration - b.duration).slice(0, 6);
 
   return { options, dest: { lat: toLat, lon: toLon } };
+}
+
+// ---------- live departures for a leg ("see more") ----------
+export interface Departure { etaMin: number; expected: string; to: string; live: boolean; }
+export async function legDepartures(env: Env, stopId: string, lineId: string): Promise<Departure[]> {
+  const qs = new URLSearchParams();
+  if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
+  try {
+    const r = await fetch(`${TFL}/StopPoint/${encodeURIComponent(stopId)}/Arrivals?${qs}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" }, cf: { cacheTtl: 15, cacheEverything: true },
+    });
+    if (!r.ok) return [];
+    const preds: any[] = await r.json();
+    return preds
+      .filter(p => !lineId || p.lineId === lineId)
+      .map(p => ({ etaMin: Math.max(0, Math.round(p.timeToStation / 60)), expected: p.expectedArrival, to: (p.destinationName ?? p.towards ?? "").replace(/\s+(Rail|Underground)?\s*Station$/i, ""), live: true }))
+      .sort((a, b) => a.etaMin - b.etaMin)
+      .slice(0, 6);
+  } catch { return []; }
 }
 
 // ---------- geocoding ----------

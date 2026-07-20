@@ -1,0 +1,15 @@
+# The wallboard updates often; keep the shell + shared code always-fresh so an
+# iPad kiosk picks up deploys on reload instead of serving stale cached CSS/JS.
+# (Cloudflare still 304s via ETag when nothing changed, so it's cheap.)
+/stokey/board.js
+  Cache-Control: no-cache
+/stokey/board.css
+  Cache-Control: no-cache
+/stokey/
+  Cache-Control: no-cache
+/stokey/cycle/
+  Cache-Control: no-cache
+/stokey/index.html
+  Cache-Control: no-cache
+/stokey/cycle/index.html
+  Cache-Control: no-cache
