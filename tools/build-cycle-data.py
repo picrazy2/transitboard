@@ -41,6 +41,14 @@ SPINE = {
 }
 SNAP_M = 220                        # a stop further than this from the spine is off-branch
 
+# Prefer a specific station for a line over the marginally-nearer one, when it is a
+# much better interchange for the way you actually travel. Finsbury Park (Victoria,
+# Great Northern, Thameslink — a real gateway into London) is preferred for the
+# Piccadilly over Manor House, which is a shade closer but a dead-end for onward
+# travel. Its Piccadilly (TfL) and Great Northern/Thameslink (RTT) merge into one
+# station. naptan is the Underground stop so /StopPoint arrivals return the tube.
+PREFER = {"piccadilly": "940GZZLUFPK"}   # lineId -> station naptan to serve it from
+
 # For *drawing* the whole line, every branch — not just the spine. One relation
 # per distinct branch; shared trunk ways are de-duplicated by OSM way id, so
 # overlap is free. The spine above still positions the pins (a train near us is
@@ -423,7 +431,16 @@ for s in nr_stations:
         names[lid] = s["names"][lid]
         offer(f"nr|{lid}|{lon}", s["id"], s["cyc_s"])
 nearest = {k: v[1] for k, v in nearest.items()}
-nr_ids = {s["id"] for s in nr_stations}
+
+# Apply PREFER overrides: hand a line's wins to the preferred station (which must be
+# a real candidate for that line + direction), dropping the nearest one.
+for k in list(nearest):
+    if k.startswith("nr|"):
+        continue
+    lid, d = k.split("|", 2)[0], k.split("|", 2)[1]
+    pref = PREFER.get(lid)
+    if pref and (pref, lid, d) in dir_london:
+        nearest[k] = pref
 
 serve, primary_ll = {}, {}
 for key, sid in nearest.items():
@@ -437,30 +454,43 @@ for key, sid in nearest.items():
         serve[sid][f"{lid}|{d}"] = lon
         primary_ll.setdefault(sid, set()).add(f"{lid}|{lon}")
 
+# Merge co-located Finsbury Park before building the board: the TfL Piccadilly
+# winner absorbs the National Rail one, so there is one station (and one map dot)
+# that fetches Piccadilly via TfL and GN/Thameslink via RTT.
+FP_TUBE, FP_NR = "940GZZLUFPK", "910GFNPK"
+nr_extra = {}   # tube naptan -> the absorbed NR station dict (crs / opLines / served)
+if FP_TUBE in primary_ll and FP_NR in primary_ll:
+    primary_ll[FP_TUBE] |= primary_ll.pop(FP_NR)
+    nr_extra[FP_TUBE] = sta[FP_NR]
+    print("  merged Finsbury Park: Piccadilly (TfL) + Great Northern/Thameslink (RTT)")
+
 board = sorted((sta[i] for i in primary_ll), key=lambda s: s["cyc_s"])
 lines_won = {k.split("|")[0] for pl in primary_ll.values() for k in pl}
 print(f"  dedup -> {len(board)} stations, {len(lines_won)} lines")
 for s in board:
     lines = sorted({names[k.split('|')[0]] for k in primary_ll[s["id"]]})
-    print(f"  {'NR' if s['id'] in nr_ids else '  '} {s['cyc_min']:>4}min  {s['name'][:22]:<23} {', '.join(lines)}")
+    tag = "NR" if (s["id"] in nr_ids or s["id"] in nr_extra) else "  "
+    print(f"  {tag} {s['cyc_min']:>4}min  {s['name'][:22]:<23} {', '.join(lines)}")
 
-# Every station carries the same keys so cycle.ts sees one shape. An NR station
-# fills opLines/destDir/nrServe and leaves serve empty; a TfL station the reverse.
+# Every station carries the same keys so cycle.ts sees one shape. `serve` drives
+# the TfL fetch, the National-Rail fields drive the RTT fetch; a merged station has
+# both. `nrst` is the National Rail source (the station itself, or the absorbed one).
 station_objs = []
 for s in board:
-    sid = s["id"]; is_nr = sid in nr_ids
+    sid = s["id"]
+    nrst = sta[sid] if sid in nr_ids else nr_extra.get(sid)
     won = sorted({k.split("|")[0] for k in primary_ll[sid]})
     station_objs.append({
         "id": sid, "name": s["name"], "lat": s["lat"], "lon": s["lon"],
         "cycMin": s["cyc_min"], "modes": s.get("modes", []),
         "serve": serve.get(sid, {}),
         "lineNames": {lid: names[lid] for lid in won},
-        "nr": is_nr, "crs": s.get("crs", ""),
+        "nr": nrst is not None, "crs": nrst["crs"] if nrst else "",
         # RTT runtime: operatorCode -> line, destination name -> in/out, and the
         # (line, london) pairs actually won (so a station shows only those).
-        "opLines": {op: v for op, v in s.get("opLines", {}).items() if v["lineId"] in won} if is_nr else {},
-        "destDir": s.get("destDir", {}) if is_nr else {},
-        "nrServe": sorted(primary_ll[sid]) if is_nr else [],
+        "opLines": {op: v for op, v in nrst["opLines"].items() if v["lineId"] in won} if nrst else {},
+        "destDir": nrst["destDir"] if nrst else {},
+        "nrServe": sorted(f"{lid}|{lon}" for lid, lon in nrst["served"]) if nrst else [],
     })
 
 # ---------- 4. write ----------

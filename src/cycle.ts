@@ -365,7 +365,14 @@ async function lineStatus(env: Env): Promise<LineStatus[]> {
 
 export async function cycleBoard(env: Env) {
   const [rowsPerStation, wx, status] = await Promise.all([
-    Promise.all(data.stations.map((s) => (s.nr ? rttRows(env, s) : stationRows(env, s)))),
+    // A station may be TfL (serve), National Rail (nr), or both (Finsbury Park is
+    // Piccadilly via TfL and Great Northern/Thameslink via RTT) — fetch each source.
+    Promise.all(data.stations.map(async (s) => {
+      const parts: Promise<CycleRow[]>[] = [];
+      if (Object.keys(s.serve).length) parts.push(stationRows(env, s));
+      if (s.nr) parts.push(rttRows(env, s));
+      return (await Promise.all(parts)).flat();
+    })),
     weather(data.home.lat, data.home.lon).catch(() => null),
     lineStatus(env).catch(() => [] as LineStatus[]),
   ]);

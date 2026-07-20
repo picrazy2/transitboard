@@ -148,11 +148,11 @@
       "nrServe": []
     },
     {
-      "id": "940GZZLUMRH",
-      "name": "Manor House",
-      "lat": 51.570738,
-      "lon": -0.096118,
-      "cycMin": 8.5,
+      "id": "940GZZLUFPK",
+      "name": "Finsbury Park",
+      "lat": 51.564158,
+      "lon": -0.106825,
+      "cycMin": 9.4,
       "modes": [
         "tube"
       ],
@@ -161,26 +161,8 @@
         "piccadilly|outbound": "out"
       },
       "lineNames": {
-        "piccadilly": "Piccadilly"
-      },
-      "nr": false,
-      "crs": "",
-      "opLines": {},
-      "destDir": {},
-      "nrServe": []
-    },
-    {
-      "id": "910GFNPK",
-      "name": "Finsbury Park",
-      "lat": 51.564302,
-      "lon": -0.106285,
-      "cycMin": 9.3,
-      "modes": [
-        "national-rail"
-      ],
-      "serve": {},
-      "lineNames": {
         "great-northern": "Great Northern",
+        "piccadilly": "Piccadilly",
         "thameslink": "Thameslink"
       },
       "nr": true,
@@ -196,18 +178,14 @@
         }
       },
       "destDir": {
-        "Cambridge": "out",
-        "Hertford North": "out",
+        "Horsham": "in",
         "Moorgate": "in",
         "Welwyn Garden City": "out",
         "London Kings Cross": "in",
-        "Brighton": "in",
-        "Gordon Hill": "out",
         "Peterborough": "out",
         "Stevenage": "out",
-        "Sevenoaks": "in",
-        "Horsham": "in",
-        "Royston": "out"
+        "Cambridge": "out",
+        "Brighton": "in"
       },
       "nrServe": [
         "great-northern|in",
