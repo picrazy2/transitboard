@@ -41,6 +41,11 @@ SPINE = {
 }
 SNAP_M = 220                        # a stop further than this from the spine is off-branch
 
+# Extra branch geometry for positioning trains a line's main spine doesn't cover.
+# The Weaver spine is the Enfield branch, so a Chingford train (caught at Clapton)
+# has no track to ride; this gives it one, emitted as "weaver|<dir>|chingford".
+BRANCH_SPINE = {"weaver": {"chingford": 9683729}}
+
 # Prefer a specific station for a line over the marginally-nearer one, when it is a
 # much better interchange for the way you actually travel. Finsbury Park (Victoria,
 # Great Northern, Thameslink — a real gateway into London) is preferred for the
@@ -56,7 +61,7 @@ PREFER = {"piccadilly": "940GZZLUFPK"}   # lineId -> station naptan to serve it 
 BRANCHES = {
     "victoria":    [6354920],                              # no branches
     "suffragette": [419512],                               # no branches
-    "weaver":      [9105028, 9105027],                     # Enfield Town + Cheshunt
+    "weaver":      [9105028, 9105027, 9683729],            # Enfield Town + Cheshunt + Chingford
     "mildmay":     [6413186, 9674325],                     # Richmond + Clapham Junction
     "piccadilly":  [102788, 7703380, 7703382],             # Heathrow T5 + T4 loop + Uxbridge
     "windrush":    [959677, 660463, 660462, 2755611, 10028997],  # Crystal Palace/New Cross/W Croydon/Clapham Jn/Battersea
@@ -656,6 +661,38 @@ for (lid, d), order in seq_of.items():
             dedup.append(s)
     if len(dedup) >= 2:
         routes[f"{lid}|{d}"] = {"track": [[round(x, 5), round(y, 5)] for x, y in poly], "stops": dedup}
+
+# Branch routes: snap a line's stops onto an extra branch spine, so trains on a
+# branch the main spine can't reach (Chingford) can still be positioned. Keyed
+# "lineId|dir|branch"; src/cycle.ts tries these when the main route doesn't fit.
+for lid, branches in BRANCH_SPINE.items():
+    if lid not in spine_poly:
+        continue
+    for bname, rel_id in branches.items():
+        bpoly = stitch(get_rel(rel_id)["members"], (HOME[1], HOME[0]))
+        if len(bpoly) < 2:
+            continue
+        for d in ("inbound", "outbound"):
+            coords = [(nid, lat, lon) for nid, lat, lon in seq_of.get((lid, d), []) if lat is not None]
+            if len(coords) < 2:
+                continue
+            poly = bpoly[:]
+            first = (coords[0][1], coords[0][2])
+            if haversine_km((poly[-1][1], poly[-1][0]), first) < haversine_km((poly[0][1], poly[0][0]), first):
+                poly = poly[::-1]
+            cum = cumulate(poly)
+            stops = []
+            for nid, lat, lon in coords:
+                off, perp = snap(poly, cum, lat, lon)
+                if perp <= SNAP_M:
+                    stops.append([round(lon, 5), round(lat, 5), nid, round(off)])
+            stops.sort(key=lambda s: s[3])
+            dedup = []
+            for s in stops:
+                if not dedup or s[2] != dedup[-1][2]:
+                    dedup.append(s)
+            if len(dedup) >= 2:
+                routes[f"{lid}|{d}|{bname}"] = {"track": [[round(x, 5), round(y, 5)] for x, y in poly], "stops": dedup}
 
 # National Rail routes are keyed by lineId alone (no direction): {track, crs offsets}.
 routes.update(nr_routes)

@@ -233,16 +233,26 @@ async function trainPins(env: Env, rows: CycleRow[]): Promise<Pin[]> {
     (byId.get(id) ?? byId.set(id, []).get(id)!).push(p);
   }
 
+  // Route + any branch variants for this line/direction ("weaver|outbound" plus
+  // "weaver|outbound|chingford"), main spine first.
+  const routeKeys = (lineId: string, dir: string) => {
+    const base = `${lineId}|${dir}`;
+    return Object.keys(ROUTES).filter((k) => k === base || k.startsWith(base + "|") ).sort();
+  };
+
   const pins: Pin[] = [];
   for (const r of wanted) {
-    const key = `${r.lineId}|${r.dir}`;
-    const route = ROUTES[key];
-    if (!route) continue;
-    const offOf = new Map(route.stops.map((s) => [s[2], s[3]] as const)); // naptan -> offset_m
-    const seq = (byId.get(r.vehicleId) ?? [])
-      .filter((p) => p.lineId === r.lineId && p.direction === r.dir && offOf.has(p.naptanId ?? ""))
-      .sort((a, b) => a.timeToStation - b.timeToStation);
-    if (seq.length < 2) continue;
+    // Pick the route (main or branch) whose stops the vehicle's predictions land on.
+    let key = "", offOf = new Map<string, number>(), seq: Prediction[] = [];
+    for (const k of routeKeys(r.lineId, r.dir)) {
+      if (!ROUTES[k]?.stops) continue;
+      const off = new Map(ROUTES[k].stops.map((s) => [s[2], s[3]] as const));
+      const s = (byId.get(r.vehicleId) ?? [])
+        .filter((p) => p.lineId === r.lineId && p.direction === r.dir && off.has(p.naptanId ?? ""))
+        .sort((a, b) => a.timeToStation - b.timeToStation);
+      if (s.length >= 2) { key = k; offOf = off; seq = s; break; }
+    }
+    if (!key) continue;
 
     // Two predicted stops with increasing offset along the track give the speed;
     // back-project the train from the nearer one by its remaining time.
