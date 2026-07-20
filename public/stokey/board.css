@@ -263,3 +263,79 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .leaflet-popup-content b{font-size:14px}
 .leaflet-control-attribution{background:rgba(15,17,21,.75)!important;color:#6c7484!important}
 .leaflet-control-attribution a{color:#8a93a5!important}
+
+/* ---------- journey planner ---------- */
+/* Search bar overlaid on the map, top-left. */
+.jpsearch{position:absolute;left:12px;top:12px;z-index:650;width:min(340px,calc(100% - 80px))}
+.jpbar{display:flex;align-items:center;gap:8px;background:rgba(20,24,33,.96);border:1px solid var(--rule);
+       border-radius:11px;padding:8px 11px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.jpbar:focus-within{border-color:#3a4356}
+.jpbar .jpicon{font-size:13px;opacity:.8}
+.jpbar input{flex:1;min-width:0;background:transparent;border:none;color:var(--ink);font:600 14px system-ui;outline:none}
+.jpbar input::placeholder{color:var(--muted);font-weight:500}
+.jpx{background:transparent;border:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+.jpresults{margin-top:6px;background:rgba(20,24,33,.98);border:1px solid var(--rule);border-radius:11px;
+           overflow:hidden;box-shadow:0 10px 28px rgba(0,0,0,.55);max-height:52vh;overflow-y:auto}
+.jpresult{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;background:transparent;border:none;
+          border-bottom:1px solid var(--rule);color:var(--ink);padding:9px 12px;cursor:pointer;font:inherit}
+.jpresult:last-child{border-bottom:none}
+.jpresult:hover{background:rgba(255,255,255,.05)}
+.jpresult b{font-size:13.5px;font-weight:700}
+.jpresult span{font-size:11.5px;color:var(--muted)}
+.jpnone{padding:10px 12px;color:var(--muted);font-size:13px}
+
+/* Planner panel replaces the left cards. */
+.cols.planning{grid-template-columns:1.35fr 2.1fr!important;grid-template-rows:1fr!important;
+               grid-template-areas:"jp map"!important}
+.cols.planning #inPanel,.cols.planning #outPanel{display:none!important}
+#jpPanel{grid-area:jp}
+body.planning .chiprow{display:none}
+.jppanel{gap:0}
+.jphead{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.jpback{background:var(--row);border:1px solid var(--rule);color:var(--ink);border-radius:9px;
+        width:34px;height:34px;font-size:17px;cursor:pointer;flex:none}
+.jpback:hover{border-color:#3a4356}
+.jptitle{font-size:16px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
+.jpsub{font-size:12px;color:var(--muted)}
+.jptabs{display:flex;gap:6px;margin-bottom:12px}
+.jptabs button{flex:1;background:var(--row);border:1px solid var(--rule);color:var(--muted);
+               border-radius:999px;padding:7px 10px;font:700 12.5px system-ui;cursor:pointer}
+.jptabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.jpoptions{display:flex;flex-direction:column;gap:9px;overflow:auto;flex:1;min-height:0;padding-right:4px;
+           scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+.jploading,.jperr{color:var(--muted);font-size:14px;padding:18px 4px}
+.jpopt{background:var(--row);border:1px solid var(--rule);border-radius:13px;padding:11px 13px;cursor:pointer;
+       transition:border-color .12s ease}
+.jpopt:hover{border-color:#3a4356}
+.jpopt.sel{border-color:#5b76c8;background:#151b2c}
+.jpopthead{display:flex;align-items:center;gap:12px}
+.jpdur{font-size:22px;font-weight:800;line-height:1;flex:none;min-width:54px}
+.jpdur span{font-size:11px;font-weight:600;color:var(--muted);margin-left:2px}
+.jpmid{min-width:0;flex:1}
+.jpchips{display:flex;flex-wrap:wrap;align-items:center;gap:3px}
+.jplegchip{display:inline-flex;align-items:center;gap:3px;background:color-mix(in srgb,var(--c) 22%,transparent);
+           color:#fff;border:1px solid var(--c);border-radius:6px;padding:2px 6px;font:800 11px system-ui;white-space:nowrap}
+.jparrow{color:var(--muted);font-size:12px}
+.jpmeta{font-size:11.5px;color:var(--muted);margin-top:5px}
+.jplegs{margin-top:11px;padding-top:11px;border-top:1px solid var(--rule);display:flex;flex-direction:column}
+.jpleg{display:flex;gap:10px}
+.jplegrail{display:flex;flex-direction:column;align-items:center;flex:none;width:12px}
+.jplegrail::before{content:"";flex:1;width:2px;background:var(--c);opacity:.5}
+.jpleg:first-child .jplegrail::before{background:transparent}
+.jplegdot{width:10px;height:10px;border-radius:50%;background:var(--c);border:2px solid var(--bg);flex:none}
+.jplegbody{padding-bottom:12px;min-width:0;flex:1}
+.jpleg:last-child .jplegbody{padding-bottom:0}
+.jplegtitle{font-size:13px;font-weight:700}
+.jplegdur{color:var(--muted);font-weight:600;font-size:11.5px;margin-left:4px}
+.jpleginstr{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.jplegtime{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* Per-leg label drawn on the map. */
+.jpleglabel{transform:translate(-50%,-50%);background:var(--c);color:#fff;font:800 10.5px system-ui;
+            padding:2px 6px;border-radius:5px;border:1.5px solid #0f1115;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+
+@media (max-width:760px){
+  .cols.planning{display:flex!important;flex-direction:column}
+  #jpPanel{order:1}
+  .jpsearch{width:min(340px,calc(100% - 24px))}
+}

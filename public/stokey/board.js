@@ -734,6 +734,7 @@ function allPins(){
 const isPassed = v => v.serving === false || countdown(v.expected, v.etaMin).secs <= 0;
 function renderPins(){
   pinLayer.clearLayers();
+  if(typeof JP !== "undefined" && JP.active){ pinWarn.hidden = true; return; }  // journey planner owns the map
   pinWarn.hidden = !(MB && MB.pinsTimedOut);
   const isMine = v => !FS.active ? true : FS.veh ? v.vehicleId === FS.veh : FS.keys.has(v.key);
   // When focused, off-focus pins are hidden entirely (only lines stay, dimmed).
@@ -774,6 +775,13 @@ function renderPins(){
 
 // ---------- map filtering ----------
 function applyMapFilter(){
+  if(typeof JP !== "undefined" && JP.active){   // planner mode: hide the board's own layers
+    for(const l of lineLayers) l.poly.setStyle({opacity:0});
+    for(const a of arrowMarkers) a.marker.setOpacity(0);
+    for(const s of nodeMarkers){ if(s.marker.setOpacity) s.marker.setOpacity(0); else s.marker.setStyle({opacity:0, fillOpacity:0}); const t = s.marker.getTooltip && s.marker.getTooltip(); if(t && t.getElement()) t.getElement().style.opacity = 0; }
+    if(homeMarker) homeMarker.setOpacity(0);
+    return;
+  }
   const focused = FS.active;
   const active = activeLines();
   const attention = focused || active.size > 0;
@@ -894,6 +902,7 @@ map.on("zoomend", () => { if(geoCache[MODE]) applyMapFilter(); });
 
 // ---------- map controls ----------
 map.on("click", () => {
+  if(typeof JP !== "undefined" && JP.active) return;   // planner owns the map
   hideInfo();
   const had = focus || mapNarrowed() || tableAll;
   focus = null; selected = new Set(SERVICES); tableAll = false;
@@ -992,8 +1001,204 @@ setInterval(() => {
   renderFilters(); renderAll(); if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); }
 }, 60000);
 
+// ---------- journey planner ----------
+// Search a destination (address / postcode), then plan from home via TfL: walk or
+// cycle access + public transport, plus a full-walk / full-cycle option. In planner
+// mode the left cards + filters are replaced by ranked options; every option is
+// sketched on the map, and tapping one frames it with per-leg styling + an accordion.
+const jpLayer = L.layerGroup().addTo(map);
+const JP = { active:false, dest:null, mode:MODE, options:[], sel:-1, places:[], geoTok:0, loadTok:0 };
+const LEG_ICON = l => l.kind === "walk" ? "🚶" : l.kind === "cycle" ? "🚲" : l.mode === "bus" ? "🚌" : "🚆";
+
+function injectPlanner(){
+  const search = document.createElement("div");
+  search.className = "jpsearch";
+  search.innerHTML =
+    `<div class="jpbar"><span class="jpicon">🔍</span>
+      <input id="jpInput" type="text" placeholder="Plan a journey — address or postcode" autocomplete="off" spellcheck="false">
+      <button id="jpClear" class="jpx" hidden title="Clear">&times;</button></div>
+     <div class="jpresults" id="jpResults" hidden></div>`;
+  mapPanel.appendChild(search);
+
+  const panel = document.createElement("section");
+  panel.className = "panel jppanel"; panel.id = "jpPanel"; panel.hidden = true;
+  panel.innerHTML =
+    `<div class="jphead"><button class="jpback" id="jpBack" title="Back to board">&#8592;</button>
+       <div><div class="jptitle" id="jpTitle"></div><div class="jpsub" id="jpSub"></div></div></div>
+     <div class="jptabs" id="jpTabs">
+       <button data-jm="walk">🚶 Walk + transit</button>
+       <button data-jm="cycle">🚲 Cycle + transit</button></div>
+     <div class="jpoptions" id="jpOptions"></div>`;
+  cols.insertBefore(panel, mapPanel);
+
+  const input = document.getElementById("jpInput");
+  const results = document.getElementById("jpResults");
+  let timer;
+  input.addEventListener("input", () => {
+    document.getElementById("jpClear").hidden = !input.value;
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if(q.length < 2){ results.hidden = true; return; }
+    timer = setTimeout(() => jpGeocode(q), 220);
+  });
+  input.addEventListener("focus", () => { if(results.children.length && input.value.trim().length >= 2) results.hidden = false; });
+  document.getElementById("jpClear").addEventListener("click", () => { input.value = ""; results.hidden = true; document.getElementById("jpClear").hidden = true; input.focus(); });
+  document.getElementById("jpBack").addEventListener("click", jpExit);
+  document.getElementById("jpTabs").addEventListener("click", e => {
+    const b = e.target.closest("[data-jm]"); if(!b || b.dataset.jm === JP.mode) return;
+    JP.mode = b.dataset.jm; jpSyncTabs(); JP.sel = -1; jpLoad();
+  });
+  document.addEventListener("click", e => { if(!e.target.closest(".jpsearch")) results.hidden = true; });
+}
+
+async function jpGeocode(q){
+  const tok = ++JP.geoTok;
+  try{
+    const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if(tok !== JP.geoTok) return;
+    JP.places = d.places || [];
+    const results = document.getElementById("jpResults");
+    if(!JP.places.length){ results.innerHTML = `<div class="jpnone">No matches</div>`; results.hidden = false; return; }
+    results.innerHTML = JP.places.map((p,i) =>
+      `<button class="jpresult" data-i="${i}"><b>${esc(p.name)}</b>${p.detail ? `<span>${esc(p.detail)}</span>` : ""}</button>`).join("");
+    results.hidden = false;
+    for(const b of results.querySelectorAll(".jpresult"))
+      b.addEventListener("click", () => jpPick(JP.places[+b.dataset.i]));
+  }catch{ /* ignore */ }
+}
+
+function jpSyncTabs(){ for(const b of document.querySelectorAll("#jpTabs button")) b.classList.toggle("on", b.dataset.jm === JP.mode); }
+
+function jpPick(place){
+  JP.dest = place; JP.mode = MODE; JP.active = true; JP.sel = -1;
+  document.getElementById("jpInput").value = place.name;
+  document.getElementById("jpResults").hidden = true;
+  document.getElementById("jpClear").hidden = false;
+  document.body.classList.add("planning");
+  cols.classList.add("planning");
+  document.getElementById("jpPanel").hidden = false;
+  document.getElementById("jpTitle").textContent = place.name;
+  document.getElementById("jpSub").textContent = place.detail || "";
+  jpSyncTabs();
+  hideInfo();
+  renderPins();               // clears board pins while planning
+  applyMapFilter();           // hide board stops/lines
+  jpLoad();
+}
+
+function jpExit(){
+  JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1;
+  document.body.classList.remove("planning");
+  cols.classList.remove("planning");
+  document.getElementById("jpPanel").hidden = true;
+  jpLayer.clearLayers();
+  renderAll();
+  if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); }
+}
+
+async function jpLoad(){
+  const tok = ++JP.loadTok;
+  const opts = document.getElementById("jpOptions");
+  opts.innerHTML = `<div class="jploading">Planning your journey…</div>`;
+  jpLayer.clearLayers();
+  try{
+    const r = await fetch(`/api/journey?to=${JP.dest.lat},${JP.dest.lon}&mode=${JP.mode}`);
+    const d = await r.json();
+    if(tok !== JP.loadTok) return;
+    JP.options = d.options || [];
+    JP.sel = JP.options.length ? 0 : -1;
+    jpRenderOptions(); jpDrawMap(); jpFit();
+  }catch{ if(tok === JP.loadTok) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
+}
+
+function jpRenderOptions(){
+  const opts = document.getElementById("jpOptions");
+  if(!JP.options.length){ opts.innerHTML = `<div class="jperr">No routes found for this trip.</div>`; return; }
+  opts.innerHTML = JP.options.map((o,i) => {
+    const chips = o.legs.map(l =>
+      `<span class="jplegchip" style="--c:${l.color}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
+    ).join(`<span class="jparrow">›</span>`);
+    const tag = o.kind === "full-walk" ? "Full walk" : o.kind === "full-cycle" ? "Full cycle"
+              : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
+    const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : ""].filter(Boolean).join(" · ");
+    const arr = o.arr ? `arrive ${to12h(new Date(o.arr))}` : "";
+    return `<div class="jpopt ${i === JP.sel ? "sel" : ""}" data-i="${i}">
+      <div class="jpopthead">
+        <div class="jpdur">${o.duration}<span>min</span></div>
+        <div class="jpmid"><div class="jpchips">${chips}</div>
+          <div class="jpmeta">${tag}${extra ? " · " + extra : ""}${arr ? " · " + arr : ""}</div></div>
+      </div>
+      <div class="jplegs" ${i === JP.sel ? "" : "hidden"}>${o.legs.map(jpLegRow).join("")}</div>
+    </div>`;
+  }).join("");
+  for(const card of opts.querySelectorAll(".jpopt"))
+    card.addEventListener("click", () => jpSelect(+card.dataset.i));
+  const sel = opts.querySelector(".jpopt.sel");
+  if(sel) sel.scrollIntoView({block:"nearest"});
+}
+
+function jpLegRow(l){
+  const to = shortStop(l.to) || shortDest(l.to);
+  const title = l.kind === "transit" ? `${l.label}${l.line ? " " + esc(l.line) : ""} → ${esc(shortDest(l.to))}`
+              : l.kind === "cycle" ? `Cycle to ${esc(to)}`
+              : `Walk to ${esc(to)}`;
+  const dep = l.dep ? to12h(new Date(l.dep)) : "";
+  const time = l.kind === "transit" && dep ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
+  return `<div class="jpleg" style="--c:${l.color}">
+    <div class="jplegrail"><span class="jplegdot"></span></div>
+    <div class="jplegbody"><div class="jplegtitle">${LEG_ICON(l)} ${title} <span class="jplegdur">${l.duration}m</span></div>
+      ${l.instruction && l.kind !== "transit" ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : ""}${time}</div>
+  </div>`;
+}
+
+function jpSelect(i){
+  JP.sel = (JP.sel === i) ? -1 : i;   // tap selected again to collapse? keep selected, just toggle accordion
+  if(JP.sel < 0) JP.sel = i;          // always keep one selected
+  jpRenderOptions(); jpDrawMap(); jpFit();
+}
+
+function jpDrawMap(){
+  jpLayer.clearLayers();
+  // Unselected options: faint hint lines. Selected: bold, styled per leg, labelled.
+  JP.options.forEach((o,i) => { if(i !== JP.sel) for(const l of o.legs) jpLeg(l, false); });
+  const o = JP.options[JP.sel]; if(!o) return;
+  for(const l of o.legs) jpLeg(l, true);
+  // endpoints
+  jpEndpoint(homeLatLng(), "#20c05b", "Home");
+  jpEndpoint([JP.dest.lat, JP.dest.lon], "#e6e8ee", JP.dest.name);
+  // per-leg labels at the midpoint of each drawn leg
+  for(const l of o.legs){
+    if(l.path.length < 2) continue;
+    const mid = l.path[Math.floor(l.path.length / 2)];
+    const txt = l.line ? `${LEG_ICON(l)} ${esc(l.line)}` : `${LEG_ICON(l)} ${l.duration}m`;
+    L.marker(mid, {interactive:false, icon:L.divIcon({className:"", iconSize:[0,0], html:
+      `<div class="jpleglabel" style="--c:${l.color}">${txt}</div>`})}).addTo(jpLayer);
+  }
+}
+function jpLeg(l, bold){
+  if(l.path.length < 2) return;
+  const dash = l.kind === "walk" ? "1 8" : l.kind === "cycle" ? "2 8" : null;
+  L.polyline(l.path, {color:l.color, weight: bold ? 6 : 3, opacity: bold ? .95 : .28,
+    dashArray:dash, lineCap:"round", lineJoin:"round"}).addTo(jpLayer);
+}
+function jpEndpoint(latlng, color, label){
+  L.marker(latlng, {icon:L.divIcon({className:"", iconSize:[16,16], iconAnchor:[8,8], html:
+    `<div style="width:16px;height:16px;background:${color};border:3px solid #0f1115;border-radius:50%;box-shadow:0 0 0 2px ${color}"></div>`})}).addTo(jpLayer);
+}
+function homeLatLng(){ const h = (geoCache[MODE]?.features || []).find(f => f.properties.kind === "home"); return h ? [h.geometry.coordinates[1], h.geometry.coordinates[0]] : HOME; }
+
+function jpFit(){
+  const o = JP.options[JP.sel]; if(!o) return;
+  const pts = [];
+  for(const l of o.legs) for(const p of l.path) pts.push(p);
+  pts.push(homeLatLng(), [JP.dest.lat, JP.dest.lon]);
+  if(pts.length >= 2) map.fitBounds(L.latLngBounds(pts), {paddingTopLeft:[16,58], paddingBottomRight:[16,16], maxZoom:16, animate:true});
+}
+
 // ---------- init ----------
 (async function init(){
+  injectPlanner();
   renderFilters();
   await loadGeo(MODE).catch(e => console.error("geo", e));
   buildMap();
