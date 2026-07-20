@@ -60,6 +60,11 @@ function shortStop(s){
   const first = String(s ?? "").split("/")[0].trim();
   return first.replace(/^Stoke Newington\s+/i, "") || first;
 }
+// A physical bus stop only ever serves one direction; the first of its `towards`
+// destinations names it. "Clapton Pond Or Stoke Newington Common" -> "Clapton Pond".
+function shortTowards(t){
+  return String(t ?? "").split(/\s+Or\s+|,/i)[0].trim();
+}
 function shortDest(name){
   const norm = s => s.replace(/,\s*/g, " ").replace(/\s+/g, " ").trim()
     .replace(/\s+Rail Station$/i, "").replace(/\s+Bus Station$/i, " Bus Stn").replace(/\s+Station$/i, " Stn");
@@ -533,7 +538,9 @@ const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y
 let showPassed = false;   // toggled by the map FAB; passed/Due vehicles are grey
 map.setView(HOME, C.openZoom);
 
-const DIM = {line:.06, stop:.1, pin:.12};
+// On focus, only the lines stay (dimmed) for context; every other layer — off-line
+// stops, their labels, off-focus vehicle pins — is hidden outright, not just faded.
+const DIM = {line:.05};
 const FIT = {paddingTopLeft:[16,34], paddingBottomRight:[16,16], maxZoom:19};
 const GONE = "#5a6070";
 const pinLayer = L.layerGroup().addTo(map);
@@ -628,31 +635,41 @@ function buildMap(){
 
   for(const f of of("stop")){
     const p = f.properties, [lon, lat] = f.geometry.coordinates, on = p.onBoard, near = p.near;
-    const base = {radius: on ? 7 : near ? 4 : 2.5, color: on ? "#fff" : near ? "#6c7484" : "#4a5162", weight: on ? 2 : 1.5};
+    // On-board stops are the point of the board: make them big and easy to hit. The
+    // dense off-board line stops stay tiny (and get thinned out by zoom).
+    const base = {radius: on ? 10 : near ? 4 : 2.5, color: on ? "#fff" : near ? "#6c7484" : "#4a5162", weight: on ? 3 : 1.5};
     const m = L.circleMarker([lat, lon], {...base, fillColor:"#0f1115", fillOpacity:1}).addTo(map);
     infoOn(m, `<b>${esc(p.name)}</b>${p.letter ? " (" + esc(p.letter) + ")" : ""}<br>
       ${p.walk_min != null ? walkMins(p.walk_min) + " min walk" : "not within a 10 min walk"}<br>${linesHTML(p)}
       ${p.towards ? `<br><span style="color:#9aa3b2">towards ${esc(p.towards)}</span>` : ""}`);
     if(on){
-      m.bindTooltip(`${esc(shortStop(p.name))}${p.letter ? " " + esc(p.letter) : ""}`, {permanent:true, direction:"right", offset:[7,0], className:"maplabel"});
-      m.on("click", e => { L.DomEvent.stopPropagation(e); focusStop(p.id); });
+      m.bindTooltip(`${esc(shortStop(p.name))}${p.letter ? " " + esc(p.letter) : ""}`,
+        {permanent:true, direction:"right", offset:[9,0], className:"maplabel big", interactive:true});
+      const tapStop = e => { L.DomEvent.stopPropagation(e); focusStop(p.id); };
+      m.on("click", tapStop);
+      m.on("tooltipopen", ev => ev.tooltip.getElement()?.addEventListener("click", tapStop));  // label counts as a tap target
     }
-    nodeMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false, name:p.name, base});
+    nodeMarkers.push({id:p.id, marker:m, lines:p.lines, onBoard:on, rail:false, name:p.name, base,
+      label: on ? `${shortStop(p.name)}${p.letter ? " " + p.letter : ""}` : "",
+      towards: shortTowards(p.towards),   // bus stops are one-direction; shown when focused
+      dense: !on && !near});  // an intermediate stop on a route; thinned out when zoomed out
   }
   for(const f of of("station")){
     const p = f.properties, [lon, lat] = f.geometry.coordinates, on = p.onBoard;
     let m;
     if(MODE === "walk"){
-      const size = on ? 15 : 9;
+      const size = on ? 20 : 9;
       m = L.marker([lat, lon], {icon:L.divIcon({className:"", iconSize:[size,size], html:
-        `<div style="width:${size}px;height:${size}px;background:#823a62;border:${on?2.5:1.5}px solid ${on?"#fff":"#8a6d7c"};border-radius:3px"></div>`})}).addTo(map);
+        `<div style="width:${size}px;height:${size}px;background:#823a62;border:${on?3:1.5}px solid ${on?"#fff":"#8a6d7c"};border-radius:4px"></div>`})}).addTo(map);
     }else{
-      m = L.circleMarker([lat, lon], {radius: on ? 7 : 3.5, color: on ? "#fff" : "#5a6472", weight: on ? 2 : 1.5, fillColor:"#0f1115", fillOpacity:1}).addTo(map);
+      m = L.circleMarker([lat, lon], {radius: on ? 10 : 3.5, color: on ? "#fff" : "#5a6472", weight: on ? 3 : 1.5, fillColor:"#0f1115", fillOpacity:1}).addTo(map);
     }
     infoOn(m, `<b>${esc(p.name)}</b><br>${MODE === "walk" ? "Weaver line" : (p.lines ? esc(p.lines.join(", ")) : "")}${p.cyc_min != null ? ` · ${p.cyc_min} min cycle` : ""}${p.walk_min != null ? ` · ${walkMins(p.walk_min)} min walk` : ""}`);
     if(on){
-      m.bindTooltip(esc(p.name), {permanent:true, direction:"right", offset:[9,0], className:"maplabel rail"});
-      m.on("click", () => focusStop(p.id));
+      m.bindTooltip(esc(p.name), {permanent:true, direction:"right", offset:[11,0], className:"maplabel rail big", interactive:true});
+      const tapStop = () => focusStop(p.id);
+      m.on("click", tapStop);
+      m.on("tooltipopen", ev => ev.tooltip.getElement()?.addEventListener("click", tapStop));  // label counts as a tap target
     }
     nodeMarkers.push({id:p.id, marker:m, lines:p.lines ?? ["Weaver"], onBoard:on, rail:true, name:p.name});
   }
@@ -718,21 +735,21 @@ const isPassed = v => v.serving === false || countdown(v.expected, v.etaMin).sec
 function renderPins(){
   pinLayer.clearLayers();
   pinWarn.hidden = !(MB && MB.pinsTimedOut);
-  const keep = v => onMap(v.line) && (showPassed || !isPassed(v));
+  const isMine = v => !FS.active ? true : FS.veh ? v.vehicleId === FS.veh : FS.keys.has(v.key);
+  // When focused, off-focus pins are hidden entirely (only lines stay, dimmed).
+  const keep = v => onMap(v.line) && (showPassed || !isPassed(v)) && isMine(v);
   for(const v of allPins().filter(keep)){
     const rail = v.mode === "rail";
     const night = String(v.line).startsWith("N");
-    const mine = !FS.active ? true : FS.veh ? v.vehicleId === FS.veh : FS.keys.has(v.key);
     const gone = isPassed(v);
     const col = colorOf(v.line);
     const bg = gone ? GONE : col;
     const arrow = gone ? "#8a90a0" : col;
     const glyph = rail ? TRAIN_GLYPH_SM : BUS_GLYPH;
     const label = v.line;   // rail and bus both labelled by line
-    const dim = FS.active && !mine;
     const eta = pinEta(v.expected, v.etaMin);
     const icon = L.divIcon({className:"", iconSize:[100,84], iconAnchor:[50,52], html:
-      `<div style="width:100px;height:84px;position:relative;opacity:${dim ? DIM.pin : 1}">
+      `<div style="width:100px;height:84px;position:relative">
          <div style="position:absolute;left:50px;top:0;transform:translateX(-50%);white-space:nowrap;
                      background:${bg};color:#fff;font:800 9.5px/1 system-ui;padding:3px 5px;border-radius:4px;border:1px solid #0f1115">
            ${esc(label)}${eta ? ` <span class="pineta" data-exp="${v.expected ?? ""}" data-min="${v.etaMin ?? ""}" style="font-weight:600;opacity:.85">${esc(eta)}</span>` : ""}
@@ -747,7 +764,7 @@ function renderPins(){
       : `${eta === "Due" ? "Due" : eta.replace("m"," min")} at ${esc(shortStop(v.stop ?? v.station ?? "your stop"))}`;
     // Soonest on top: among live vehicles the one with the lowest ETA wins, so
     // several stacked at a terminus show the next-to-depart in front.
-    const z = gone ? 300 : dim ? 600 : 2000 - Math.min(v.etaMin ?? 999, 999);
+    const z = gone ? 300 : 2000 - Math.min(v.etaMin ?? 999, 999);
     const marker = L.marker([v.lat, v.lon], {icon, zIndexOffset: z, vehicleId:v.vehicleId}).addTo(pinLayer);
     infoOn(marker, `<b>${esc(v.line)} → ${esc(shortDest(v.to))}</b><br>${when}<br>
       <span style="color:#9aa3b2">heading ${compass(v.bearing)} · estimated position · ${esc(v.vehicleId)}</span>`);
@@ -779,15 +796,31 @@ function applyMapFilter(){
     const mine = !focused || a.pairs.some(pr => FS.keys.has(`bus|${pr}`));
     a.marker.setOpacity(!live ? 0 : !mine ? 0 : .9);
   }
+  const zoom = map.getZoom();
   for(const s of nodeMarkers){
     const serves = s.lines.some(onMap);
     const mine = s.lines.some(l => active.has(l)) || FS.stops.has(s.id);
+    // Non-relevant nodes are hidden outright when focused/narrowed (not dimmed), so
+    // only the lines carry the context. A hidden node is o=0. Dense intermediate
+    // stops also drop out when zoomed out, unless we're zoomed in or focused on them.
     const off = !serves || (attention && !mine && !(active.size === 0 && !focused));
-    const o = off ? DIM.stop : 1;
+    const declutter = s.dense && zoom < DENSE_ZOOM && !(attention && mine);
+    const o = (off || declutter) ? 0 : 1;
     if(s.marker.setOpacity) s.marker.setOpacity(o);
     else s.marker.setStyle({opacity:o, fillOpacity:o, ...(s.base ?? {})});
+    // Labels: only the *relevant* stop(s) when there is a focus — a focused route
+    // shows its own station, a tapped stop shows only itself. Off-focus, on-board
+    // labels show normally; a bare chip filter labels the active lines' on-board stops.
+    const labelOn = focused ? FS.stops.has(s.id)
+                  : active.size > 0 ? (s.onBoard && s.lines.some(l => active.has(l)))
+                  : s.onBoard;
+    // When we're down to the relevant stop(s), spell out which way the bus goes.
+    if(s.label !== undefined && s.marker.setTooltipContent){
+      const showDir = labelOn && attention && !s.rail && s.towards;
+      s.marker.setTooltipContent(showDir ? `${s.label} <span class="dir">→ ${esc(s.towards)}</span>` : s.label);
+    }
     const tip = s.marker.getTooltip && s.marker.getTooltip();
-    if(tip && tip.getElement()) tip.getElement().style.opacity = off ? 0 : o;
+    if(tip && tip.getElement()) tip.getElement().style.opacity = labelOn ? 1 : 0;
   }
   tiles.setOpacity(1);
   if(homeMarker) homeMarker.setOpacity(1);
@@ -799,12 +832,19 @@ function applyMapFilter(){
 //   - vehicle focus: frame just that train and the stop it's heading for.
 //   - anything else (chip filter, route/direction focus): frame the whole
 //     geometry of the active line(s), always.
+// Framing a whole line can otherwise fly the map right out (the 476 runs to
+// Waterloo); cap how far it will zoom out so home stays legible.
+const MIN_FOCUS_ZOOM = 12.5;
+// Below this zoom the intermediate route stops are too dense to read, so hide them.
+const DENSE_ZOOM = 15;
 function fitTo(pts, sig){
   if(sig === lastFit) return;
   if(!pts.length){ return; }
   lastFit = sig;
   if(pts.length < 2){ if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate:true}); return; }
-  map.fitBounds(L.latLngBounds(pts), {...FIT, animate:true});
+  const b = L.latLngBounds(pts);
+  const z = Math.max(MIN_FOCUS_ZOOM, map.getBoundsZoom(b, false, L.point(34, 50)));
+  map.setView(b.getCenter(), z, {animate:true});
 }
 function fitFocus(){
   if(!focus && !mapNarrowed()){
@@ -847,6 +887,10 @@ async function syncFleet(){
   }catch{ if(token !== fleetToken) return; fleet = []; }
   renderPins(); applyMapFilter();
 }
+
+// Re-thin intermediate stops as the user zooms (fitFocus early-returns on the same
+// focus signature, so this never fights a manual zoom).
+map.on("zoomend", () => { if(geoCache[MODE]) applyMapFilter(); });
 
 // ---------- map controls ----------
 map.on("click", () => {
