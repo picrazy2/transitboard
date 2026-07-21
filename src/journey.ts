@@ -1,5 +1,75 @@
 import { Env } from "./tfl";
 import home from "./cycle-stops.json";
+import spinesRail from "./cycle-routes.json";
+import spinesBus from "./stokey-routes.json";
+
+// lineId -> candidate polylines ([lat,lon]) from the board's own precise OSM
+// geometry. TfL returns near-straight lines for Overground / National Rail and
+// some bus legs, so we snap those onto the real track we already drew.
+const LINE_SPINES: Record<string, [number, number][][]> = {};
+for (const [k, v] of Object.entries(spinesRail as unknown as Record<string, { track?: number[][] }>)) {
+  const lid = k.split("|")[0];
+  (LINE_SPINES[lid] ??= []).push((v.track ?? []).map((p) => [p[1], p[0]] as [number, number]));
+}
+for (const [k, v] of Object.entries(spinesBus as unknown as Record<string, { poly?: number[][] }>)) {
+  const lid = k.split("|")[0];
+  (LINE_SPINES[lid] ??= []).push((v.poly ?? []).map((p) => [p[1], p[0]] as [number, number]));
+}
+
+function metresLL(a: [number, number], b: [number, number]) {
+  const R = 6371000, p = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * p, dLon = (b[1] - a[1]) * p;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * p) * Math.cos(b[0] * p) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function cumul(poly: [number, number][]) { const c = [0]; for (let i = 1; i < poly.length; i++) c[i] = c[i - 1] + metresLL(poly[i - 1], poly[i]); return c; }
+function projectLL(poly: [number, number][], cum: number[], pt: [number, number]) {
+  let best = { perp: 1e18, arc: 0 };
+  const kx = Math.cos(pt[0] * Math.PI / 180) * 111320, ky = 110540;
+  for (let i = 0; i < poly.length - 1; i++) {
+    const ax = poly[i][1], ay = poly[i][0], bx = poly[i + 1][1], by = poly[i + 1][0];
+    const px = (pt[1] - ax) * kx, py = (pt[0] - ay) * ky, dx = (bx - ax) * kx, dy = (by - ay) * ky;
+    const seg2 = dx * dx + dy * dy, t = seg2 ? Math.max(0, Math.min(1, (px * dx + py * dy) / seg2)) : 0;
+    const perp = Math.hypot(px - t * dx, py - t * dy);
+    if (perp < best.perp) best = { perp, arc: cum[i] + t * Math.sqrt(seg2) };
+  }
+  return best;
+}
+function pointOnPoly(poly: [number, number][], cum: number[], arc: number): [number, number] {
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi - 1) { const m = (lo + hi) >> 1; if (cum[m] <= arc) lo = m; else hi = m; }
+  const span = cum[hi] - cum[lo], t = span ? (arc - cum[lo]) / span : 0;
+  return [poly[lo][0] + (poly[hi][0] - poly[lo][0]) * t, poly[lo][1] + (poly[hi][1] - poly[lo][1]) * t];
+}
+function sliceLL(poly: [number, number][], cum: number[], a: number, b: number): [number, number][] {
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const pts: [number, number][] = [pointOnPoly(poly, cum, lo)];
+  for (let i = 0; i < poly.length; i++) if (cum[i] > lo && cum[i] < hi) pts.push(poly[i]);
+  pts.push(pointOnPoly(poly, cum, hi));
+  return a > b ? pts.reverse() : pts;
+}
+// Swap a sparse transit leg's straight line for the board's own track when both
+// its endpoints sit on one of that line's drawn spines.
+function enrichLeg(leg: JLeg) {
+  if (leg.kind !== "transit" || !leg.lineId || leg.path.length < 2) return;
+  const cands = LINE_SPINES[leg.lineId]; if (!cands) return;
+  // Enrich when TfL's geometry is sparse OR suspiciously straight (its length barely
+  // exceeds the crow-flies distance — real routes bend). Detailed, bendy paths are left.
+  let plen = 0; for (let i = 0; i < leg.path.length - 1; i++) plen += metresLL(leg.path[i], leg.path[i + 1]);
+  const straight = plen / (metresLL(leg.path[0], leg.path[leg.path.length - 1]) || 1);
+  if (leg.path.length >= 20 && straight > 1.2) return;
+  const start = leg.path[0], end = leg.path[leg.path.length - 1];
+  let best: { seg: [number, number][]; perp: number } | null = null;
+  for (const poly of cands) {
+    if (poly.length < 2) continue;
+    const cum = cumul(poly);
+    const a = projectLL(poly, cum, start), b = projectLL(poly, cum, end);
+    if (Math.abs(a.arc - b.arc) < 100) continue;
+    if (!best || a.perp + b.perp < best.perp) best = { seg: sliceLL(poly, cum, a.arc, b.arc), perp: a.perp + b.perp };
+  }
+  if (best && best.perp < 500 && best.seg.length >= 2)
+    leg.path = best.seg.map((p) => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+}
 
 // Journey planning is TfL's Journey Planner (free, London-complete, native
 // multimodal). Origin is always home; the destination is searched. Two modes:
@@ -85,7 +155,8 @@ function parseLeg(l: any): JLeg {
 }
 
 function parseJourney(j: any, i: number): JOption {
-  const legs = (j.legs ?? []).map(parseLeg);
+  const legs: JLeg[] = (j.legs ?? []).map(parseLeg);
+  legs.forEach(enrichLeg);   // snap sparse Overground/rail/bus legs onto real geometry
   const walkMins = legs.filter((l: JLeg) => l.kind === "walk").reduce((a: number, l: JLeg) => a + l.duration, 0);
   const cycleMins = legs.filter((l: JLeg) => l.kind === "cycle").reduce((a: number, l: JLeg) => a + l.duration, 0);
   const transitLegs = legs.filter((l: JLeg) => l.kind === "transit");

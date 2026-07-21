@@ -290,6 +290,9 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .cols.planning #inPanel,.cols.planning #outPanel{display:none!important}
 #jpPanel{grid-area:jp}
 body.planning .chiprow{display:none}
+/* .panel sets display:flex, which beats the bare [hidden] attribute — without this
+   the planner panel shows (and floats out of the grid) even in the default view. */
+.panel[hidden]{display:none!important}
 .jppanel{gap:0}
 .jphead{display:flex;align-items:center;gap:11px;margin-bottom:12px}
 .jpback{background:var(--row);border:1px solid var(--rule);color:var(--ink);border-radius:9px;
