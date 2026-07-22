@@ -13,3 +13,11 @@
   Cache-Control: no-cache
 /stokey/cycle/index.html
   Cache-Control: no-cache
+/stokey/home
+  Cache-Control: no-cache
+/stokey/home.html
+  Cache-Control: no-cache
+/stokey/home.js
+  Cache-Control: no-cache
+/stokey/home.css
+  Cache-Control: no-cache

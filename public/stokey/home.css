@@ -1,0 +1,197 @@
+/* Mobile "get me home" view. Full-screen map with a floating origin/dest bar on top
+   and a draggable bottom drawer of route options. Reuses board.css for the .jp* card,
+   leg and chip styles; this sheet is only the mobile shell around them. */
+
+body.homeapp {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body.homeapp #map {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: #0f1115;
+}
+
+/* ---------- top origin / destination bar ---------- */
+.hbar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: 10px;
+  right: 10px;
+  z-index: 500;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .45);
+  padding: 4px 6px;
+}
+.hrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  min-height: 44px;
+}
+.hrow-dest { min-height: 40px; }
+.hdot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.hdot.from { background: #e6e8ee; box-shadow: 0 0 0 3px rgba(230, 232, 238, .18); }
+.hdot.to { background: var(--ok); box-shadow: 0 0 0 3px rgba(32, 192, 91, .22); }
+.hrule {
+  height: 1px;
+  background: var(--rule);
+  margin: 0 10px 0 27px;
+}
+#hOrigin {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--ink);
+  font-size: 16px;              /* 16px keeps iOS from zooming on focus */
+  font-family: inherit;
+  padding: 2px 0;
+}
+#hOrigin::placeholder { color: var(--muted); }
+.hdestlbl {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.hiconbtn {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--row);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.hiconbtn:active { background: #1c2233; }
+
+/* search results dropdown */
+.hresults {
+  border-top: 1px solid var(--rule);
+  margin-top: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.jpresult {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 10px;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+}
+.jpresult:active { background: var(--row); }
+.jpresult .mi { color: var(--muted); flex: 0 0 auto; }
+.jprestext { display: flex; flex-direction: column; min-width: 0; }
+.jpresname { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jpresdetail { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- floating recenter button ---------- */
+.hfab {
+  position: fixed;
+  right: 14px;
+  z-index: 480;
+  bottom: calc(46vh + 16px);     /* sits just above the drawer's mid snap; JS-independent */
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+  cursor: pointer;
+}
+.hfab:active { background: var(--row); }
+
+/* ---------- bottom drawer ---------- */
+.drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 490;
+  height: 46vh;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, .5);
+  display: flex;
+  flex-direction: column;
+  transition: height .26s cubic-bezier(.4, 0, .2, 1);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.draghandle {
+  flex: 0 0 auto;
+  padding: 10px 0 6px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.draghandle span {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: #3a4150;
+}
+.drawerhdr {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 16px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.drawertitle { font-size: 16px; font-weight: 700; }
+.drawerupd { font-size: 12px; color: var(--muted); }
+.hoptions {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px 12px calc(env(safe-area-inset-bottom) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Keep option cards inside the phone width: flex items default to min-width:auto and
+   won't shrink below their content, so long line names / stop titles would push the card
+   past the viewport. Force them to shrink and wrap instead. */
+body.homeapp .hoptions { overflow-x: hidden; }
+/* An explicit width bound breaks the circular flex sizing (a flex item won't otherwise
+   shrink below its content), so the chip row and leg titles actually wrap. */
+body.homeapp .jpopt { min-width: 0; width: 100%; max-width: calc(100vw - 24px); }
+body.homeapp .jpopthead, body.homeapp .jpmid, body.homeapp .jpleg, body.homeapp .jplegbody { min-width: 0; }
+body.homeapp .jpchips { flex-wrap: wrap; max-width: 100%; }
+body.homeapp .jplegtitle, body.homeapp .jpmeta { overflow-wrap: anywhere; }
+
+/* Leaflet controls we don't want on mobile */
+body.homeapp .leaflet-control-container { display: none; }
