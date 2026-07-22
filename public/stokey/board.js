@@ -918,7 +918,17 @@ map.on("click", () => {
   focus = null; selected = new Set(SERVICES); tableAll = false;
   if(had){ renderFilters(); renderAll(); }
 });
-if(typeof recentre !== "undefined") recentre.addEventListener("click", () => homeBounds && (lastFit = null, map.fitBounds(homeBounds, FIT)));
+// FAB icons (Material, no emoji).
+if(typeof recentre !== "undefined") recentre.innerHTML = mi("mylocation", 19);
+if(typeof passedBtn !== "undefined") passedBtn.innerHTML = mi("recent", 19);
+if(typeof legendBtn !== "undefined") legendBtn.innerHTML = mi("info", 19);
+if(typeof fullscreen !== "undefined") fullscreen.innerHTML = mi("fullscreen", 19);
+
+// Recentre: frame the whole journey while planning, else home.
+if(typeof recentre !== "undefined") recentre.addEventListener("click", () => {
+  if(typeof JP !== "undefined" && JP.active){ lastFit = null; jpFit(); return; }
+  if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); }
+});
 if(typeof infoclose !== "undefined") infoclose.addEventListener("click", e => {
   e.stopPropagation(); hideInfo();
   if(typeof JP !== "undefined" && JP.active) return;
@@ -931,14 +941,23 @@ if(typeof passedBtn !== "undefined") passedBtn.addEventListener("click", () => {
   passedBtn.setAttribute("aria-pressed", String(showPassed));
   renderPins();
 });
+const JP_LEGEND = `<div><span class="leg-line walk"></span> Walk</div>
+  <div><span class="leg-line cycle"></span> Cycle</div>
+  <div><span class="leg-line" style="background:#e1251b"></span> Bus</div>
+  <div><span class="leg-line" style="background:#0098d4;height:4px"></span> Rail / tube</div>
+  <div><span class="dot" style="border-color:#fff;background:#0f1115;width:11px;height:11px"></span> Change / stop</div>
+  <div><span class="dot" style="border-color:#20c05b"></span> Home &nbsp;<span class="dot" style="border-color:#e6e8ee"></span> Destination</div>`;
+const BOARD_LEGEND = (typeof maplegend !== "undefined" && maplegend) ? maplegend.innerHTML : "";
 if(typeof legendBtn !== "undefined") legendBtn.addEventListener("click", () => {
-  const open = maplegend.hidden; maplegend.hidden = !open; legendBtn.setAttribute("aria-expanded", String(open));
+  const open = maplegend.hidden;
+  if(open) maplegend.innerHTML = (typeof JP !== "undefined" && JP.active) ? JP_LEGEND : BOARD_LEGEND;
+  maplegend.hidden = !open; legendBtn.setAttribute("aria-expanded", String(open));
 });
 if(typeof fullscreen !== "undefined") fullscreen.addEventListener("click", () => {
   if(!mapPanel.classList.contains("full"))
     document.documentElement.style.setProperty("--chrome", `${Math.round(document.querySelector(".wrap").getBoundingClientRect().top)}px`);
   const full = mapPanel.classList.toggle("full");
-  fullscreen.innerHTML = full ? "&#10531;" : "&#10530;";
+  fullscreen.innerHTML = mi(full ? "fullscreen_exit" : "fullscreen", 19);
   requestAnimationFrame(() => { map.invalidateSize(); if(!full && homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); } });
   renderAll();
 });
@@ -1057,6 +1076,11 @@ const MI = {
   park:`<path d="M17 12h2L12 3 5 12h2l-3.9 6h6.92v3h3.96v-3H21z"/>`,
   school:`<path d="M5 13.18v4L12 21l7-3.82v-4L12 17zM12 3 1 9l11 6 9-4.91V17h2V9z"/>`,
   airport:`<path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>`,
+  fullscreen:`<path d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z"/>`,
+  fullscreen_exit:`<path d="M5 16h3v3h2v-5H5zm3-8H5v2h5V5H8zm6 11h2v-3h3v-2h-5zm2-11V5h-2v5h5V8z"/>`,
+  mylocation:`<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/>`,
+  info:`<path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/>`,
+  route:`<path d="M19 15.18V7c0-2.21-1.79-4-4-4s-4 1.79-4 4v10c0 1.1-.9 2-2 2s-2-.9-2-2V8.82C8.16 8.4 9 7.3 9 6c0-1.66-1.34-3-3-3S3 4.34 3 6c0 1.3.84 2.4 2 2.82V17c0 2.21 1.79 4 4 4s4-1.79 4-4V7c0-1.1.9-2 2-2s2 .9 2 2v8.18c-1.16.42-2 1.52-2 2.82 0 1.66 1.34 3 3 3s3-1.34 3-3c0-1.3-.84-2.4-2-2.82z"/>`,
 };
 const PLACE_ICON = { station:"train", restaurant:"restaurant", hotel:"hotel", store:"store", park:"park", school:"school", airport:"airport", address:"place", place:"place", recent:"recent" };
 const mi = (name, size = 16) => `<svg class="mi" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${MI[name] ?? MI.place}</svg>`;
@@ -1085,6 +1109,7 @@ function injectPlanner(){
        <div class="jptabs" id="jpTabs">
          <button data-jm="walk" title="Walk + transit">${mi("walk", 17)}</button>
          <button data-jm="cycle" title="Cycle + transit">${mi("bike", 17)}</button></div></div>
+     <div class="jpupdated" id="jpUpdated"></div>
      <div class="jpoptions" id="jpOptions"></div>`;
   cols.insertBefore(panel, mapPanel);
 
@@ -1208,18 +1233,37 @@ async function jpLoad(keep){
   try{
     const [walk, cycle] = await Promise.all([one("walk"), one("cycle")]);
     if(tok !== JP.loadTok || !JP.active) return;
-    JP.cache = { walk, cycle };
+    JP.cache = { walk, cycle }; JP.updated = Date.now();
     jpShowMode(keep);
   }catch{ if(tok === JP.loadTok && !keep) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
 function jpShowMode(keep){
   JP.options = JP.cache[JP.mode] || [];
+  const u = document.getElementById("jpUpdated");
+  if(u) u.textContent = JP.updated ? `Updated ${to12h(new Date(JP.updated))}` : "";
   if(keep && JP.sel >= 0){ JP.sel = Math.min(JP.sel, JP.options.length - 1); JP.expanded = JP.sel; }
   else { JP.sel = JP.options.length ? 0 : -1; JP.expanded = JP.sel; }
   jpRenderOptions(); jpDrawMap();
   if(!keep) jpFit();
 }
 
+// Elevation sparkline for a full-cycle option, from its sampled profile.
+function jpElevSvg(o){
+  const p = o.profile;
+  if(!p || p.length < 2) return "";
+  const min = Math.min(...p), max = Math.max(...p), range = Math.max(1, max - min);
+  const W = 280, H = 64, pad = 5;
+  const xy = p.map((h,i) => [pad + i*(W-2*pad)/(p.length-1), pad + (H-2*pad)*(1-(h-min)/range)]);
+  const line = xy.map(([x,y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${pad},${H-pad} ${line} ${W-pad},${H-pad}`;
+  return `<div class="jpelev">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points="${area}" fill="rgba(32,192,91,.16)"/>
+      <polyline points="${line}" fill="none" stroke="#20c05b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>
+    <div class="jpelevlbl"><span>elevation</span><span>${Math.round(min)}–${Math.round(max)} m</span></div>
+  </div>`;
+}
 function jpRenderOptions(){
   jpStopMore();   // any open mini-board is about to be re-rendered away
   const opts = document.getElementById("jpOptions");
@@ -1229,7 +1273,8 @@ function jpRenderOptions(){
     const chips = o.legs.map(l =>
       `<span class="jplegchip ${legStyle(l)}" style="--c:${legColor(l)};color:${textOn(legColor(l))}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
     ).join(`<span class="jparrow">›</span>`);
-    const tag = o.kind === "full-walk" ? "Full walk" : o.kind === "full-cycle" ? "Full cycle"
+    const tag = o.kind === "full-walk" ? "Full walk"
+              : o.kind === "full-cycle" ? `${o.label || "Full"} cycle`
               : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
     const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : "",
                    o.km ? `${o.km} km` : "", o.ascent != null ? `↑ ${o.ascent} m` : ""].filter(Boolean).join(" · ");
@@ -1239,19 +1284,24 @@ function jpRenderOptions(){
     const leaveMin = o.dep ? Math.round((Date.parse(o.dep) - Date.now()) / 60000) : null;
     const soon = leaveMin != null && leaveMin <= 5
       ? `<div class="jpsoon">${leaveMin <= 0 ? "Leave now" : `Leave in ${leaveMin} min`}</div>` : "";
+    // Full cycle expands to its elevation graph; full walk has nothing to expand.
+    const body = o.kind === "full-cycle" ? jpElevSvg(o)
+               : o.kind === "full-walk" ? ""
+               : o.legs.map((l, li) => jpLegRow(l, i, li)).join("");
+    const expandable = !!body;
     return `<div class="jpopt ${i === JP.sel ? "sel" : ""} ${open ? "open" : ""}" data-i="${i}">
       ${soon}
       <div class="jpopthead">
         <div class="jpdur">${o.duration}<span>min</span></div>
         <div class="jpmid"><div class="jpchips">${chips}</div>
           <div class="jpmeta">${tag}${extra ? " · " + extra : ""}${arr ? " · " + arr : ""}</div></div>
-        <span class="jpcaret">${mi("expand", 20)}</span>
+        <span class="jpcaret" ${expandable ? "" : "hidden"}>${mi("expand", 20)}</span>
       </div>
-      <div class="jplegs" ${open ? "" : "hidden"}>${o.legs.map((l, li) => jpLegRow(l, i, li)).join("")}</div>
+      <div class="jplegs" ${open ? "" : "hidden"}>${body}</div>
     </div>`;
   }).join("");
   for(const card of opts.querySelectorAll(".jpopt"))
-    card.querySelector(".jpopthead").addEventListener("click", () => jpToggle(+card.dataset.i));
+    card.addEventListener("click", e => { if(e.target.closest(".jplegs")) return; jpToggle(+card.dataset.i); });
   for(const b of opts.querySelectorAll(".jpmore"))
     b.addEventListener("click", e => { e.stopPropagation(); jpSeeMore(+b.dataset.o, +b.dataset.l, b); });
 }

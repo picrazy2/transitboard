@@ -170,6 +170,8 @@ export interface JOption {
   legs: JLeg[];
   km?: number;        // full walk/cycle distance
   ascent?: number;    // full-cycle total climb, metres (from Stadia elevation)
+  profile?: number[]; // full-cycle elevation samples, for the graph
+  label?: string;     // e.g. "Fastest" / "Quiet" for the two full-cycle routes
 }
 
 const num = (s: any) => (typeof s === "number" ? s : parseFloat(s) || 0);
@@ -247,9 +249,8 @@ function decodePolyline(str: string, precision = 6): [number, number][] {
   return out;
 }
 
-// Total climb (m) along a route, from Stadia's elevation (Valhalla /height). Sampled
-// to keep the request small.
-async function stadiaAscent(key: string, path: [number, number][]): Promise<number | null> {
+// Smoothed elevation (m) along a route, from Stadia's elevation (Valhalla /height).
+async function stadiaHeights(key: string, path: [number, number][]): Promise<number[] | null> {
   if (path.length < 2) return null;
   const step = Math.max(1, Math.floor(path.length / 150));
   const shape = path.filter((_, i) => i % step === 0 || i === path.length - 1).map(([lat, lon]) => ({ lat, lon }));
@@ -261,27 +262,34 @@ async function stadiaAscent(key: string, path: [number, number][]): Promise<numb
     const d: any = await r.json();
     const h: number[] = (d.height ?? []).filter((x: any) => typeof x === "number");
     if (h.length < 2) return null;
-    // Smooth, then count only sustained climbs (>3 m above the running low) so DEM
-    // sampling noise doesn't inflate the total — summing raw deltas roughly doubled it.
-    const sm = h.map((_, i) => (h[Math.max(0, i - 1)] + h[i] + h[Math.min(h.length - 1, i + 1)]) / 3);
-    let asc = 0, ref = sm[0];
-    for (const e of sm) {
-      if (e > ref + 3) { asc += e - ref; ref = e; }
-      else if (e < ref) ref = e;
-    }
-    return Math.round(asc);
+    return h.map((_, i) => (h[Math.max(0, i - 1)] + h[i] + h[Math.min(h.length - 1, i + 1)]) / 3);  // 3-pt smooth
   } catch { return null; }
 }
+// Sustained climb only (>3 m above the running low), so DEM noise doesn't ~double it.
+function ascentOf(sm: number[]): number {
+  let asc = 0, ref = sm[0];
+  for (const e of sm) { if (e > ref + 3) { asc += e - ref; ref = e; } else if (e < ref) ref = e; }
+  return Math.round(asc);
+}
+function downsample(arr: number[], n: number): number[] {
+  if (arr.length <= n) return arr.map(x => Math.round(x * 10) / 10);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(Math.round(arr[Math.round(i * (arr.length - 1) / (n - 1))] * 10) / 10);
+  return out;
+}
 
-async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle"): Promise<JOption | null> {
+async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle", variant?: "fast" | "quiet"): Promise<JOption | null> {
   const key = SKEY(env); if (!key) return null;
   const costing = mode === "cycle" ? "bicycle" : "pedestrian";
   const body: any = {
     locations: [{ lat: HOME.lat, lon: HOME.lon }, { lat: toLat, lon: toLon }],
     costing, directions_options: { units: "kilometers" },
   };
-  // Fastest bike route: don't detour to avoid hills, willing to use main roads.
-  if (costing === "bicycle") body.costing_options = { bicycle: { use_hills: 0.1, use_roads: 0.5, bicycle_type: "Hybrid" } };
+  // Fast: willing to use main roads, ignore hills. Quiet: prefer residential streets
+  // and cycleways, tolerate some hills.
+  if (costing === "bicycle") body.costing_options = { bicycle: variant === "quiet"
+    ? { use_hills: 0.3, use_roads: 0.05, bicycle_type: "Hybrid", avoid_bad_surfaces: 0.5 }
+    : { use_hills: 0.1, use_roads: 0.5, bicycle_type: "Hybrid" } };
   try {
     const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -293,19 +301,23 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
     for (const leg of trip.legs) path.push(...decodePolyline(leg.shape, 6));
     const dur = Math.round(num(trip.summary?.time) / 60);
     const km = Math.round(num(trip.summary?.length) * 10) / 10;
-    const ascent = costing === "bicycle" ? await stadiaAscent(key, path) : null;
+    const heights = costing === "bicycle" ? await stadiaHeights(key, path) : null;
+    const ascent = heights ? ascentOf(heights) : null;
+    const profile = heights ? downsample(heights, 48) : undefined;
     const jleg: JLeg = {
       mode: costing, kind: mode, label: mode === "cycle" ? "Cycle" : "Walk",
       color: mode === "cycle" ? "#20c05b" : "#8a93a5", line: null, lineId: null,
       duration: dur, from: "Home", to: "", fromId: null, fromAlt: null,
       dep: null, arr: null, instruction: "", path, stops: [],
     };
+    const label = mode === "cycle" ? (variant === "quiet" ? "Quiet" : "Fastest") : undefined;
     return {
-      id: mode === "cycle" ? "fullcycle" : "fullwalk", duration: dur, dep: null, arr: null,
+      id: mode === "cycle" ? (variant === "quiet" ? "fullcyclequiet" : "fullcycle") : "fullwalk",
+      duration: dur, dep: null, arr: null,
       walkMins: mode === "cycle" ? 0 : dur, cycleMins: mode === "cycle" ? dur : 0, changes: 0,
       kind: mode === "cycle" ? "full-cycle" : "full-walk",
       summary: [{ label: jleg.label, color: jleg.color, line: null }], legs: [jleg],
-      km, ...(ascent != null ? { ascent } : {}),
+      km, ...(ascent != null ? { ascent } : {}), ...(profile ? { profile } : {}), ...(label ? { label } : {}),
     };
   } catch { return null; }
 }
@@ -340,11 +352,14 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   let options = raws.flat().map(parseJourney);
 
   // Full walk / cycle: prefer Stadia (Valhalla) — elevation-aware bike, any-distance
-  // walk, detailed geometry — and drop TfL's version. Fall back to TfL if no key.
+  // walk, detailed geometry — and drop TfL's version. Cycle gets a fastest AND a quiet
+  // route. Fall back to TfL if no key.
   const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
-  const stadia = await stadiaFull(env, toLat, toLon, mode);
-  if (stadia) {
-    options = options.filter(o => o.kind !== fullKind).concat(stadia);
+  const stadias = mode === "cycle"
+    ? (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])).filter(Boolean) as JOption[]
+    : ([await stadiaFull(env, toLat, toLon, "walk")].filter(Boolean)) as JOption[];
+  if (stadias.length) {
+    options = options.filter(o => o.kind !== fullKind).concat(stadias);
   } else if (!options.some(o => o.kind === fullKind)) {
     const full = (await jp(env, to, mode === "cycle" ? { mode: "cycle", cyclePreference: "AllTheWay" } : { mode: "walking" })).map(parseJourney);
     options = options.concat(full);   // TfL walking 404s for long walks -> empty, which is fine
@@ -353,9 +368,14 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // De-duplicate identical leg-signatures.
   const seen = new Set<string>();
   options = options.filter(o => {
-    const sig = o.legs.map(l => `${l.mode}:${l.duration}`).join("|");
+    const sig = o.legs.map(l => `${l.mode}:${l.duration}`).join("|") + (o.label ? "|" + o.label : "");
     if (seen.has(sig)) return false; seen.add(sig); return true;
   });
+
+  // Drop options with a pointless micro-hop: a transit leg so short (<=2 min) that
+  // walking beats waiting for it (TfL loves a 1-stop bus sandwiched between walks).
+  const micro = options.filter(o => o.kind !== "transit" || !o.legs.some(l => l.kind === "transit" && l.duration <= 2));
+  if (micro.some(o => o.kind === "transit")) options = micro;   // keep at least the transit ones
 
   // Drop a transit option if ANY other option (including full walk/cycle) is at least
   // as good on every axis — total time, walk, cycle, interchanges, arrival — and better
