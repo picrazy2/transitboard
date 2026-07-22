@@ -52,7 +52,11 @@ BRANCH_SPINE = {"weaver": {"chingford": 9683729}}
 # Piccadilly over Manor House, which is a shade closer but a dead-end for onward
 # travel. Its Piccadilly (TfL) and Great Northern/Thameslink (RTT) merge into one
 # station. naptan is the Underground stop so /StopPoint arrivals return the tube.
-PREFER = {"piccadilly": "940GZZLUFPK"}   # lineId -> station naptan to serve it from
+# Victoria is also served from Finsbury Park rather than its marginally-nearer Seven
+# Sisters: Finsbury Park is one stop inbound (you usually travel into London) and the
+# cycle time is within ~1 min, so it's the better boarding point — and it's already the
+# station serving the Piccadilly, so the two consolidate.
+PREFER = {"piccadilly": "940GZZLUFPK", "victoria": "940GZZLUFPK"}   # lineId -> station naptan to serve it from
 
 # For *drawing* the whole line, every branch — not just the spine. One relation
 # per distinct branch; shared trunk ways are de-duplicated by OSM way id, so

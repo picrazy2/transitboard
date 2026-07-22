@@ -21,3 +21,5 @@
   Cache-Control: no-cache
 /stokey/home.css
   Cache-Control: no-cache
+/stokey/cycle/geo.json
+  Cache-Control: no-cache

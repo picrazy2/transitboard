@@ -78,7 +78,7 @@
       "name": "Hackney Downs",
       "lat": 51.548757,
       "lon": -0.060819,
-      "cycMin": 7.9,
+      "cycMin": 8.0,
       "modes": [
         "national-rail"
       ],
@@ -95,12 +95,10 @@
         }
       },
       "destDir": {
-        "Hertford East": "out",
         "London Liverpool Street": "in"
       },
       "nrServe": [
-        "greater-anglia|in",
-        "greater-anglia|out"
+        "greater-anglia|in"
       ]
     },
     {
@@ -126,28 +124,6 @@
       "nrServe": []
     },
     {
-      "id": "940GZZLUSVS",
-      "name": "Seven Sisters",
-      "lat": 51.58333,
-      "lon": -0.072584,
-      "cycMin": 8.3,
-      "modes": [
-        "tube"
-      ],
-      "serve": {
-        "victoria|inbound": "in",
-        "victoria|outbound": "out"
-      },
-      "lineNames": {
-        "victoria": "Victoria"
-      },
-      "nr": false,
-      "crs": "",
-      "opLines": {},
-      "destDir": {},
-      "nrServe": []
-    },
-    {
       "id": "940GZZLUFPK",
       "name": "Finsbury Park",
       "lat": 51.564158,
@@ -157,34 +133,35 @@
         "tube"
       ],
       "serve": {
+        "victoria|inbound": "in",
+        "victoria|outbound": "out",
         "piccadilly|inbound": "in",
         "piccadilly|outbound": "out"
       },
       "lineNames": {
         "great-northern": "Great Northern",
         "piccadilly": "Piccadilly",
-        "thameslink": "Thameslink"
+        "thameslink": "Thameslink",
+        "victoria": "Victoria"
       },
       "nr": true,
       "crs": "FPK",
       "opLines": {
-        "GN": {
-          "lineId": "great-northern",
-          "name": "Great Northern"
-        },
         "TL": {
           "lineId": "thameslink",
           "name": "Thameslink"
+        },
+        "GN": {
+          "lineId": "great-northern",
+          "name": "Great Northern"
         }
       },
       "destDir": {
-        "Moorgate": "in",
-        "Stevenage": "out",
-        "Horsham": "in",
-        "Cambridge": "out",
-        "Welwyn Garden City": "out",
         "London Kings Cross": "in",
-        "Brighton": "in",
+        "Cambridge": "out",
+        "Moorgate": "in",
+        "Welwyn Garden City": "out",
+        "Hertford North": "out",
         "Peterborough": "out"
       },
       "nrServe": [
