@@ -292,6 +292,8 @@ header{padding:8px 14px;border-bottom:1px solid var(--rule);display:flex;gap:16p
 .cols.planning #inPanel,.cols.planning #outPanel{display:none!important}
 #jpPanel{grid-area:jp}
 body.planning .chiprow{display:none}
+/* Board chrome that's irrelevant while planning a journey. */
+body.planning .warnkey,body.planning #disrupt{display:none}
 /* .panel sets display:flex, which beats the bare [hidden] attribute — without this
    the planner panel shows (and floats out of the grid) even in the default view. */
 .panel[hidden]{display:none!important}
@@ -331,15 +333,15 @@ body.planning .chiprow{display:none}
 .jplegs{margin-top:11px;padding-top:11px;border-top:1px solid var(--rule);display:flex;flex-direction:column}
 .jplegs[hidden],.jptimes[hidden]{display:none}
 .jpleg{display:flex;gap:9px}
-/* Prominent duration badge at the start of each segment. */
+/* Prominent duration badge, centred on the leg's line segment. */
 .jplegdur{flex:none;width:34px;text-align:right;font:800 13.5px system-ui;color:var(--ink);
-          padding-top:1px;line-height:1.35;font-variant-numeric:tabular-nums}
+          align-self:center;line-height:1.35;font-variant-numeric:tabular-nums}
 .jplegdur span{font-size:10px;font-weight:600;color:var(--muted);margin-left:1px}
-/* Timeline: a dot at each leg's title, a connector flowing down to the next. */
+/* Timeline: a dot at each leg's start, a connector running down through its segment
+   (every leg keeps a line, including the last). */
 .jplegrail{display:flex;flex-direction:column;align-items:center;flex:none;width:11px}
 .jplegdot{width:11px;height:11px;border-radius:50%;background:var(--c);border:2px solid var(--bg);flex:none;margin-top:3px}
 .jplegrail::after{content:"";flex:1;width:2px;background:var(--c);opacity:.55;margin-top:1px}
-.jpleg:last-child .jplegrail::after{background:transparent}
 .jplegbody{padding-bottom:14px;min-width:0;flex:1}
 .jpleg:last-child .jplegbody{padding-bottom:2px}
 .jplegtitle{font-size:13px;font-weight:700;line-height:1.3}

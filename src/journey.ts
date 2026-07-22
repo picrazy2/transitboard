@@ -320,8 +320,10 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // NB: alternativeCycle/alternativeWalking mean "alternative TO that mode" — they
   // swap the cycle/walk-access journeys out for others, so we do NOT want them.
   // LeaveAtStation already returns both cycle-to-station+transit and full-cycle.
+  // TakeOnTransport = bring the bike on board, so you cycle at BOTH ends (a folding
+  // Brompton goes anywhere). LeaveAtStation would strand the bike at the origin.
   const raw = mode === "cycle"
-    ? await jp(env, to, { mode: TRANSIT, cyclePreference: "LeaveAtStation" })
+    ? await jp(env, to, { mode: TRANSIT, cyclePreference: "TakeOnTransport" })
     : await jp(env, to, { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" });
 
   let options = raw.map(parseJourney);

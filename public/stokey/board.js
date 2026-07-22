@@ -1219,7 +1219,9 @@ function jpRenderOptions(){
               : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
     const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : "",
                    o.km ? `${o.km} km` : "", o.ascent != null ? `↑ ${o.ascent} m` : ""].filter(Boolean).join(" · ");
-    const arr = [o.dep ? `leave ${to12h(new Date(o.dep))}` : "", o.arr ? `arrive ${to12h(new Date(o.arr))}` : ""].filter(Boolean).join(" · ");
+    const noMer = iso => to12h(new Date(iso)).replace(/\s?[AP]M$/i, "");
+    const mer = iso => to12h(new Date(iso)).toLowerCase().replace(/\s/, "");
+    const arr = (o.dep && o.arr) ? `${noMer(o.dep)} → ${mer(o.arr)}` : o.arr ? `arrive ${to12h(new Date(o.arr))}` : "";
     return `<div class="jpopt ${i === JP.sel ? "sel" : ""} ${open ? "open" : ""}" data-i="${i}">
       <div class="jpopthead">
         <div class="jpdur">${o.duration}<span>min</span></div>
