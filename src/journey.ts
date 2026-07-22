@@ -323,10 +323,10 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
   } catch { return null; }
 }
 
-async function jp(env: Env, to: string, params: Record<string, string>): Promise<any[]> {
+async function jp(env: Env, to: string, params: Record<string, string>, from = `${HOME.lat},${HOME.lon}`): Promise<any[]> {
   const qs = new URLSearchParams(params);
   if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
-  const url = `${TFL}/Journey/JourneyResults/${HOME.lat},${HOME.lon}/to/${to}?${qs}`;
+  const url = `${TFL}/Journey/JourneyResults/${from}/to/${to}?${qs}`;
   const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, cf: { cacheTtl: 30, cacheEverything: true } });
   if (!r.ok) return [];
   const body: any = await r.json().catch(() => ({}));
@@ -349,7 +349,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // direct bus, so leastwalking surfaces the rail routes it hides. Run the TfL queries
   // and the Stadia full walk/cycle routes ALL in parallel (they're independent) so the
   // slowest single call, not their sum, sets the latency.
-  const prefs = ["", "leastwalking"];
+  const prefs = [""];
   const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
   const [raws, stadiaArr] = await Promise.all([
     Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base))),
