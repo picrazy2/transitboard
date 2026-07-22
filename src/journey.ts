@@ -146,7 +146,10 @@ function parseLeg(l: any): JLeg {
     duration: Math.round(num(l.duration)),
     from: l.departurePoint?.commonName ?? "",
     to: l.arrivalPoint?.commonName ?? "",
-    fromId: l.departurePoint?.naptanId ?? l.departurePoint?.icsCode ?? null,  // for live "see more" departures
+    // For live "see more" departures. A bus leg's naptanId is the StopArea *group*
+    // (490G…), which /Arrivals rejects; individualStopId (490003307Q) is the actual
+    // stop. Tube/rail have no individualStopId but their naptanId works.
+    fromId: l.departurePoint?.individualStopId ?? l.departurePoint?.naptanId ?? null,
     dep: l.departureTime ?? null,
     arr: l.arrivalTime ?? null,
     instruction: l.instruction?.summary ?? "",

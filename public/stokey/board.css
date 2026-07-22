@@ -335,8 +335,11 @@ body.planning .chiprow{display:none}
 .jplegtime{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* Per-leg label drawn on the map. */
-.jpleglabel{transform:translate(-50%,-50%);background:var(--c);color:#fff;font:800 10.5px system-ui;
-            padding:2px 6px;border-radius:5px;border:1.5px solid #0f1115;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+/* Sits above the track, not centred on it, so it reads as a label not a stop. */
+.jpleglabel{transform:translate(-50%,-165%);background:var(--c);color:#fff;font:800 10.5px system-ui;
+            display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:5px;border:1.5px solid #0f1115;
+            white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.55)}
+.jpleglabel .mi{vertical-align:-.15em}
 
 @media (max-width:760px){
   .cols.planning{display:flex!important;flex-direction:column}
@@ -357,8 +360,13 @@ body.planning .chiprow{display:none}
 .jpmore{margin-top:7px;background:transparent;border:1px solid var(--rule);color:var(--ink);
         border-radius:7px;padding:4px 10px;font:700 11.5px system-ui;cursor:pointer}
 .jpmore:hover{border-color:#3a4356}
-.jptimes{margin-top:8px;display:flex;flex-direction:column;gap:6px}
-.jptime{display:flex;align-items:baseline;gap:9px;font-size:12px}
-.jptime b{min-width:48px;color:var(--ink);font-weight:800}
-.jptime span{color:var(--muted);font-size:11.5px}
-.jptime.jpnolive{color:var(--muted)}
+.jptimes{margin-top:8px;display:flex;flex-direction:column;gap:5px}
+.jpminihdr{font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin-bottom:1px}
+.jpnolive{color:var(--muted);font-size:12px;padding:4px 0}
+/* Mini board rows: same shape as the main board's departures, live-ticking. */
+.jpdep{display:flex;align-items:center;gap:9px;padding:5px 8px;border-radius:8px;background:var(--row)}
+.jpdep.rec{outline:1.5px solid #5b76c8;background:#151b2c}
+.jpdep.gone{opacity:.45}
+.jpbadge{flex:none;min-width:30px;text-align:center;color:#fff;font:800 11px system-ui;padding:2px 5px;border-radius:5px}
+.jpdepto{flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jpdepeta{flex:none;font:800 14px system-ui;font-variant-numeric:tabular-nums;color:var(--ink)}

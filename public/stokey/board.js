@@ -854,30 +854,35 @@ function fitTo(pts, sig){
   const z = Math.max(MIN_FOCUS_ZOOM, map.getBoundsZoom(b, false, L.point(34, 50)));
   map.setView(b.getCenter(), z, {animate:true});
 }
+// Every focus (a vehicle, a stop, a line/direction) pans to a single fixed zoom
+// centred on the thing itself — never a fit-to-bounds that flies out for a long line.
+const FOCUS_ZOOM = 14;
 function fitFocus(){
   if(!focus && !mapNarrowed()){
     if(lastFit !== null){ lastFit = null; if(homeBounds) map.fitBounds(homeBounds, {...FIT, animate:true}); }
     return;
   }
   const active = activeLines();
+  let center = null, sig = "";
   if(FS.veh){
-    const pts = [];
     const v = allPins().find(v => v.vehicleId === FS.veh);
-    for(const s of nodeMarkers) if(FS.stops.has(s.id)) pts.push(s.marker.getLatLng());
-    if(v) pts.push(L.latLng(v.lat, v.lon));
-    fitTo(pts, `veh:${FS.veh}|${v ? "p" : "n"}`);
-    return;
+    if(v) center = L.latLng(v.lat, v.lon);
+    else { const s = nodeMarkers.find((s) => FS.stops.has(s.id)); if(s) center = s.marker.getLatLng(); }
+    sig = `veh:${FS.veh}`;
+  } else if(focus && focus.kind === "stop"){
+    const n = nodeMarkers.find((s) => s.id === focus.id); if(n) center = n.marker.getLatLng();
+    sig = `stop:${focus.id}`;
+  } else {
+    // Line / direction: centre on this line's board stop(s) near home, not the whole
+    // route — so it lands consistently instead of framing miles of track.
+    const pts = [];
+    for(const s of nodeMarkers) if(s.onBoard && s.lines.some((l) => active.has(l))) pts.push(s.marker.getLatLng());
+    if(pts.length) center = L.latLngBounds(pts).getCenter();
+    sig = `lines:${[...active].sort().join(",")}|${focus?.kind || ""}|${focus?.id || ""}`;
   }
-  // Whole line(s): the full drawn geometry of every active line.
-  const pts = [];
-  for(const l of lineLayers) if(active.has(l.line) && onMap(l.line)){
-    try{ const b = l.poly.getBounds(); if(b.isValid()) pts.push(b.getNorthEast(), b.getSouthWest()); }catch{}
-  }
-  // A tapped bus stop has no line geometry of its own — anchor on the stop.
-  if(focus && focus.kind === "stop"){
-    const n = nodeMarkers.find(s => s.id === focus.id); if(n) pts.push(n.marker.getLatLng());
-  }
-  fitTo(pts, `lines:${[...active].sort().join(",")}|${focus?.kind || ""}|${focus?.id || ""}`);
+  if(!center || sig === lastFit) return;
+  lastFit = sig;
+  map.setView(center, FOCUS_ZOOM, {animate:true});
 }
 
 // ---------- fleet (walk only) ----------
@@ -909,7 +914,13 @@ map.on("click", () => {
   if(had){ renderFilters(); renderAll(); }
 });
 if(typeof recentre !== "undefined") recentre.addEventListener("click", () => homeBounds && (lastFit = null, map.fitBounds(homeBounds, FIT)));
-if(typeof infoclose !== "undefined") infoclose.addEventListener("click", e => { e.stopPropagation(); hideInfo(); });
+if(typeof infoclose !== "undefined") infoclose.addEventListener("click", e => {
+  e.stopPropagation(); hideInfo();
+  if(typeof JP !== "undefined" && JP.active) return;
+  const had = focus || mapNarrowed() || tableAll;   // closing the popup also clears the focus
+  focus = null; selected = new Set(SERVICES); tableAll = false;
+  if(had){ renderFilters(); renderAll(); }
+});
 if(typeof passedBtn !== "undefined") passedBtn.addEventListener("click", () => {
   showPassed = !showPassed;
   passedBtn.setAttribute("aria-pressed", String(showPassed));
@@ -1128,7 +1139,8 @@ async function jpLoad(){
     const d = await r.json();
     if(tok !== JP.loadTok) return;
     JP.options = d.options || [];
-    JP.sel = -1; JP.expanded = -1;    // options start collapsed; overview shows them all on the map
+    JP.sel = JP.options.length ? 0 : -1;   // first option expanded + framed by default
+    JP.expanded = JP.sel;
     jpRenderOptions(); jpDrawMap(); jpFit();
   }catch{ if(tok === JP.loadTok) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
@@ -1189,7 +1201,9 @@ function jpToggle(i){
   }
 }
 
-// Live upcoming departures for a transit leg's boarding stop.
+// "See more" opens a mini board for that leg's line + stop: the live upcoming
+// departures (same TfL feed the main board uses, so the times match), ticking down,
+// with the one your journey is built around highlighted.
 async function jpSeeMore(oi, li, btn){
   const box = btn.nextElementSibling;
   if(!box.hidden){ box.hidden = true; btn.textContent = "See more times"; return; }
@@ -1199,28 +1213,59 @@ async function jpSeeMore(oi, li, btn){
     const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&line=${encodeURIComponent(leg.lineId)}`);
     const d = await r.json();
     const deps = d.departures || [];
+    const col = legColor(leg);
+    const rec = leg.dep ? Date.parse(leg.dep) : null;
     box.innerHTML = deps.length
-      ? deps.map(x => `<div class="jptime"><b>${x.etaMin === 0 ? "Due" : x.etaMin + " min"}</b><span>${to12h(new Date(x.expected))} → ${esc(shortDest(x.to))}</span></div>`).join("")
-      : `<div class="jptime jpnolive">No live times right now</div>`;
+      ? `<div class="jpminihdr">Live at ${esc(shortStop(leg.from))}</div>` + deps.map(x => {
+          const mine = rec != null && Math.abs(Date.parse(x.expected) - rec) < 90000;
+          return `<div class="jpdep${mine ? " rec" : ""}">
+            <span class="jpbadge" style="background:${col}">${esc(leg.line ?? "")}</span>
+            <span class="jpdepto">${esc(shortDest(x.to))}</span>
+            <span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span></div>`;
+        }).join("")
+      : `<div class="jpnolive">No live departures right now</div>`;
     box.hidden = false; btn.textContent = "Hide times";
   }catch{ btn.textContent = "See more times"; }
 }
+// Tick the mini-board countdowns each second, like the main board's rows.
+setInterval(() => {
+  for(const el of document.querySelectorAll(".jpdepeta[data-exp]")){
+    if(!el.dataset.exp) continue;
+    const c = countdown(el.dataset.exp, null);
+    el.textContent = c.text;
+    el.closest(".jpdep")?.classList.toggle("gone", c.secs <= 0);
+  }
+}, 1000);
 
 function jpDrawMap(){
   jpLayer.clearLayers();
   // Overview: every option faint. Expanded: that one bold, styled per leg, labelled.
   JP.options.forEach((o,i) => { if(i !== JP.sel) for(const l of o.legs) jpLeg(l, false); });
+  const o = JP.options[JP.sel];
+  if(!o){ jpEndpoint(homeLatLng(), "#20c05b"); jpEndpoint([JP.dest.lat, JP.dest.lon], "#e6e8ee"); return; }
+  for(const l of o.legs) jpLeg(l, true);
+  // Transfer points: a ringed marker at every boundary between legs, so a change
+  // (e.g. bus -> bus) reads clearly. Endpoints are home (green) and destination.
+  for(let i = 0; i < o.legs.length - 1; i++){
+    const a = o.legs[i].path, b = o.legs[i + 1].path;
+    const pt = (a.length ? a[a.length - 1] : null) || (b.length ? b[0] : null);
+    if(pt) jpTransfer(pt);
+  }
   jpEndpoint(homeLatLng(), "#20c05b");
   jpEndpoint([JP.dest.lat, JP.dest.lon], "#e6e8ee");
-  const o = JP.options[JP.sel]; if(!o) return;
-  for(const l of o.legs) jpLeg(l, true);
+  // Leg labels sit ABOVE the line (a pill, not a dot on the track) so they read as
+  // labels, not stops. Placed a third of the way along to avoid the transfer dots.
   for(const l of o.legs){
     if(l.path.length < 2) continue;
-    const mid = l.path[Math.floor(l.path.length / 2)];
+    const at = l.path[Math.floor(l.path.length / 3)];
     const txt = l.line ? `${LEG_ICON(l)} ${esc(l.line)}` : `${LEG_ICON(l)} ${l.duration}m`;
-    L.marker(mid, {interactive:false, icon:L.divIcon({className:"", iconSize:[0,0], html:
+    L.marker(at, {interactive:false, zIndexOffset:1000, icon:L.divIcon({className:"", iconSize:[0,0], html:
       `<div class="jpleglabel" style="--c:${legColor(l)}">${txt}</div>`})}).addTo(jpLayer);
   }
+}
+function jpTransfer(latlng){
+  L.marker(latlng, {zIndexOffset:900, icon:L.divIcon({className:"", iconSize:[15,15], iconAnchor:[7.5,7.5], html:
+    `<div style="width:15px;height:15px;background:#0f1115;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.6)"></div>`})}).addTo(jpLayer);
 }
 function jpLeg(l, bold){
   if(l.path.length < 2) return;
