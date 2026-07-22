@@ -117,8 +117,8 @@ body.homeapp #map {
 .hfab {
   position: fixed;
   right: 14px;
-  z-index: 480;
-  bottom: calc(46vh + 16px);     /* sits just above the drawer's mid snap; JS-independent */
+  z-index: 495;                  /* above the drawer so it's always tappable */
+  bottom: calc(46vh + 16px);     /* JS keeps this just above the drawer's current height */
   width: 46px;
   height: 46px;
   border-radius: 50%;

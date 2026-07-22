@@ -395,47 +395,47 @@ function bikeCache(env: Env) {
 // Minutes bundled (not shown as a leg) for getting from the bike through the station to
 // the platform, plus a little buffer — the user asked for this padded into wait time
 // rather than shown as a misleading multi-minute "walk" leg.
-const ACCESS_PAD = 3, EGRESS_PAD = 1;
+const ACCESS_PAD = 3, EGRESS_PAD = 3;
 
 // Build cycle+transit option(s) from a TfL journey. Cycle from `startPt` straight to the
-// first boarding point and from the alighting point to `endPt` — so we cycle to/from the
-// actual platform, not the station centroid (which produced bogus 6-min access walks).
-// The through-station walk is folded into ACCESS_PAD, not shown. Also emits a variant
-// that alights one transit leg earlier and cycles from that interchange ("just cycle from
-// Kings Cross instead of taking a last short hop").
+// boarding point and from the alighting point to `endPt` — so we cycle to/from the actual
+// platform, not the station centroid (which produced bogus 6-min access walks). The
+// through-station walk is folded into ACCESS_PAD/EGRESS_PAD, not shown as a leg.
+// Also emits variants that drop a SHORT first or last transit leg and cycle that stretch
+// instead — but only when the resulting interchange is within a ~3 km cycle of the start
+// / end ("just cycle from Kings Cross rather than take one more stop", and the mirror on
+// the origin side). The distance gate stops us dropping a major leg and cycling 50 min.
 async function assembleCycleRoute(cbike: ReturnType<typeof bikeCache>, startPt: [number, number], endPt: [number, number], endName: string, j: any, idPrefix: string): Promise<JOption[]> {
   const legs = parseJourney(j, 0).legs;
   const tIdx = legs.map((l, i) => (l.kind === "transit" ? i : -1)).filter(i => i >= 0);
   if (!tIdx.length) return [];
-  const fi = tIdx[0];
-  const board = legs[fi].path[0];
-  if (!board) return [];
-  const access = await cbike(startPt, board);
-  if (!access) return [];
-  access.to = legs[fi].from || "";   // "Cycle to <boarding station>"
-  const boardTime = legs[fi].dep ? Date.parse(legs[fi].dep) : Date.now();
-  const depMs = boardTime - (access.duration + ACCESS_PAD) * 60000;
-  // Full route, plus — only when the previous interchange is within a ~3 km cycle of the
-  // destination — a variant that drops the last transit leg and cycles from there instead
-  // ("just cycle from Kings Cross rather than take one more stop"). The distance gate stops
-  // us dropping a major leg and cycling 50 min in its place.
+  const startChoices = [0];
+  if (tIdx.length >= 2) {
+    const secondBoard = legs[tIdx[1]].path[0];   // where you'd board if you cycle past the first hop
+    if (secondBoard && haversineKm(secondBoard, startPt) <= 3) startChoices.push(1);
+  }
   const endChoices = [tIdx.length - 1];
   if (tIdx.length >= 2) {
     const dropAlight = legs[tIdx[tIdx.length - 2]].path.slice(-1)[0];
     if (dropAlight && haversineKm(dropAlight, endPt) <= 3) endChoices.push(tIdx.length - 2);
   }
-  const built = await Promise.all(endChoices.map(async (ei, variant): Promise<JOption | null> => {
-    const li = tIdx[ei];
-    const alight = legs[li].path[legs[li].path.length - 1];
-    if (!alight) return null;
-    const egress = await cbike(alight, endPt);
-    if (!egress) return null;
+  const combos: [number, number][] = [];
+  for (const si of startChoices) for (const ei of endChoices) if (si <= ei) combos.push([si, ei]);
+  const built = await Promise.all(combos.map(async ([si, ei], variant): Promise<JOption | null> => {
+    const bi = tIdx[si], li = tIdx[ei];
+    const board = legs[bi].path[0], alight = legs[li].path[legs[li].path.length - 1];
+    if (!board || !alight) return null;
+    const [access, egress] = await Promise.all([cbike(startPt, board), cbike(alight, endPt)]);
+    if (!access || !egress) return null;
+    access.to = legs[bi].from || "";   // "Cycle to <boarding station>"
     egress.to = endName;
-    const all = [{ ...access }, ...legs.slice(fi, li + 1), { ...egress }];
+    const all = [{ ...access }, ...legs.slice(bi, li + 1), { ...egress }];
     const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
     const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
     const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
+    const boardTime = legs[bi].dep ? Date.parse(legs[bi].dep) : Date.now();
     const alightTime = legs[li].arr ? Date.parse(legs[li].arr) : boardTime;
+    const depMs = boardTime - (access.duration + ACCESS_PAD) * 60000;
     const arrMs = alightTime + (egress.duration + EGRESS_PAD) * 60000;
     const duration = Math.max(1, Math.round((arrMs - depMs) / 60000));
     return { id: `${idPrefix}-${variant}`, duration, dep: new Date(depMs).toISOString(), arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };

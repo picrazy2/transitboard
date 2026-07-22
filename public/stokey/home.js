@@ -61,6 +61,7 @@ const MI = {
   home: `<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>`,
   mylocation: `<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/>`,
   route: `<path d="M19 15.18V7c0-2.21-1.79-4-4-4s-4 1.79-4 4v10c0 1.1-.9 2-2 2s-2-.9-2-2V8.82C8.16 8.4 9 7.3 9 6c0-1.66-1.34-3-3-3S3 4.34 3 6c0 1.3.84 2.4 2 2.82V17c0 2.21 1.79 4 4 4s4-1.79 4-4V7c0-1.1.9-2 2-2s2 .9 2 2v8.18c-1.16.42-2 1.52-2 2.82 0 1.66 1.34 3 3 3s3-1.34 3-3c0-1.3-.84-2.4-2-2.82z"/>`,
+  recenter: `<path d="M5 15H3v4c0 1.1.9 2 2 2h4v-2H5v-4zM5 5h4V3H5c-1.1 0-2 .9-2 2v4h2V5zm14-2h-4v2h4v4h2V5c0-1.1-.9-2-2-2zm0 16h-4v2h4c1.1 0 2-.9 2-2v-4h-2v4zM12 9c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>`,
 };
 const PLACE_ICON = { station: "train", restaurant: "place", hotel: "place", store: "place", park: "place", school: "place", airport: "place", address: "place", place: "place", recent: "recent" };
 const mi = (name, size = 16) => `<svg class="mi" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${MI[name] ?? MI.place}</svg>`;
@@ -348,43 +349,70 @@ async function choose(place) {
 // ---------- draggable bottom drawer (Google-Maps-style snap points) ----------
 const SNAPS = { peek: 132, mid: () => Math.round(innerHeight * 0.46), full: () => Math.round(innerHeight * 0.86) };
 function snapPx(name) { const v = SNAPS[name]; return typeof v === "function" ? v() : v; }
+function setDrawerH(h) {
+  const d = document.getElementById("drawer");
+  d.style.height = h + "px";
+  const fab = document.getElementById("hRecenter");
+  if (fab) fab.style.bottom = Math.round(h + 14) + "px";   // keep the FAB just above the drawer
+}
 function snapTo(name) {
   const d = document.getElementById("drawer");
   d.dataset.snap = name;
-  d.style.height = snapPx(name) + "px";
+  setDrawerH(snapPx(name));
   requestAnimationFrame(() => map.invalidateSize());
 }
+// The whole drawer is draggable: a vertical drag collapses/expands it, EXCEPT when the
+// gesture should scroll the options list instead (dragging up while already full, or
+// dragging down while the list isn't scrolled to the top). Decided once per gesture.
 function initDrawer() {
   const d = document.getElementById("drawer");
   const handle = document.getElementById("dragHandle");
+  const box = document.getElementById("hOptions");
   snapTo("mid");
-  let startY = 0, startH = 0, dragging = false;
-  const onDown = e => { dragging = true; startY = (e.touches ? e.touches[0].clientY : e.clientY); startH = d.getBoundingClientRect().height; d.style.transition = "none"; };
+  let pressed = false, moved = false, startY = 0, startH = 0, mode = null;   // mode: null -> undecided, "drawer", "scroll"
+  const onDown = e => { pressed = true; moved = false; mode = null; startY = (e.touches ? e.touches[0].clientY : e.clientY); startH = d.getBoundingClientRect().height; d.style.transition = "none"; };
   const onMove = e => {
-    if (!dragging) return;
+    if (!pressed) return;
     const y = (e.touches ? e.touches[0].clientY : e.clientY);
-    const h = Math.max(SNAPS.peek - 20, Math.min(snapPx("full") + 20, startH + (startY - y)));
-    d.style.height = h + "px";
-    if (e.cancelable) e.preventDefault();
+    const dy = startY - y;   // up positive
+    if (mode === null) {
+      if (Math.abs(dy) < 5) return;
+      const onHandle = e.target && e.target.closest && e.target.closest(".draghandle");
+      const full = d.dataset.snap === "full";
+      const atTop = box.scrollTop <= 0;
+      // Handle always drags. Otherwise: dragging down drags the drawer only when the list
+      // is at the top; dragging up drags the drawer unless it's already full (then scroll).
+      mode = onHandle ? "drawer" : (dy < 0 ? (atTop ? "drawer" : "scroll") : (full ? "scroll" : "drawer"));
+    }
+    if (mode === "drawer") {
+      moved = true;
+      setDrawerH(Math.max(SNAPS.peek - 20, Math.min(snapPx("full") + 20, startH + dy)));
+      if (e.cancelable) e.preventDefault();
+    }
   };
   const onUp = () => {
-    if (!dragging) return; dragging = false;
+    if (!pressed) return; pressed = false;
     d.style.transition = "";
+    if (mode !== "drawer") { mode = null; return; }
+    mode = null;
     const h = d.getBoundingClientRect().height;
-    const order = ["peek", "mid", "full"];
-    let best = order[0], bd = Infinity;
-    for (const n of order) { const dist = Math.abs(snapPx(n) - h); if (dist < bd) { bd = dist; best = n; } }
+    let best = "mid", bd = Infinity;
+    for (const n of ["peek", "mid", "full"]) { const dist = Math.abs(snapPx(n) - h); if (dist < bd) { bd = dist; best = n; } }
     snapTo(best);
   };
-  handle.addEventListener("touchstart", onDown, { passive: true });
-  handle.addEventListener("touchmove", onMove, { passive: false });
-  handle.addEventListener("touchend", onUp);
-  handle.addEventListener("mousedown", onDown);
+  d.addEventListener("touchstart", onDown, { passive: true });
+  d.addEventListener("touchmove", onMove, { passive: false });
+  d.addEventListener("touchend", onUp);
+  d.addEventListener("mousedown", onDown);
   addEventListener("mousemove", onMove);
   addEventListener("mouseup", onUp);
-  // Tapping the handle when peeking pops it up.
-  handle.addEventListener("click", () => { if (d.dataset.snap === "peek") snapTo("mid"); });
-  addEventListener("resize", () => { snapTo(d.dataset.snap); });
+  // Tap the handle to cycle the drawer down a level and collapse (full -> mid -> peek -> full).
+  handle.addEventListener("click", () => {
+    if (moved) return;   // that was a drag, not a tap
+    const order = ["full", "mid", "peek"];
+    snapTo(order[(order.indexOf(d.dataset.snap) + 1) % order.length]);
+  });
+  addEventListener("resize", () => snapTo(d.dataset.snap));
 }
 
 // ---------- wire up ----------
