@@ -259,9 +259,16 @@ async function stadiaAscent(key: string, path: [number, number][]): Promise<numb
     });
     if (!r.ok) return null;
     const d: any = await r.json();
-    const h: number[] = d.height ?? [];
-    let asc = 0;
-    for (let i = 1; i < h.length; i++) { const dh = h[i] - h[i - 1]; if (dh > 0) asc += dh; }
+    const h: number[] = (d.height ?? []).filter((x: any) => typeof x === "number");
+    if (h.length < 2) return null;
+    // Smooth, then count only sustained climbs (>3 m above the running low) so DEM
+    // sampling noise doesn't inflate the total — summing raw deltas roughly doubled it.
+    const sm = h.map((_, i) => (h[Math.max(0, i - 1)] + h[i] + h[Math.min(h.length - 1, i + 1)]) / 3);
+    let asc = 0, ref = sm[0];
+    for (const e of sm) {
+      if (e > ref + 3) { asc += e - ref; ref = e; }
+      else if (e < ref) ref = e;
+    }
     return Math.round(asc);
   } catch { return null; }
 }
@@ -322,11 +329,15 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // LeaveAtStation already returns both cycle-to-station+transit and full-cycle.
   // TakeOnTransport = bring the bike on board, so you cycle at BOTH ends (a folding
   // Brompton goes anywhere). LeaveAtStation would strand the bike at the origin.
-  const raw = mode === "cycle"
-    ? await jp(env, to, { mode: TRANSIT, cyclePreference: "TakeOnTransport" })
-    : await jp(env, to, { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" });
+  const base: Record<string, string> = mode === "cycle"
+    ? { mode: TRANSIT, cyclePreference: "TakeOnTransport" }
+    : { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
+  // Query a few journey preferences and merge — TfL's default ranking favours a
+  // direct bus, so leastinterchange/leastwalking surface the rail routes it hides.
+  const prefs = ["", "leastinterchange", "leastwalking"];
+  const raws = await Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base)));
 
-  let options = raw.map(parseJourney);
+  let options = raws.flat().map(parseJourney);
 
   // Full walk / cycle: prefer Stadia (Valhalla) — elevation-aware bike, any-distance
   // walk, detailed geometry — and drop TfL's version. Fall back to TfL if no key.
@@ -346,15 +357,16 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     if (seen.has(sig)) return false; seen.add(sig); return true;
   });
 
-  // Drop a transit option if another transit option is at least as good on every axis
-  // (total time, walk, cycle, interchanges, arrival) and strictly better on one — it's
-  // never worth choosing. Full walk/cycle are a different trade-off, so keep them.
+  // Drop a transit option if ANY other option (including full walk/cycle) is at least
+  // as good on every axis — total time, walk, cycle, interchanges, arrival — and better
+  // on one. This kills the nonsense "cycle 30 min to a station, short hop, cycle again"
+  // routes that a straight 23-min ride beats outright. Full walk/cycle are always kept.
   const axes = (o: JOption) => [o.duration, o.walkMins, o.cycleMins, o.changes, o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000];
   const dominates = (a: JOption, b: JOption) => {
     const A = axes(a), B = axes(b);
     return A.every((v, i) => v <= B[i]) && A.some((v, i) => v < B[i]);
   };
-  options = options.filter(b => b.kind !== "transit" || !options.some(a => a !== b && a.kind === "transit" && dominates(a, b)));
+  options = options.filter(b => b.kind !== "transit" || !options.some(a => a !== b && dominates(a, b)));
 
   const arrMs = (o: JOption) => o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000;
   options = options.sort((a, b) => arrMs(a) - arrMs(b)).slice(0, 6);   // soonest arrival first

@@ -298,17 +298,17 @@ body.planning .warnkey,body.planning #disrupt{display:none}
    the planner panel shows (and floats out of the grid) even in the default view. */
 .panel[hidden]{display:none!important}
 .jppanel{gap:0}
-.jphead{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.jphead{display:flex;align-items:center;gap:11px;margin-bottom:13px}
+.jpdest{flex:1;min-width:0}
 .jpback{background:var(--row);border:1px solid var(--rule);color:var(--ink);border-radius:9px;
-        width:34px;height:34px;font-size:17px;cursor:pointer;flex:none}
+        width:34px;height:34px;font-size:17px;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center}
 .jpback:hover{border-color:#3a4356}
-.jptitle{font-size:16px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
-.jpsub{font-size:12px;color:var(--muted)}
-/* Segmented pill, like the board's Default/All and Walk/Cycle toggles. */
-.jptabs{display:inline-flex;align-self:flex-start;background:#0c0e13;border:1px solid var(--rule);
-        border-radius:999px;padding:2px;margin-bottom:13px}
+.jptitle{font-size:16px;font-weight:800;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jpsub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Icon-only segmented toggle, in the destination row. */
+.jptabs{display:inline-flex;flex:none;background:#0c0e13;border:1px solid var(--rule);border-radius:999px;padding:2px}
 .jptabs button{background:transparent;border:0;color:var(--muted);cursor:pointer;border-radius:999px;
-               padding:7px 13px;font:700 12px/1 system-ui;display:inline-flex;align-items:center;gap:5px}
+               padding:6px 10px;display:inline-flex;align-items:center;justify-content:center}
 .jptabs button.on{background:var(--ink);color:var(--bg)}
 .jpoptions{display:flex;flex-direction:column;gap:9px;overflow:auto;flex:1;min-height:0;padding-right:4px;
            scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
@@ -317,6 +317,9 @@ body.planning .warnkey,body.planning #disrupt{display:none}
        transition:border-color .12s ease}
 .jpopt:hover{border-color:#3a4356}
 .jpopt.sel{border-color:#5b76c8;background:#151b2c}
+/* Obvious "leave within 5 min" flag at the top of an option. */
+.jpsoon{display:inline-block;background:var(--warn);color:#111;font:800 10px/1 system-ui;letter-spacing:.04em;
+        text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-bottom:9px}
 .jpopthead{display:flex;align-items:center;gap:12px}
 .jpdur{font-size:22px;font-weight:800;line-height:1;flex:none;min-width:54px}
 .jpdur span{font-size:11px;font-weight:600;color:var(--muted);margin-left:2px}
