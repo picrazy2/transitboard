@@ -1273,7 +1273,7 @@ async function jpSeeMore(oi, li, btn){
             <span class="jpdepright"><span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span>
               ${clock ? `<span class="jpdepclock">${esc(clock)}</span>` : ""}</span></div>`;
         }).join("")
-      : `<div class="jpnolive">No live departures right now</div>`;
+      : `<div class="jpnolive">${leg.dep ? `Scheduled ${esc(to12h(new Date(leg.dep)))} · no live times for this service` : "No live departures right now"}</div>`;
     box.hidden = false; btn.textContent = "Hide times";
   }catch{ btn.textContent = "See more times"; }
 }
