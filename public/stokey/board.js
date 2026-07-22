@@ -918,11 +918,13 @@ map.on("click", () => {
   focus = null; selected = new Set(SERVICES); tableAll = false;
   if(had){ renderFilters(); renderAll(); }
 });
-// FAB icons (Material, no emoji).
-if(typeof recentre !== "undefined") recentre.innerHTML = mi("mylocation", 19);
-if(typeof passedBtn !== "undefined") passedBtn.innerHTML = mi("recent", 19);
-if(typeof legendBtn !== "undefined") legendBtn.innerHTML = mi("info", 19);
-if(typeof fullscreen !== "undefined") fullscreen.innerHTML = mi("fullscreen", 19);
+// FAB icons (Material, no emoji). Deferred to init() — mi() is defined later.
+function setFabIcons(){
+  if(typeof recentre !== "undefined") recentre.innerHTML = mi("mylocation", 19);
+  if(typeof passedBtn !== "undefined") passedBtn.innerHTML = mi("recent", 19);
+  if(typeof legendBtn !== "undefined") legendBtn.innerHTML = mi("info", 19);
+  if(typeof fullscreen !== "undefined") fullscreen.innerHTML = mi("fullscreen", 19);
+}
 
 // Recentre: frame the whole journey while planning, else home.
 if(typeof recentre !== "undefined") recentre.addEventListener("click", () => {
@@ -1447,6 +1449,7 @@ function jpFit(){
 // ---------- init ----------
 (async function init(){
   injectPlanner();
+  setFabIcons();
   renderFilters();
   await loadGeo(MODE).catch(e => console.error("geo", e));
   buildMap();
