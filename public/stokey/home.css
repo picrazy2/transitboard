@@ -2,11 +2,13 @@
    and a draggable bottom drawer of route options. Reuses board.css for the .jp* card,
    leg and chip styles; this sheet is only the mobile shell around them. */
 
+html { height: 100%; overscroll-behavior: none; }   /* kill Android pull-to-refresh */
 body.homeapp {
   display: block;
   padding: 0;
   overflow: hidden;
   overscroll-behavior: none;
+  touch-action: pan-x pan-y;
 }
 body.homeapp #map {
   position: fixed;

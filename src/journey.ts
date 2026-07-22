@@ -176,6 +176,14 @@ export interface JOption {
 
 const num = (s: any) => (typeof s === "number" ? s : parseFloat(s) || 0);
 
+// Great-circle distance in km between two [lat, lon] points.
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const R = 6371, toR = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * toR, dLon = (b[1] - a[1]) * toR;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * toR) * Math.cos(b[0] * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
 function parseLeg(l: any): JLeg {
   const mode = l.mode?.id ?? l.mode?.name ?? "walking";
   const meta = MODE_META[mode] ?? { label: l.mode?.name ?? mode, color: "#8a93a5", kind: "transit" };
@@ -384,6 +392,57 @@ function bikeCache(env: Env) {
   };
 }
 
+// Minutes bundled (not shown as a leg) for getting from the bike through the station to
+// the platform, plus a little buffer — the user asked for this padded into wait time
+// rather than shown as a misleading multi-minute "walk" leg.
+const ACCESS_PAD = 3, EGRESS_PAD = 1;
+
+// Build cycle+transit option(s) from a TfL journey. Cycle from `startPt` straight to the
+// first boarding point and from the alighting point to `endPt` — so we cycle to/from the
+// actual platform, not the station centroid (which produced bogus 6-min access walks).
+// The through-station walk is folded into ACCESS_PAD, not shown. Also emits a variant
+// that alights one transit leg earlier and cycles from that interchange ("just cycle from
+// Kings Cross instead of taking a last short hop").
+async function assembleCycleRoute(cbike: ReturnType<typeof bikeCache>, startPt: [number, number], endPt: [number, number], endName: string, j: any, idPrefix: string): Promise<JOption[]> {
+  const legs = parseJourney(j, 0).legs;
+  const tIdx = legs.map((l, i) => (l.kind === "transit" ? i : -1)).filter(i => i >= 0);
+  if (!tIdx.length) return [];
+  const fi = tIdx[0];
+  const board = legs[fi].path[0];
+  if (!board) return [];
+  const access = await cbike(startPt, board);
+  if (!access) return [];
+  access.to = legs[fi].from || "";   // "Cycle to <boarding station>"
+  const boardTime = legs[fi].dep ? Date.parse(legs[fi].dep) : Date.now();
+  const depMs = boardTime - (access.duration + ACCESS_PAD) * 60000;
+  // Full route, plus — only when the previous interchange is within a ~3 km cycle of the
+  // destination — a variant that drops the last transit leg and cycles from there instead
+  // ("just cycle from Kings Cross rather than take one more stop"). The distance gate stops
+  // us dropping a major leg and cycling 50 min in its place.
+  const endChoices = [tIdx.length - 1];
+  if (tIdx.length >= 2) {
+    const dropAlight = legs[tIdx[tIdx.length - 2]].path.slice(-1)[0];
+    if (dropAlight && haversineKm(dropAlight, endPt) <= 3) endChoices.push(tIdx.length - 2);
+  }
+  const built = await Promise.all(endChoices.map(async (ei, variant): Promise<JOption | null> => {
+    const li = tIdx[ei];
+    const alight = legs[li].path[legs[li].path.length - 1];
+    if (!alight) return null;
+    const egress = await cbike(alight, endPt);
+    if (!egress) return null;
+    egress.to = endName;
+    const all = [{ ...access }, ...legs.slice(fi, li + 1), { ...egress }];
+    const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
+    const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
+    const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
+    const alightTime = legs[li].arr ? Date.parse(legs[li].arr) : boardTime;
+    const arrMs = alightTime + (egress.duration + EGRESS_PAD) * 60000;
+    const duration = Math.max(1, Math.round((arrMs - depMs) / 60000));
+    return { id: `${idPrefix}-${variant}`, duration, dep: new Date(depMs).toISOString(), arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
+  }));
+  return built.filter(Boolean) as JOption[];
+}
+
 async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>): Promise<JOption[]> {
   if (!SKEY(env)) return [];
   const now = Date.now();
@@ -393,33 +452,14 @@ async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike
   // pay off. There are only a handful, and the queries run in parallel, so it's cheap.
   const per = await Promise.all(STATIONS.map(async (s): Promise<JOption[]> => {
     const cycMin = Math.max(1, Math.round(s.cycMin));
-    // Transit from the station, departing when you'd get there by bike.
-    const [journeys, access] = await Promise.all([
-      jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${s.lat},${s.lon}`),
-      cbike([HOME.lat, HOME.lon], [s.lat, s.lon], cycMin),
-    ]);
-    if (!access) return [];
-    access.to = s.name;
-    // Consider TfL's top few journeys per station, not just the fastest: a lower-ranked
-    // one may need much less cycling (Stoke Newington + Weaver + Elizabeth to Heathrow
-    // beats cycling 9 min to Finsbury Park). Dominance keeps only the ones that pay off.
-    const built = await Promise.all((journeys as any[]).slice(0, 2).map(async (j, k): Promise<JOption | null> => {
-      const parsed = parseJourney(j, k);
-      if (!parsed.legs.some(l => l.kind === "transit")) return null;   // just walking from the station -> useless
-      const legs = parsed.legs.slice();
-      while (legs.length && legs[legs.length - 1].kind === "walk") legs.pop();   // cycle the last mile instead
-      const lastTransit = [...legs].reverse().find(l => l.kind === "transit");
-      const egress = lastTransit?.path.length ? await cbike(lastTransit.path[lastTransit.path.length - 1], [toLat, toLon]) : null;
-      const all = [{ ...access }, ...legs, ...(egress ? [egress] : [])];
-      const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
-      const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
-      const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
-      const arrMs = (parsed.arr ? Date.parse(parsed.arr) : now) + (egress ? egress.duration * 60000 : 0);
-      const dep = j.startDateTime ? new Date(Date.parse(j.startDateTime) - cycMin * 60000).toISOString() : new Date(now).toISOString();
-      const duration = Math.max(1, Math.round((arrMs - Date.parse(dep)) / 60000));
-      return { id: `stn-${s.id}-${k}`, duration, dep, arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
-    }));
-    return built.filter(Boolean) as JOption[];
+    // Transit from the station, departing when you'd get there by bike. Consider TfL's top
+    // 2 journeys per station (a lower-ranked one may need much less cycling, e.g. Stoke
+    // Newington + Weaver + Elizabeth to Heathrow). assembleCycleRoute cycles to/from the
+    // real platforms and adds a drop-the-last-hop variant; dominance keeps what pays off.
+    const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${s.lat},${s.lon}`);
+    const built = await Promise.all((journeys as any[]).slice(0, 2).map((j, k) =>
+      assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `stn-${s.id}-${k}`)));
+    return built.flat();
   }));
   return per.flat();
 }
@@ -470,7 +510,7 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
   const dests = await nearDestStations(env, toLat, toLon);
   if (!dests.length) return [];
   const now = Date.now();
-  const jobs: (() => Promise<JOption | null>)[] = [];
+  const jobs: (() => Promise<JOption[]>)[] = [];
   for (const D of dests) {
     // Pair each dest station with the home station(s) ON ITS LINE first — that's the
     // no-transfer ride, and the right home station may not be a nearest one (a Victoria-
@@ -483,32 +523,15 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
       if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     }
     for (const H of homeStns) {
-    jobs.push(async () => {
-      const cycMin = Math.max(1, Math.round(H.cycMin));
-      const [journeys, access, egress] = await Promise.all([
-        jp(env, `${D.lat},${D.lon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${H.lat},${H.lon}`),
-        cbike([HOME.lat, HOME.lon], [H.lat, H.lon], cycMin),
-        cbike([D.lat, D.lon], [toLat, toLon]),
-      ]);
-      if (!access || !egress) return null;
-      access.to = H.name; egress.to = D.name ? `${D.name} · destination` : "";
-      const j = (journeys as any[])[0]; if (!j) return null;
-      const parsed = parseJourney(j, 0);
-      if (!parsed.legs.some(l => l.kind === "transit")) return null;
-      const legs = parsed.legs.slice();
-      while (legs.length && legs[legs.length - 1].kind === "walk") legs.pop();   // arrive at D, then cycle to dest
-      const all = [{ ...access }, ...legs, { ...egress }];
-      const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
-      const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
-      const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
-      const arrMs = (parsed.arr ? Date.parse(parsed.arr) : now) + egress.duration * 60000;
-      const dep = j.startDateTime ? new Date(Date.parse(j.startDateTime) - cycMin * 60000).toISOString() : new Date(now).toISOString();
-      const duration = Math.max(1, Math.round((arrMs - Date.parse(dep)) / 60000));
-      return { id: `dst-${H.id}-${Math.round(D.lat * 1e3)}`, duration, dep, arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
-    });
+      jobs.push(async () => {
+        const cycMin = Math.max(1, Math.round(H.cycMin));
+        const journeys = await jp(env, `${D.lat},${D.lon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${H.lat},${H.lon}`);
+        const j = (journeys as any[])[0]; if (!j) return [];
+        return assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}`);
+      });
     }
   }
-  return (await Promise.all(jobs.map(f => f()))).filter(Boolean) as JOption[];
+  return (await Promise.all(jobs.map(f => f()))).flat();
 }
 
 // Fold two Stadia cycle cards (fast/quiet) into one if they're basically identical.
@@ -595,6 +618,18 @@ function rankOptions(options: JOption[]): JOption[] {
   options = options.filter(b => b.kind !== "transit" || !options.some(a => a !== b && dominates(a, b)));
 
   const arrMs = (o: JOption) => o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000;
+
+  // Strongly prefer one-seat rides: a cycle+transit route with a transfer is only worth
+  // showing if there's no no-transfer option at all, or it's genuinely faster than every
+  // no-transfer one (one-seat transit + full cycle/walk). Otherwise the extra change isn't
+  // worth it. baseArr = Infinity when nothing no-transfer exists, so transfers survive then.
+  // Only count real no-transfer TRANSIT rides and full-walk as the bar for one-seat
+  // preference — NOT full-cycle (its "arrival" is just now+duration and would wrongly
+  // greenlight every transfer). If no one-seat ride exists, transfers are all we have.
+  const noTransfer = options.filter(o => (o.kind === "transit" && o.changes === 0) || o.kind === "full-walk");
+  const baseArr = noTransfer.length ? Math.min(...noTransfer.map(arrMs)) : Infinity;
+  options = options.filter(o => o.kind !== "transit" || o.changes === 0 || arrMs(o) < baseArr);
+
   options.sort((a, b) => arrMs(a) - arrMs(b));   // soonest arrival first
   // Always keep the full walk/cycle option(s) — they're a mode the user explicitly wants
   // to see — then fill the rest with the soonest transit routes, capped at 6 total.
@@ -611,28 +646,10 @@ async function homewardStationRoutes(env: Env, fromLat: number, fromLon: number,
   if (!SKEY(env)) return [];
   const from = `${fromLat},${fromLon}`;
   const per = await Promise.all(STATIONS.map(async (s): Promise<JOption[]> => {
-    const cycMin = Math.max(1, Math.round(s.cycMin));
-    const [journeys, egress] = await Promise.all([
-      jp(env, `${s.lat},${s.lon}`, { mode: `walking,${RAIL_MODES}` }, from),
-      cbike([s.lat, s.lon], [HOME.lat, HOME.lon], cycMin),
-    ]);
-    if (!egress) return [];
-    egress.to = "Home";
-    const built = (journeys as any[]).slice(0, 2).map((j, k): JOption | null => {
-      const parsed = parseJourney(j, k);
-      if (!parsed.legs.some(l => l.kind === "transit")) return null;   // just walking to the station -> useless
-      const legs = parsed.legs.slice();
-      while (legs.length && legs[legs.length - 1].kind === "walk") legs.pop();   // arrive at station, then cycle home
-      const all = [...legs, { ...egress }];
-      const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
-      const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
-      const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
-      const dep = j.startDateTime ?? new Date(Date.now()).toISOString();
-      const arrMs = (parsed.arr ? Date.parse(parsed.arr) : Date.now()) + cycMin * 60000;
-      const duration = Math.max(1, Math.round((arrMs - Date.parse(dep)) / 60000));
-      return { id: `home-${s.id}-${k}`, duration, dep, arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
-    });
-    return built.filter(Boolean) as JOption[];
+    const journeys = await jp(env, `${s.lat},${s.lon}`, { mode: `walking,${RAIL_MODES}` }, from);
+    const built = await Promise.all((journeys as any[]).slice(0, 2).map((j, k) =>
+      assembleCycleRoute(cbike, [fromLat, fromLon], [HOME.lat, HOME.lon], "Home", j, `home-${s.id}-${k}`)));
+    return built.flat();
   }));
   return per.flat();
 }
@@ -644,40 +661,21 @@ async function originStationRoutes(env: Env, fromLat: number, fromLon: number, c
   if (!SKEY(env)) return [];
   const origins = await nearDestStations(env, fromLat, fromLon);   // rail stations near a point
   if (!origins.length) return [];
-  const jobs: (() => Promise<JOption | null>)[] = [];
+  const jobs: (() => Promise<JOption[]>)[] = [];
   for (const O of origins) {
     // Pair with the home station on the origin station's line first (no-transfer ride).
     const sameLine = O.lines.flatMap(id => HOME_LINE_STATIONS[id] ?? []);
     const homeStns: any[] = [];
     for (const H of [...sameLine, ...STATIONS.slice(0, 2)]) if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     for (const H of homeStns) {
-    jobs.push(async () => {
-      const cycMin = Math.max(1, Math.round(H.cycMin));
-      const [journeys, access, egress] = await Promise.all([
-        jp(env, `${H.lat},${H.lon}`, { mode: `walking,${RAIL_MODES}` }, `${O.lat},${O.lon}`),
-        cbike([fromLat, fromLon], [O.lat, O.lon]),
-        cbike([H.lat, H.lon], [HOME.lat, HOME.lon], cycMin),
-      ]);
-      if (!access || !egress) return null;
-      access.to = O.name; egress.to = "Home";
-      const j = (journeys as any[])[0]; if (!j) return null;
-      const parsed = parseJourney(j, 0);
-      if (!parsed.legs.some(l => l.kind === "transit")) return null;
-      const legs = parsed.legs.slice();
-      while (legs.length && legs[0].kind === "walk") legs.shift();               // cycle origin->O instead
-      while (legs.length && legs[legs.length - 1].kind === "walk") legs.pop();   // cycle H->home instead
-      const all = [{ ...access }, ...legs, { ...egress }];
-      const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
-      const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
-      const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
-      const dep = j.startDateTime ? new Date(Date.parse(j.startDateTime) - access.duration * 60000).toISOString() : new Date(Date.now()).toISOString();
-      const arrMs = (parsed.arr ? Date.parse(parsed.arr) : Date.now()) + cycMin * 60000;
-      const duration = Math.max(1, Math.round((arrMs - Date.parse(dep)) / 60000));
-      return { id: `orig-${H.id}-${Math.round(O.lat * 1e3)}`, duration, dep, arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
-    });
+      jobs.push(async () => {
+        const journeys = await jp(env, `${H.lat},${H.lon}`, { mode: `walking,${RAIL_MODES}` }, `${O.lat},${O.lon}`);
+        const j = (journeys as any[])[0]; if (!j) return [];
+        return assembleCycleRoute(cbike, [fromLat, fromLon], [HOME.lat, HOME.lon], "Home", j, `orig-${H.id}-${Math.round(O.lat * 1e3)}`);
+      });
     }
   }
-  return (await Promise.all(jobs.map(f => f()))).filter(Boolean) as JOption[];
+  return (await Promise.all(jobs.map(f => f()))).flat();
 }
 
 export async function planHomeward(env: Env, fromLat: number, fromLon: number, stage: "fast" | "full" = "full"): Promise<{ options: JOption[]; home: { lat: number; lon: number }; from: { lat: number; lon: number } }> {
