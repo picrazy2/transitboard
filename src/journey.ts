@@ -365,10 +365,11 @@ async function bikeLeg(env: Env, from: [number, number], to: [number, number], m
 async function nearbyStationRoutes(env: Env, toLat: number, toLon: number): Promise<JOption[]> {
   if (!SKEY(env)) return [];
   const now = Date.now();
-  // Try the ~6 nearest stations, not just the closest: cycling a few extra minutes to a
-  // hub with a fast direct line (e.g. Finsbury Park + Victoria) often beats the nearest
-  // station's slower service. Dominance pruning drops the ones that don't pay off.
-  const out = await Promise.all(STATIONS.slice(0, 6).map(async (s): Promise<JOption | null> => {
+  // Try all the board's cycle-reachable stations, not just the closest: cycling a few
+  // extra minutes to a hub with a fast direct line (e.g. Finsbury Park + Victoria) often
+  // beats the nearest station's slower service. Dominance pruning drops ones that don't
+  // pay off. There are only a handful, and the queries run in parallel, so it's cheap.
+  const out = await Promise.all(STATIONS.map(async (s): Promise<JOption | null> => {
     const cycMin = Math.max(1, Math.round(s.cycMin));
     // Transit from the station, departing when you'd get there by bike.
     const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${TRANSIT}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${s.lat},${s.lon}`);
@@ -419,21 +420,16 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     return { options: stadias, dest: { lat: toLat, lon: toLon } };
   }
 
-  // NB: alternativeCycle/alternativeWalking mean "alternative TO that mode" — they
-  // swap the cycle/walk-access journeys out for others, so we do NOT want them.
-  // LeaveAtStation already returns both cycle-to-station+transit and full-cycle.
-  // TakeOnTransport = bring the bike on board, so you cycle at BOTH ends (a folding
-  // Brompton goes anywhere). LeaveAtStation would strand the bike at the origin.
-  const base: Record<string, string> = mode === "cycle"
-    ? { mode: TRANSIT, cyclePreference: "TakeOnTransport" }
-    : { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
-  // Query a couple of journey preferences and merge — TfL's default ranking favours a
-  // direct bus, so leastwalking surfaces the rail routes it hides. Run the TfL queries,
-  // the Stadia full walk/cycle routes, and (cycle) our own nearest-station router ALL in
-  // parallel (they're independent) so the slowest single call, not their sum, sets latency.
-  const prefs = [""];
+  // Cycle+transit no longer uses TfL's TakeOnTransport query: it's ~7s and picks
+  // awkward stations. Our nearest-station router (below) covers the same ground —
+  // cycle to a station, transit, cycle the last mile — faster and with better picks.
+  // Walk still queries TfL directly (that query is ~1s). maxWalkingMinutes caps access.
+  const base: Record<string, string> = { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
+  // Run the walk query (walk mode only), the Stadia full walk/cycle routes, and (cycle)
+  // our own nearest-station router ALL in parallel so the slowest single call, not their
+  // sum, sets latency.
   const [raws, stadiaArr, stationOpts] = await Promise.all([
-    Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base))),
+    mode === "walk" ? jp(env, to, base) : Promise.resolve([] as any[]),
     mode === "cycle"
       ? Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])
       : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
