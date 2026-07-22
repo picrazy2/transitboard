@@ -123,12 +123,17 @@ function fit() {
   for (const l of legs) for (const p of l.path) pts.push(p);
   pts.push(HOME); if (H.from) pts.push([H.from.lat, H.from.lon]);
   if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts), drawerPadding());
+  showFab(false);   // the route is framed now; the recenter FAB is only for after you pan away
 }
-// Keep the framed route clear of the top bar and the drawer.
+// Keep the framed route clear of the floating origin panel up top and the drawer below.
 function drawerPadding() {
   const dh = document.getElementById("drawer").getBoundingClientRect().height;
-  return { paddingTopLeft: [24, 96], paddingBottomRight: [24, Math.min(dh + 16, innerHeight * 0.6)], maxZoom: 16, animate: true };
+  const bar = document.querySelector(".hbar");
+  const top = (bar ? bar.getBoundingClientRect().bottom : 0) + 16;
+  return { paddingTopLeft: [24, top], paddingBottomRight: [24, Math.min(dh + 16, innerHeight * 0.6)], maxZoom: 16, animate: true };
 }
+// The recenter FAB only makes sense when there's a selected route AND you've panned off it.
+function showFab(v) { const f = document.getElementById("hRecenter"); if (f) f.style.display = (v && H.sel >= 0) ? "" : "none"; }
 
 // ---------- options list ----------
 function renderOptions() {
@@ -420,9 +425,12 @@ function init() {
   newSession();
   initDrawer();
   document.getElementById("hLocate").innerHTML = mi("mylocation", 20);
-  document.getElementById("hRecenter").innerHTML = mi("route", 22);
+  document.getElementById("hRecenter").innerHTML = mi("recenter", 22);
+  showFab(false);
   document.getElementById("hLocate").addEventListener("click", locate);
-  document.getElementById("hRecenter").addEventListener("click", () => { H.sel = H.expanded = H.sel >= 0 ? H.sel : -1; drawRoute(); fit(); });
+  document.getElementById("hRecenter").addEventListener("click", fit);   // re-frame the selected route
+  // Show the recenter FAB once you pan/zoom off a selected route (not on programmatic fits).
+  map.on("dragstart", () => showFab(true));
 
   const input = document.getElementById("hOrigin");
   let timer;
@@ -432,7 +440,10 @@ function init() {
     if (q.length < 2) { showResults(recents(), true); return; }
     timer = setTimeout(() => geocode(q), 220);
   });
-  input.addEventListener("focus", () => { if (input.value.trim().length < 2) showResults(recents(), true); });
+  // Focus/tap selects all the text so it's easy to clear and retype (timeout for iOS).
+  const selectAll = () => setTimeout(() => { try { input.select(); } catch {} }, 0);
+  input.addEventListener("focus", () => { selectAll(); if (input.value.trim().length < 2) showResults(recents(), true); });
+  input.addEventListener("click", selectAll);
   document.addEventListener("click", e => { if (!e.target.closest(".hbar")) document.getElementById("hResults").hidden = true; });
 
   // ?from=lat,lon pins a start point (shareable link / testing); otherwise use GPS.
