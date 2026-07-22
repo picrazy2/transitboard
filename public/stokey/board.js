@@ -1260,9 +1260,13 @@ async function jpSeeMore(oi, li, btn){
   try{
     const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}`);
     const d = await r.json();
-    const deps = d.departures || [];
+    const all = d.departures || [];
     const col = legColor(leg);
     const rec = leg.dep ? Date.parse(leg.dep) : null;
+    // Centre the list on the journey's own departure — show one before it so it lands
+    // as roughly the 2nd row — rather than always starting from "now".
+    const recIdx = rec != null ? all.findIndex(x => Math.abs(Date.parse(x.expected) - rec) < 90000) : -1;
+    const deps = (recIdx > 0 ? all.slice(recIdx - 1) : all).slice(0, 6);
     box.innerHTML = deps.length
       ? `<div class="jpminihdr">Live at ${esc(jpStopName(leg.from))}</div>` + deps.map(x => {
           const mine = rec != null && Math.abs(Date.parse(x.expected) - rec) < 90000;

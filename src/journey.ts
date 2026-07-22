@@ -242,7 +242,7 @@ async function arrivalsAt(env: Env, stopId: string, lineId: string): Promise<Dep
       .filter(p => !lineId || p.lineId === lineId)
       .map(p => ({ etaMin: Math.max(0, Math.round(p.timeToStation / 60)), expected: p.expectedArrival, to: (p.destinationName ?? p.towards ?? "").replace(/\s+(Rail|Underground)?\s*Station$/i, ""), live: true }))
       .sort((a, b) => a.etaMin - b.etaMin)
-      .slice(0, 6);
+      .slice(0, 12);   // extra so the client can centre the list on the journey's departure
   } catch { return []; }
 }
 // Bus vs Overground/rail disagree on which stop-id form /Arrivals accepts, so try
