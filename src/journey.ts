@@ -286,10 +286,11 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
     costing, directions_options: { units: "kilometers" },
   };
   // Fast: willing to use main roads, ignore hills. Quiet: prefer residential streets
-  // and cycleways, tolerate some hills.
+  // and cycleways, tolerate some hills. cycling_speed 15 km/h matches real-world /
+  // Google (Valhalla's default ~18 was ~20% too optimistic — 39 vs 47 min).
   if (costing === "bicycle") body.costing_options = { bicycle: variant === "quiet"
-    ? { use_hills: 0.3, use_roads: 0.05, bicycle_type: "Hybrid", avoid_bad_surfaces: 0.5 }
-    : { use_hills: 0.1, use_roads: 0.5, bicycle_type: "Hybrid" } };
+    ? { use_hills: 0.3, use_roads: 0.05, bicycle_type: "Hybrid", avoid_bad_surfaces: 0.5, cycling_speed: 15 }
+    : { use_hills: 0.1, use_roads: 0.5, bicycle_type: "Hybrid", cycling_speed: 15 } };
   try {
     const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
