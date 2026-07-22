@@ -352,7 +352,12 @@ async function choose(place) {
 }
 
 // ---------- draggable bottom drawer (Google-Maps-style snap points) ----------
-const SNAPS = { peek: 132, mid: () => Math.round(innerHeight * 0.46), full: () => Math.round(innerHeight * 0.86) };
+// full stops just below the floating origin panel so it never overlaps it.
+const SNAPS = {
+  peek: 132,
+  mid: () => Math.round(innerHeight * 0.46),
+  full: () => { const bar = document.querySelector(".hbar"); const top = bar ? bar.getBoundingClientRect().bottom : 64; return Math.round(innerHeight - top - 12); },
+};
 function snapPx(name) { const v = SNAPS[name]; return typeof v === "function" ? v() : v; }
 function setDrawerH(h) {
   const d = document.getElementById("drawer");
