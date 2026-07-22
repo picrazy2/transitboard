@@ -1193,7 +1193,7 @@ async function jpChoose(place){
 function jpSyncTabs(){ for(const b of document.querySelectorAll("#jpTabs button")) b.classList.toggle("on", b.dataset.jm === JP.mode); }
 
 function jpPick(place){
-  JP.dest = place; JP.mode = MODE; JP.active = true; JP.sel = -1;
+  JP.dest = place; JP.mode = MODE; JP.active = true; JP.sel = -1; JP.cache = {walk:null, cycle:null};
   document.getElementById("jpInput").value = place.name;
   document.getElementById("jpResults").hidden = true;
   document.getElementById("jpClear").hidden = false;
@@ -1232,11 +1232,15 @@ async function jpLoad(keep){
   const opts = document.getElementById("jpOptions");
   if(!keep){ opts.innerHTML = `<div class="jploading">Planning your journey…</div>`; jpLayer.clearLayers(); }
   const one = m => fetch(`/api/journey?to=${JP.dest.lat},${JP.dest.lon}&mode=${m}`).then(r => r.json()).then(d => d.options || []).catch(() => []);
+  const other = JP.mode === "walk" ? "cycle" : "walk";
   try{
-    const [walk, cycle] = await Promise.all([one("walk"), one("cycle")]);
+    // Show the current mode as soon as it's ready; prefetch the other in the background
+    // so the toggle is still instant — don't make the user wait for both up front.
+    const cur = await one(JP.mode);
     if(tok !== JP.loadTok || !JP.active) return;
-    JP.cache = { walk, cycle }; JP.updated = Date.now();
+    JP.cache[JP.mode] = cur; JP.updated = Date.now();
     jpShowMode(keep);
+    one(other).then(r => { if(tok === JP.loadTok && JP.active) JP.cache[other] = r; });
   }catch{ if(tok === JP.loadTok && !keep) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
 function jpShowMode(keep){

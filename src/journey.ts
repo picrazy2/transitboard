@@ -358,6 +358,14 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   const stadias = mode === "cycle"
     ? (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])).filter(Boolean) as JOption[]
     : ([await stadiaFull(env, toLat, toLon, "walk")].filter(Boolean)) as JOption[];
+  // If the quiet route is basically the fast route, don't show two identical cards —
+  // keep one and drop the fastest/quiet distinction.
+  if (stadias.length === 2) {
+    const [fast, quiet] = stadias;
+    if (Math.abs((fast.km ?? 0) - (quiet.km ?? 0)) < 0.15 && Math.abs((fast.ascent ?? 0) - (quiet.ascent ?? 0)) < 6 && Math.abs(fast.duration - quiet.duration) <= 1) {
+      delete fast.label; stadias.pop();
+    }
+  }
   if (stadias.length) {
     options = options.filter(o => o.kind !== fullKind).concat(stadias);
   } else if (!options.some(o => o.kind === fullKind)) {
