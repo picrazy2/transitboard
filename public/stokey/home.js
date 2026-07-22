@@ -70,7 +70,11 @@ const legColor = l => l.kind === "transit" && l.line ? colorOf(l.line) : l.color
 const legStyle = l => l.kind !== "transit" ? l.kind : (l.mode === "bus" ? "bus" : "rail");
 
 // ---------- state ----------
-const H = { from: null, options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
+const HOME_PLACE = { name: "Home · Stoke Newington", lat: HOME[0], lon: HOME[1], home: true };
+// from/to are {name,lat,lon}; to defaults to home ("get me home"). activeField tracks which
+// input the search results apply to.
+const H = { from: null, to: { ...HOME_PLACE }, activeField: "origin", options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
+const toPt = () => [H.to.lat, H.to.lon];
 
 // ---------- map ----------
 const map = L.map("map", { zoomControl: false, attributionControl: false, zoomSnap: 0.25 });
@@ -85,7 +89,7 @@ function drawRoute() {
   hLayer.clearLayers();
   H.options.forEach((o, i) => { if (i !== H.sel) for (const l of o.legs) drawLeg(l, false); });
   const o = H.options[H.sel];
-  endpoint(HOME, "#20c05b");
+  endpoint(toPt(), "#20c05b");
   if (H.from) endpoint([H.from.lat, H.from.lon], "#e6e8ee");
   if (!o) return;
   for (const l of o.legs) drawLeg(l, true);
@@ -121,7 +125,7 @@ function fit() {
   const pts = [];
   const legs = H.sel >= 0 ? (H.options[H.sel]?.legs ?? []) : H.options.flatMap(o => o.legs);
   for (const l of legs) for (const p of l.path) pts.push(p);
-  pts.push(HOME); if (H.from) pts.push([H.from.lat, H.from.lon]);
+  pts.push(toPt()); if (H.from) pts.push([H.from.lat, H.from.lon]);
   if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts), drawerPadding());
   showFab(false);   // the route is framed now; the recenter FAB is only for after you pan away
 }
@@ -266,8 +270,10 @@ async function loadRoutes(keep) {
   if (!H.from) return;
   const tok = ++H.loadTok;
   const box = document.getElementById("hOptions");
-  if (!keep) box.innerHTML = `<div class="jploading">Finding ways home…</div>`;
-  const one = stage => fetch(`/api/homeward?from=${H.from.lat},${H.from.lon}${stage ? "&stage=" + stage : ""}`).then(r => r.json()).then(d => d.options || []).catch(() => []);
+  const goingHome = !!H.to.home;
+  if (!keep) box.innerHTML = `<div class="jploading">Finding ${goingHome ? "ways home" : "routes"}…</div>`;
+  const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}`)
+    .then(r => r.json()).then(d => d.options || []).catch(() => []);
   const paint = (opts, loading) => {
     if (tok !== H.loadTok) return;
     H.options = opts; H.updated = Date.now(); H.loading = loading;
@@ -276,24 +282,29 @@ async function loadRoutes(keep) {
     renderOptions(); drawRoute(); if (!keep && !loading) fit();
   };
   try {
-    // Full-cycle-home paints in ~1s; the rail routes swap in when ready.
+    // Full-cycle paints in ~1s; the rail routes swap in when ready.
     const fast = await one("fast");
     if (tok === H.loadTok && !H.optionsFinal) paint(fast, true);
     const full = await one("full");
     H.optionsFinal = true;
     paint(full, false);
   } catch {
-    if (tok === H.loadTok && !keep) document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't plan a route home. Try again.</div>`;
+    if (tok === H.loadTok && !keep) document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't plan that route. Try again.</div>`;
   }
 }
 
-function setOrigin(place, refit) {
-  H.from = place;
+function updateTitle() { const t = document.querySelector(".drawertitle"); if (t) t.textContent = H.to.home ? "Ways home" : "Routes"; }
+function setPlace(field, place, refit) {
+  if (field === "dest") { H.to = place; document.getElementById("hDest").value = place.name || ""; updateTitle(); }
+  else { H.from = place; document.getElementById("hOrigin").value = place.name || "Current location"; }
   H.sel = -1; H.expanded = -1; H.optionsFinal = false;
-  document.getElementById("hOrigin").value = place.name || "Current location";
   loadRoutes(false);
-  if (refit) map.setView([place.lat, place.lon], 13);
+  if (refit) {
+    const pts = []; if (H.from) pts.push([H.from.lat, H.from.lon]); pts.push(toPt());
+    if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts), drawerPadding()); else map.setView([place.lat, place.lon], 13);
+  }
 }
+const setOrigin = (place, refit) => setPlace("origin", place, refit);
 
 // ---------- geolocation ----------
 function locate() {
@@ -338,14 +349,15 @@ async function geocode(q) {
   } catch {}
 }
 async function choose(place) {
+  const field = H.activeField;
   document.getElementById("hResults").hidden = true;
-  document.getElementById("hOrigin").blur();
-  if (place.lat != null) { setOrigin(place, true); addRecent(place); newSession(); return; }
+  document.getElementById(field === "dest" ? "hDest" : "hOrigin").blur();
+  if (place.lat != null) { setPlace(field, place, true); addRecent(place); newSession(); return; }
   if (place.placeId) {
     try {
       const r = await fetch(`/api/place?id=${encodeURIComponent(place.placeId)}&session=${geoSession || ""}`);
       const d = await r.json();
-      if (d.place) { const full = { ...place, lat: d.place.lat, lon: d.place.lon }; setOrigin(full, true); addRecent(full); }
+      if (d.place) { const full = { ...place, lat: d.place.lat, lon: d.place.lon }; setPlace(field, full, true); addRecent(full); }
     } catch {}
     newSession();
   }
@@ -437,24 +449,36 @@ function init() {
   // Show the recenter FAB once you pan/zoom off a selected route (not on programmatic fits).
   map.on("dragstart", () => showFab(true));
 
-  const input = document.getElementById("hOrigin");
+  // Wire both the origin and destination inputs. The search results apply to whichever
+  // field is focused (H.activeField).
+  const origin = document.getElementById("hOrigin"), dest = document.getElementById("hDest");
   let timer;
-  input.addEventListener("input", () => {
-    clearTimeout(timer);
-    const q = input.value.trim();
-    if (q.length < 2) { showResults(recents(), true); return; }
-    timer = setTimeout(() => geocode(q), 220);
-  });
-  // Focus/tap selects all the text so it's easy to clear and retype (timeout for iOS).
-  const selectAll = () => setTimeout(() => { try { input.select(); } catch {} }, 0);
-  input.addEventListener("focus", () => { selectAll(); if (input.value.trim().length < 2) showResults(recents(), true); });
-  input.addEventListener("click", selectAll);
+  const wireField = (el, field) => {
+    el.addEventListener("input", () => {
+      clearTimeout(timer);
+      const q = el.value.trim();
+      if (q.length < 2) { showResults(recents(), true); return; }
+      timer = setTimeout(() => geocode(q), 220);
+    });
+    const selectAll = () => setTimeout(() => { try { el.select(); } catch {} }, 0);   // easy clear+retype (iOS timeout)
+    el.addEventListener("focus", () => { H.activeField = field; selectAll(); if (el.value.trim().length < 2) showResults(recents(), true); });
+    el.addEventListener("click", () => { H.activeField = field; selectAll(); });
+  };
+  wireField(origin, "origin");
+  wireField(dest, "dest");
+  document.getElementById("hHomeBtn").innerHTML = mi("home", 20);
+  document.getElementById("hHomeBtn").addEventListener("click", () => setPlace("dest", { ...HOME_PLACE }, true));
   document.addEventListener("click", e => { if (!e.target.closest(".hbar")) document.getElementById("hResults").hidden = true; });
 
-  // ?from=lat,lon pins a start point (shareable link / testing); otherwise use GPS.
-  const fp = new URLSearchParams(location.search).get("from");
-  const fc = fp ? fp.split(",").map(Number) : null;
-  if (fc && fc.length === 2 && fc.every(Number.isFinite)) setOrigin({ name: "Pinned start", lat: fc[0], lon: fc[1] }, true);
+  // ?from / ?to pin start / destination (shareable link / testing); else GPS for origin.
+  const qp = new URLSearchParams(location.search);
+  const parse = s => { const c = (s || "").split(",").map(Number); return c.length === 2 && c.every(Number.isFinite) ? c : null; };
+  const tc = parse(qp.get("to"));
+  if (tc) H.to = { name: qp.get("toName") || "Destination", lat: tc[0], lon: tc[1] };
+  document.getElementById("hDest").value = H.to.name;
+  updateTitle();
+  const fc = parse(qp.get("from"));
+  if (fc) setOrigin({ name: "Pinned start", lat: fc[0], lon: fc[1] }, true);
   else locate();
   // Keep routes fresh, but never yank the list around while it's being read.
   setInterval(() => { if (!document.hidden && H.from) loadRoutes(true); }, 60000);

@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/stokey/board.css?v=20260722233512">
-<link rel="stylesheet" href="/stokey/home.css?v=20260723003000">
+<link rel="stylesheet" href="/stokey/home.css?v=20260723004059">
 </head>
 <body class="homeapp">
 <div id="map"></div>
@@ -26,9 +26,10 @@
     <button id="hLocate" class="hiconbtn" title="Use my location" aria-label="Use my location"></button>
   </div>
   <div class="hrule"></div>
-  <div class="hrow hrow-dest">
+  <div class="hrow">
     <span class="hdot to"></span>
-    <span class="hdestlbl">Home · Stoke Newington</span>
+    <input id="hDest" type="text" value="Home · Stoke Newington" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <button id="hHomeBtn" class="hiconbtn" title="Reset to home" aria-label="Reset destination to home"></button>
   </div>
   <div class="hresults" id="hResults" hidden></div>
 </div>
@@ -46,6 +47,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="/stokey/home.js?v=20260723003130"></script>
+<script src="/stokey/home.js?v=20260723004059"></script>
 </body>
 </html>

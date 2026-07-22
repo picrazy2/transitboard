@@ -708,6 +708,55 @@ export async function planHomeward(env: Env, fromLat: number, fromLon: number, s
   return { options, home: { lat: HOME.lat, lon: HOME.lon }, from: { lat: fromLat, lon: fromLon } };
 }
 
+// ---------- general point-to-point planner (mobile view can vary both ends) ----------
+const isHome = (lat: number, lon: number) => haversineKm([lat, lon], [HOME.lat, HOME.lon]) < 0.35;
+// Stations near a point: the curated home set (line+direction deduped) when it's home,
+// else a dynamic StopPoint lookup.
+async function nearStationsFor(env: Env, lat: number, lon: number): Promise<{ lat: number; lon: number; name: string; lines: string[] }[]> {
+  if (isHome(lat, lon)) return STATIONS.map((s: any) => ({ lat: s.lat, lon: s.lon, name: s.name, lines: Object.keys(s.lineNames || {}) }));
+  return nearDestStations(env, lat, lon);
+}
+
+// Cycle+transit between two arbitrary points. Origin-side sweep (cycle to a near-origin
+// station, rail to dest) + dest-side sweep (rail from origin, alight near dest, cycle in)
+// + the direct origin->dest journey, each finished with assembleCycleRoute (cycle to/from
+// real platforms, drop a short first/last hop). Plus the full-cycle option.
+export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = ""): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+  const from: [number, number] = [fromLat, fromLon], to: [number, number] = [toLat, toLon];
+  const meta = { from: { lat: fromLat, lon: fromLon }, to: { lat: toLat, lon: toLon } };
+  if (stage === "fast") {
+    const s = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)])).filter(Boolean) as JOption[];
+    dedupStadia(s); await enrichWithTflGeometry(env, s);
+    return { options: s, ...meta };
+  }
+  const cbike = bikeCache(env);
+  const [stadiaArr, originStns, destStns] = await Promise.all([
+    Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)]),
+    nearStationsFor(env, fromLat, fromLon),
+    nearStationsFor(env, toLat, toLon),
+  ]);
+  // One journey per station on the sweeps (the direct query keeps 2) — keeps total
+  // subrequests well under Cloudflare's per-request cap and the latency down.
+  const sweep = async (stns: { lat: number; lon: number }[], toQuery: string, fromQuery: string, tag: string) =>
+    (await Promise.all(stns.slice(0, 3).map(async (S, si) => {
+      const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}` }, fromQuery.replace("$", `${S.lat},${S.lon}`));
+      const j = (journeys as any[])[0];
+      return j ? assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-0`) : [];
+    }))).flat();
+  const [originSweep, destSweep, directJ] = await Promise.all([
+    sweep(originStns, `${toLat},${toLon}`, "$", "o"),        // cycle to a near-origin station, rail to dest
+    sweep(destStns, "$", `${fromLat},${fromLon}`, "d"),      // rail from origin, alight near dest, cycle in
+    jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}` }, `${fromLat},${fromLon}`),
+  ]);
+  const direct = (await Promise.all((directJ as any[]).slice(0, 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
+  const stadias = stadiaArr.filter(Boolean) as JOption[];
+  dedupStadia(stadias);
+  let options = [...originSweep, ...destSweep, ...direct, ...stadias];
+  options = rankOptions(options);
+  await enrichWithTflGeometry(env, options);
+  return { options, ...meta };
+}
+
 // ---------- live departures for a leg ("see more") ----------
 export interface Departure { etaMin: number; expected: string; to: string; live: boolean; }
 async function arrivalsAt(env: Env, stopId: string, lineId: string): Promise<Departure[]> {
