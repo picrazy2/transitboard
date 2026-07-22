@@ -344,20 +344,21 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   const base: Record<string, string> = mode === "cycle"
     ? { mode: TRANSIT, cyclePreference: "TakeOnTransport" }
     : { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
-  // Query a few journey preferences and merge — TfL's default ranking favours a
-  // direct bus, so leastinterchange/leastwalking surface the rail routes it hides.
-  const prefs = ["", "leastinterchange", "leastwalking"];
-  const raws = await Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base)));
+  // Query a couple of journey preferences and merge — TfL's default ranking favours a
+  // direct bus, so leastwalking surfaces the rail routes it hides. Run the TfL queries
+  // and the Stadia full walk/cycle routes ALL in parallel (they're independent) so the
+  // slowest single call, not their sum, sets the latency.
+  const prefs = ["", "leastwalking"];
+  const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
+  const [raws, stadiaArr] = await Promise.all([
+    Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base))),
+    mode === "cycle"
+      ? Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])
+      : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
+  ]);
 
   let options = raws.flat().map(parseJourney);
-
-  // Full walk / cycle: prefer Stadia (Valhalla) — elevation-aware bike, any-distance
-  // walk, detailed geometry — and drop TfL's version. Cycle gets a fastest AND a quiet
-  // route. Fall back to TfL if no key.
-  const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
-  const stadias = mode === "cycle"
-    ? (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])).filter(Boolean) as JOption[]
-    : ([await stadiaFull(env, toLat, toLon, "walk")].filter(Boolean)) as JOption[];
+  const stadias = stadiaArr.filter(Boolean) as JOption[];
   // If the quiet route is basically the fast route, don't show two identical cards —
   // keep one and drop the fastest/quiet distinction.
   if (stadias.length === 2) {
