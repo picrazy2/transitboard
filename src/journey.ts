@@ -242,33 +242,91 @@ export async function legDepartures(env: Env, stopId: string, lineId: string): P
 }
 
 // ---------- geocoding ----------
-export interface Place { name: string; detail: string; lat: number; lon: number; }
+// A search result. Google predictions carry a placeId (coords resolved on pick via
+// placeDetails); Photon/postcodes carry coords directly. `type` drives the icon.
+export interface Place { name: string; detail: string; type: string; lat?: number; lon?: number; placeId?: string; }
 
 const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
+const GKEY = (env: Env) => (env as any).GOOGLE_MAPS_KEY as string | undefined;
 
-export async function geocode(q: string): Promise<Place[]> {
-  q = q.trim();
-  if (q.length < 2) return [];
+// Category -> icon key the frontend renders (Material icons).
+function googleType(types: string[] = []): string {
+  const s = types.join(",");
+  if (/airport/.test(s)) return "airport";
+  if (/transit_station|subway|train_station|light_rail|bus_station|bus_stop/.test(s)) return "station";
+  if (/restaurant|cafe|bar|food|meal_|bakery/.test(s)) return "restaurant";
+  if (/lodging/.test(s)) return "hotel";
+  if (/store|shopping|supermarket|shop/.test(s)) return "store";
+  if (/\bpark\b/.test(s)) return "park";
+  if (/school|university/.test(s)) return "school";
+  if (/street_address|route|premise|subpremise|intersection/.test(s)) return "address";
+  return "place";
+}
+function photonType(p: any): string {
+  const k = p.osm_key, v = p.osm_value;
+  if (k === "railway" || k === "public_transport" || v === "station" || v === "bus_stop" || v === "aerodrome") return v === "aerodrome" ? "airport" : "station";
+  if (k === "amenity" && /restaurant|cafe|bar|pub|fast_food/.test(v)) return "restaurant";
+  if (v === "hotel" || v === "hostel") return "hotel";
+  if (k === "shop") return "store";
+  if (v === "park") return "park";
+  if (k === "highway" || p.housenumber) return "address";
+  return "place";
+}
+
+async function geocodeGoogle(env: Env, q: string, session?: string): Promise<Place[]> {
+  const key = GKEY(env); if (!key) return [];
+  try {
+    const u = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
+    u.searchParams.set("input", q);
+    u.searchParams.set("key", key);
+    u.searchParams.set("components", "country:gb");
+    u.searchParams.set("location", `${HOME.lat},${HOME.lon}`);
+    u.searchParams.set("radius", "40000");   // bias toward London
+    if (session) u.searchParams.set("sessiontoken", session);
+    const r = await fetch(u.toString());
+    if (!r.ok) return [];
+    const d: any = await r.json();
+    return (d.predictions ?? []).slice(0, 7).map((p: any) => ({
+      name: p.structured_formatting?.main_text ?? p.description,
+      detail: p.structured_formatting?.secondary_text ?? "",
+      placeId: p.place_id,
+      type: googleType(p.types),
+    }));
+  } catch { return []; }
+}
+
+// Resolve a Google place_id to coordinates (called when the user picks a result).
+export async function placeDetails(env: Env, placeId: string, session?: string): Promise<{ lat: number; lon: number; name: string } | null> {
+  const key = GKEY(env); if (!key || !placeId) return null;
+  try {
+    const u = new URL("https://maps.googleapis.com/maps/api/place/details/json");
+    u.searchParams.set("place_id", placeId);
+    u.searchParams.set("key", key);
+    u.searchParams.set("fields", "geometry/location,name");
+    if (session) u.searchParams.set("sessiontoken", session);
+    const r = await fetch(u.toString());
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const loc = d.result?.geometry?.location;
+    return loc ? { lat: loc.lat, lon: loc.lng, name: d.result?.name ?? "" } : null;
+  } catch { return null; }
+}
+
+async function geocodePhoton(q: string): Promise<Place[]> {
   const out: Place[] = [];
-
   if (UK_POSTCODE.test(q)) {
     try {
       const r = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(q.replace(/\s+/g, ""))}`);
       if (r.ok) {
         const d: any = await r.json();
-        if (d.result) out.push({ name: d.result.postcode, detail: [d.result.admin_ward, d.result.admin_district].filter(Boolean).join(", "), lat: d.result.latitude, lon: d.result.longitude });
+        if (d.result) out.push({ name: d.result.postcode, detail: [d.result.admin_ward, d.result.admin_district].filter(Boolean).join(", "), lat: d.result.latitude, lon: d.result.longitude, type: "place" });
       }
-    } catch { /* fall through to Photon */ }
+    } catch { /* fall through */ }
   }
-
-  // Photon: OSM autocomplete, biased around home so local matches rank first.
   try {
     const u = new URL("https://photon.komoot.io/api/");
-    u.searchParams.set("q", q);
-    u.searchParams.set("limit", "6");
-    u.searchParams.set("lat", String(HOME.lat));
-    u.searchParams.set("lon", String(HOME.lon));
-    u.searchParams.set("lang", "en");
+    u.searchParams.set("q", q); u.searchParams.set("limit", "6");
+    u.searchParams.set("lat", String(HOME.lat)); u.searchParams.set("lon", String(HOME.lon)); u.searchParams.set("lang", "en");
     const r = await fetch(u.toString(), { headers: { "User-Agent": UA } });
     if (r.ok) {
       const d: any = await r.json();
@@ -277,12 +335,17 @@ export async function geocode(q: string): Promise<Place[]> {
         if (lat == null) continue;
         const name = p.name || [p.housenumber, p.street].filter(Boolean).join(" ") || p.city || p.postcode || "—";
         const detail = [p.street && p.name !== p.street ? p.street : null, p.district, p.city, p.postcode].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(", ");
-        out.push({ name, detail, lat, lon });
+        out.push({ name, detail, lat, lon, type: photonType(p) });
       }
     }
   } catch { /* ignore */ }
-
-  // Dedup by rounded coord.
   const seen = new Set<string>();
-  return out.filter(p => { const k = `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 7);
+  return out.filter(p => { const k = `${p.lat!.toFixed(4)},${p.lon!.toFixed(4)}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 7);
+}
+
+export async function geocode(env: Env, q: string, session?: string): Promise<Place[]> {
+  q = q.trim();
+  if (q.length < 2) return [];
+  const g = await geocodeGoogle(env, q, session);   // best quality + types when a key is set
+  return g.length ? g : geocodePhoton(q);            // else free OSM fallback
 }

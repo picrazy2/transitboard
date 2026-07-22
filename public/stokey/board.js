@@ -1030,8 +1030,17 @@ const MI = {
   bus:`<path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM18 11H6V6h12z"/>`,
   train:`<path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM11 10H6V6h5zm2 0V6h5v4zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>`,
   expand:`<path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/>`,
+  place:`<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/>`,
+  recent:`<path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8z"/>`,
+  restaurant:`<path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.66 3.84 3.75 3.97V22h2.5v-9.03C11.34 12.84 13 11.12 13 9V2h-2v7zm5-3v8h2.5v8H21V2c-2.76 0-5 2.24-5 4z"/>`,
+  hotel:`<path d="M7 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm12-6h-8v7H3V5H1v15h2v-3h18v3h2v-9a4 4 0 0 0-4-4z"/>`,
+  store:`<path d="M18 6h-2a4 4 0 1 0-8 0H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-6-2a2 2 0 0 1 2 2h-4a2 2 0 0 1 2-2z"/>`,
+  park:`<path d="M17 12h2L12 3 5 12h2l-3.9 6h6.92v3h3.96v-3H21z"/>`,
+  school:`<path d="M5 13.18v4L12 21l7-3.82v-4L12 17zM12 3 1 9l11 6 9-4.91V17h2V9z"/>`,
+  airport:`<path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>`,
 };
-const mi = (name, size = 16) => `<svg class="mi" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${MI[name]}</svg>`;
+const PLACE_ICON = { station:"train", restaurant:"restaurant", hotel:"hotel", store:"store", park:"park", school:"school", airport:"airport", address:"place", place:"place", recent:"recent" };
+const mi = (name, size = 16) => `<svg class="mi" viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor" aria-hidden="true">${MI[name] ?? MI.place}</svg>`;
 const LEG_ICON = l => mi(l.kind === "walk" ? "walk" : l.kind === "cycle" ? "bike" : l.mode === "bus" ? "bus" : "train", 15);
 // Transit legs use the board's own line colours (so Windrush is its real red, etc.);
 // walk/cycle keep the mode colour from the backend.
@@ -1065,11 +1074,11 @@ function injectPlanner(){
     document.getElementById("jpClear").hidden = !input.value;
     clearTimeout(timer);
     const q = input.value.trim();
-    if(q.length < 2){ results.hidden = true; return; }
+    if(q.length < 2){ jpShowRecents(); return; }   // empty/short -> your recent destinations
     timer = setTimeout(() => jpGeocode(q), 220);
   });
-  input.addEventListener("focus", () => { if(results.children.length && input.value.trim().length >= 2) results.hidden = false; });
-  document.getElementById("jpClear").addEventListener("click", () => { input.value = ""; results.hidden = true; document.getElementById("jpClear").hidden = true; input.focus(); });
+  input.addEventListener("focus", () => { if(input.value.trim().length < 2) jpShowRecents(); });
+  document.getElementById("jpClear").addEventListener("click", () => { input.value = ""; document.getElementById("jpClear").hidden = true; input.focus(); jpShowRecents(); });
   document.getElementById("jpBack").addEventListener("click", jpExit);
   document.getElementById("jpTabs").addEventListener("click", e => {
     const b = e.target.closest("[data-jm]"); if(!b || b.dataset.jm === JP.mode) return;
@@ -1078,21 +1087,57 @@ function injectPlanner(){
   document.addEventListener("click", e => { if(!e.target.closest(".jpsearch")) results.hidden = true; });
 }
 
+// A geocoding session groups one autocomplete-then-pick sequence (Google bills per
+// session, not per keystroke). New token after each pick.
+let jpSession = null;
+function jpNewSession(){ jpSession = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.round(Math.random() * 1e9); }
+
+function jpRecents(){ try{ return JSON.parse(localStorage.getItem("jpRecents") || "[]"); }catch{ return []; } }
+function jpAddRecent(p){
+  if(p.lat == null) return;
+  const r = jpRecents().filter(x => Math.abs(x.lat - p.lat) > 1e-5 || Math.abs(x.lon - p.lon) > 1e-5);
+  r.unshift({ name: p.name, detail: p.detail || "", lat: p.lat, lon: p.lon, type: p.type || "place" });
+  try{ localStorage.setItem("jpRecents", JSON.stringify(r.slice(0, 6))); }catch{}
+}
+function jpShowRecents(){ jpShowResults(jpRecents(), true); }
+
+function jpShowResults(places, recent){
+  const results = document.getElementById("jpResults");
+  JP.places = places || [];
+  if(!JP.places.length){ results.hidden = true; return; }
+  results.innerHTML = JP.places.map((p, i) =>
+    `<button class="jpresult" data-i="${i}">${mi(recent ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
+       <span class="jprestxt"><b>${esc(p.name)}</b>${p.detail ? `<span>${esc(p.detail)}</span>` : ""}</span></button>`).join("");
+  results.hidden = false;
+  for(const b of results.querySelectorAll(".jpresult"))
+    b.addEventListener("click", () => jpChoose(JP.places[+b.dataset.i]));
+}
+
 async function jpGeocode(q){
   const tok = ++JP.geoTok;
+  if(!jpSession) jpNewSession();
   try{
-    const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+    const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&session=${jpSession}`);
     const d = await r.json();
     if(tok !== JP.geoTok) return;
-    JP.places = d.places || [];
-    const results = document.getElementById("jpResults");
-    if(!JP.places.length){ results.innerHTML = `<div class="jpnone">No matches</div>`; results.hidden = false; return; }
-    results.innerHTML = JP.places.map((p,i) =>
-      `<button class="jpresult" data-i="${i}"><b>${esc(p.name)}</b>${p.detail ? `<span>${esc(p.detail)}</span>` : ""}</button>`).join("");
-    results.hidden = false;
-    for(const b of results.querySelectorAll(".jpresult"))
-      b.addEventListener("click", () => jpPick(JP.places[+b.dataset.i]));
+    jpShowResults(d.places || [], false);
   }catch{ /* ignore */ }
+}
+
+// Google predictions have no coords until picked — resolve, then plan. Recents and
+// Photon results already carry coords.
+async function jpChoose(place){
+  document.getElementById("jpResults").hidden = true;
+  if(place.lat != null){ jpPick(place); jpAddRecent(place); jpNewSession(); return; }
+  if(place.placeId){
+    document.getElementById("jpInput").value = place.name;
+    try{
+      const r = await fetch(`/api/place?id=${encodeURIComponent(place.placeId)}&session=${jpSession || ""}`);
+      const d = await r.json();
+      if(d.place){ const full = { ...place, lat: d.place.lat, lon: d.place.lon }; jpPick(full); jpAddRecent(full); }
+    }catch{ /* ignore */ }
+    jpNewSession();
+  }
 }
 
 function jpSyncTabs(){ for(const b of document.querySelectorAll("#jpTabs button")) b.classList.toggle("on", b.dataset.jm === JP.mode); }
