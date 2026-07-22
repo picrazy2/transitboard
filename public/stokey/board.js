@@ -1011,6 +1011,14 @@ window.addEventListener("popstate", () => {
 let lastTouch = Date.now();
 ["click","touchstart","keydown"].forEach(ev => document.addEventListener(ev, () => { lastTouch = Date.now(); }, {passive:true}));
 setInterval(() => {
+  // Planner: re-plan in the background so times stay live, but only ≥30s after the
+  // last touch so it never redraws mid-tap; drop back to the board after 15 min idle.
+  if(typeof JP !== "undefined" && JP.active){
+    const idle = Date.now() - lastTouch;
+    if(idle > 900000){ jpExit(); return; }
+    if(idle > 30000 && !document.hidden) jpLoad(true);
+    return;
+  }
   if(Date.now() - lastTouch < 3600000) return;
   if(!focus && !mapNarrowed() && !tableAll) return;
   focus = null; tableAll = false; selected = new Set(SERVICES);
@@ -1050,6 +1058,8 @@ const LEG_ICON = l => mi(l.kind === "walk" ? "walk" : l.kind === "cycle" ? "bike
 // Transit legs use the board's own line colours (so Windrush is its real red, etc.);
 // walk/cycle keep the mode colour from the backend.
 const legColor = l => l.kind === "transit" && l.line ? colorOf(l.line) : l.color;
+// walk / cycle / bus / rail — used to style chips and map lines differently per mode.
+const legStyle = l => l.kind !== "transit" ? l.kind : (l.mode === "bus" ? "bus" : "rail");
 
 function injectPlanner(){
   const search = document.createElement("div");
@@ -1166,6 +1176,7 @@ function jpPick(place){
 }
 
 function jpExit(){
+  jpStopMore();
   JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1; JP.expanded = -1; JP.places = [];
   document.body.classList.remove("planning");
   cols.classList.remove("planning");
@@ -1179,29 +1190,30 @@ function jpExit(){
   requestAnimationFrame(() => { map.invalidateSize(); if(homeBounds){ lastFit = null; map.fitBounds(homeBounds, FIT); } });
 }
 
-async function jpLoad(){
+async function jpLoad(keep){
   const tok = ++JP.loadTok;
   const opts = document.getElementById("jpOptions");
-  opts.innerHTML = `<div class="jploading">Planning your journey…</div>`;
-  jpLayer.clearLayers();
+  if(!keep){ opts.innerHTML = `<div class="jploading">Planning your journey…</div>`; jpLayer.clearLayers(); }
   try{
     const r = await fetch(`/api/journey?to=${JP.dest.lat},${JP.dest.lon}&mode=${JP.mode}`);
     const d = await r.json();
-    if(tok !== JP.loadTok) return;
+    if(tok !== JP.loadTok || !JP.active) return;
     JP.options = d.options || [];
-    JP.sel = JP.options.length ? 0 : -1;   // first option expanded + framed by default
-    JP.expanded = JP.sel;
-    jpRenderOptions(); jpDrawMap(); jpFit();
-  }catch{ if(tok === JP.loadTok) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
+    if(keep && JP.sel >= 0){ JP.sel = Math.min(JP.sel, JP.options.length - 1); JP.expanded = JP.sel; }
+    else { JP.sel = JP.options.length ? 0 : -1; JP.expanded = JP.sel; }
+    jpRenderOptions(); jpDrawMap();
+    if(!keep) jpFit();   // a background refresh keeps the user's current map view
+  }catch{ if(tok === JP.loadTok && !keep) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
 
 function jpRenderOptions(){
+  jpStopMore();   // any open mini-board is about to be re-rendered away
   const opts = document.getElementById("jpOptions");
   if(!JP.options.length){ opts.innerHTML = `<div class="jperr">No routes found for this trip.</div>`; return; }
   opts.innerHTML = JP.options.map((o,i) => {
     const open = i === JP.expanded;
     const chips = o.legs.map(l =>
-      `<span class="jplegchip" style="--c:${legColor(l)}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
+      `<span class="jplegchip ${legStyle(l)}" style="--c:${legColor(l)}">${LEG_ICON(l)}${l.line ? " " + esc(l.line) : ""}</span>`
     ).join(`<span class="jparrow">›</span>`);
     const tag = o.kind === "full-walk" ? "Full walk" : o.kind === "full-cycle" ? "Full cycle"
               : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
@@ -1236,10 +1248,11 @@ function jpLegRow(l, oi, li){
     ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
   const more = l.kind === "transit" && l.fromId && l.lineId
     ? `<button class="jpmore" data-o="${oi}" data-l="${li}">See more times</button><div class="jptimes" hidden></div>` : "";
+  // No instruction subtitle for walk/cycle — it just repeats the "Walk to …" title.
   return `<div class="jpleg" style="--c:${legColor(l)}">
     <div class="jplegrail"><span class="jplegdot"></span></div>
     <div class="jplegbody"><div class="jplegtitle">${LEG_ICON(l)} ${title} <span class="jplegdur">${l.duration}m</span></div>
-      ${l.instruction && l.kind !== "transit" ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : ""}${meta}${more}</div>
+      ${meta}${more}</div>
   </div>`;
 }
 
@@ -1257,13 +1270,21 @@ function jpToggle(i){
 // "See more" opens a mini board for that leg's line + stop: the live upcoming
 // departures (same TfL feed the main board uses, so the times match), ticking down,
 // with the one your journey is built around highlighted.
+let jpMoreTimer = null;
+function jpStopMore(){ if(jpMoreTimer){ clearInterval(jpMoreTimer); jpMoreTimer = null; } }
 async function jpSeeMore(oi, li, btn){
   const box = btn.nextElementSibling;
-  if(!box.hidden){ box.hidden = true; btn.textContent = "See more times"; return; }
+  if(!box.hidden){ box.hidden = true; btn.textContent = "See more times"; jpStopMore(); return; }
   const leg = JP.options[oi]?.legs[li]; if(!leg) return;
   btn.textContent = "Loading…";
+  await jpRenderDeps(leg, box);
+  btn.textContent = "Hide times";
+  jpStopMore();                                              // keep the live board fresh while open
+  jpMoreTimer = setInterval(() => { if(box.hidden || !JP.active) jpStopMore(); else jpRenderDeps(leg, box); }, 30000);
+}
+async function jpRenderDeps(leg, box){
   try{
-    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}`);
+    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}&from=${encodeURIComponent(leg.from || "")}&to=${encodeURIComponent(leg.to || "")}`);
     const d = await r.json();
     const all = d.departures || [];
     const col = legColor(leg);
@@ -1277,14 +1298,14 @@ async function jpSeeMore(oi, li, btn){
           const mine = rec != null && Math.abs(Date.parse(x.expected) - rec) < 90000;
           const clock = x.expected ? to12h(new Date(x.expected)) : "";
           return `<div class="jpdep${mine ? " rec" : ""}">
-            <span class="jpbadge" style="background:${col}">${esc(leg.line ?? "")}</span>
+            <span class="jpbadge ${legStyle(leg)}" style="background:${col}">${esc(leg.line ?? "")}</span>
             <span class="jpdepto">${esc(shortDest(x.to))}</span>
             <span class="jpdepright"><span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span>
               ${clock ? `<span class="jpdepclock">${esc(clock)}</span>` : ""}</span></div>`;
         }).join("")
       : `<div class="jpnolive">${leg.dep ? `Scheduled ${esc(to12h(new Date(leg.dep)))} · no live times for this service` : "No live departures right now"}</div>`;
-    box.hidden = false; btn.textContent = "Hide times";
-  }catch{ btn.textContent = "See more times"; }
+    box.hidden = false;
+  }catch{ /* keep whatever was shown */ }
 }
 // Tick the mini-board countdowns each second, like the main board's rows.
 setInterval(() => {
@@ -1319,7 +1340,7 @@ function jpDrawMap(){
     const at = l.path[Math.floor(l.path.length / 3)];
     const txt = l.line ? `${LEG_ICON(l)} ${esc(l.line)}` : `${LEG_ICON(l)} ${l.duration}m`;
     L.marker(at, {interactive:false, zIndexOffset:1000, icon:L.divIcon({className:"", iconSize:[0,0], html:
-      `<div class="jpleglabel" style="--c:${legColor(l)}">${txt}</div>`})}).addTo(jpLayer);
+      `<div class="jpleglabel ${legStyle(l)}" style="--c:${legColor(l)}">${txt}</div>`})}).addTo(jpLayer);
   }
 }
 function jpTransfer(latlng){
@@ -1328,8 +1349,12 @@ function jpTransfer(latlng){
 }
 function jpLeg(l, bold){
   if(l.path.length < 2) return;
-  const dash = l.kind === "walk" ? "1 8" : l.kind === "cycle" ? "2 8" : null;
-  L.polyline(l.path, {color:legColor(l), weight: bold ? 6 : 3, opacity: bold ? .95 : .28,
+  // Self-powered legs are dashed (walk = dots, cycle = dashes); transit is solid,
+  // with rail drawn heavier than bus so the two read apart at a glance.
+  const st = legStyle(l);
+  const dash = st === "walk" ? "1 9" : st === "cycle" ? "5 8" : null;
+  const weight = bold ? (st === "rail" ? 7 : st === "bus" ? 4.5 : 4) : 3;
+  L.polyline(l.path, {color:legColor(l), weight, opacity: bold ? .95 : .28,
     dashArray:dash, lineCap:"round", lineJoin:"round"}).addTo(jpLayer);
 }
 function jpEndpoint(latlng, color, label){

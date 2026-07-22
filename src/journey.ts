@@ -282,19 +282,73 @@ async function arrivalsAt(env: Env, stopId: string, lineId: string): Promise<Dep
     });
     if (!r.ok) return [];
     const preds: any[] = await r.json();
+    const seen = new Set<string>();
     return preds
       .filter(p => !lineId || p.lineId === lineId)
       .map(p => ({ etaMin: Math.max(0, Math.round(p.timeToStation / 60)), expected: p.expectedArrival, to: (p.destinationName ?? p.towards ?? "").replace(/\s+(Rail|Underground)?\s*Station$/i, ""), live: true }))
       .sort((a, b) => a.etaMin - b.etaMin)
+      // Busy interchanges list the same service on several platforms; collapse rows
+      // with the same destination and departure minute.
+      .filter(d => { const k = `${d.to}|${Math.round(Date.parse(d.expected) / 60000)}`; if (seen.has(k)) return false; seen.add(k); return true; })
       .slice(0, 12);   // extra so the client can centre the list on the journey's departure
   } catch { return []; }
 }
-// Bus vs Overground/rail disagree on which stop-id form /Arrivals accepts, so try
-// the primary then the alternate.
-export async function legDepartures(env: Env, stopId: string, lineId: string, altId = ""): Promise<Departure[]> {
-  const first = await arrivalsAt(env, stopId, lineId);
-  if (first.length || !altId || altId === stopId) return first;
-  return arrivalsAt(env, altId, lineId);
+const normName = (s: string) => String(s ?? "").toLowerCase()
+  .replace(/\s+(rail|underground|dlr|bus)?\s*station$/i, "").replace(/[^a-z0-9]/g, "").trim();
+
+// Full ordered stop names per branch route of a line. stopPointSequences are split
+// into disjoint pieces, so use orderedLineRoutes (each a complete end-to-end branch)
+// mapped through the naptanId->name table the sequences provide.
+const seqCache = new Map<string, string[][]>();
+async function lineSequences(env: Env, lineId: string): Promise<string[][]> {
+  if (seqCache.has(lineId)) return seqCache.get(lineId)!;
+  const seqs: string[][] = [];
+  try {
+    const qs = new URLSearchParams({ serviceTypes: "Regular", excludeCrowding: "true" });
+    if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
+    const r = await fetch(`${TFL}/Line/${lineId}/Route/Sequence/outbound?${qs}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" }, cf: { cacheTtl: 604800, cacheEverything: true },
+    });
+    if (r.ok) {
+      const d: any = await r.json();
+      const name: Record<string, string> = {};
+      for (const sp of d.stopPointSequences ?? []) for (const s of sp.stopPoint ?? []) name[s.id] = normName(s.name);
+      for (const route of d.orderedLineRoutes ?? []) {
+        const seq = (route.naptanIds ?? []).map((id: string) => name[id]).filter(Boolean);
+        if (seq.length >= 2) seqs.push(seq);
+      }
+    }
+  } catch { /* ignore */ }
+  seqCache.set(lineId, seqs);
+  return seqs;
+}
+// Keep a departure only if travelling to its destination from `f` passes through the
+// leg's alighting stop `t` — i.e. it's going the same way. Drops opposite-direction
+// and terminating-here services. Fails open when the stops can't be located.
+function keepDir(seqs: string[][], f: string, t: string, d: string): boolean {
+  if (d === f) return false;                       // terminates at the boarding stop
+  let locatedFT = false;
+  for (const seq of seqs) {
+    const fi = seq.indexOf(f), ti = seq.indexOf(t);
+    if (fi < 0 || ti < 0) continue;
+    locatedFT = true;
+    const di = seq.indexOf(d);
+    if (di < 0) continue;
+    if (fi < ti ? di >= ti : di <= ti) return true;   // destination is beyond t, same way
+  }
+  return !locatedFT;   // couldn't judge -> keep; located but never confirmed -> opposite -> drop
+}
+
+// Bus vs Overground/rail disagree on which stop-id form /Arrivals accepts, so try the
+// primary then the alternate; then keep only same-direction departures.
+export async function legDepartures(env: Env, stopId: string, lineId: string, altId = "", fromName = "", toName = ""): Promise<Departure[]> {
+  let deps = await arrivalsAt(env, stopId, lineId);
+  if (!deps.length && altId && altId !== stopId) deps = await arrivalsAt(env, altId, lineId);
+  if (fromName && toName) {
+    const seqs = await lineSequences(env, lineId);
+    if (seqs.length) { const f = normName(fromName), t = normName(toName); deps = deps.filter(x => keepDir(seqs, f, t, normName(x.to))); }
+  }
+  return deps.slice(0, 12);
 }
 
 // ---------- geocoding ----------

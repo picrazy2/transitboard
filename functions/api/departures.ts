@@ -8,8 +8,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const stop = u.searchParams.get("stop") ?? "";
   const alt = u.searchParams.get("alt") ?? "";
   const line = u.searchParams.get("line") ?? "";
+  const from = u.searchParams.get("from") ?? "";
+  const to = u.searchParams.get("to") ?? "";
   if (!stop) return new Response(JSON.stringify({ departures: [] }), { headers: { "content-type": "application/json" } });
-  const departures = await legDepartures(env, stop, line, alt);
+  const departures = await legDepartures(env, stop, line, alt, from, to);
   return new Response(JSON.stringify({ departures }), {
     headers: { "content-type": "application/json", "cache-control": "public, max-age=15" },
   });
