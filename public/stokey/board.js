@@ -1052,7 +1052,7 @@ setInterval(() => {
 // mode the left cards + filters are replaced by ranked options; every option is
 // sketched on the map, and tapping one frames it with per-leg styling + an accordion.
 const jpLayer = L.layerGroup().addTo(map);
-const JP = { active:false, dest:null, mode:MODE, options:[], sel:-1, expanded:-1, places:[], geoTok:0, loadTok:0, cache:{walk:null, cycle:null} };
+const JP = { active:false, dest:null, mode:MODE, options:[], sel:-1, expanded:-1, places:[], geoTok:0, loadTok:0, cache:{walk:null, cycle:null}, fast:{cycle:null} };
 // White text, or black when the line colour is light (Circle yellow, W&C teal, etc.).
 function textOn(hex){
   const c = String(hex||"").replace("#",""); if(c.length < 6) return "#fff";
@@ -1131,7 +1131,9 @@ function injectPlanner(){
   document.getElementById("jpTabs").addEventListener("click", e => {
     const b = e.target.closest("[data-jm]"); if(!b || b.dataset.jm === JP.mode) return;
     JP.mode = b.dataset.jm; jpSyncTabs();
-    if(JP.cache[JP.mode]) jpShowMode(false);   // instant from cache
+    // Show whatever we have (full, or the cycle-only interim); only reload if nothing yet.
+    const have = JP.mode === "cycle" ? (JP.cache.cycle || JP.fast.cycle) : JP.cache.walk;
+    if(have) jpShowMode(false);
     else jpLoad();
   });
   document.addEventListener("click", e => { if(!e.target.closest(".jpsearch")) results.hidden = true; });
@@ -1193,7 +1195,7 @@ async function jpChoose(place){
 function jpSyncTabs(){ for(const b of document.querySelectorAll("#jpTabs button")) b.classList.toggle("on", b.dataset.jm === JP.mode); }
 
 function jpPick(place){
-  JP.dest = place; JP.mode = MODE; JP.active = true; JP.sel = -1; JP.cache = {walk:null, cycle:null};
+  JP.dest = place; JP.mode = MODE; JP.active = true; JP.sel = -1; JP.cache = {walk:null, cycle:null}; JP.fast = {cycle:null};
   document.getElementById("jpInput").value = place.name;
   document.getElementById("jpResults").hidden = true;
   document.getElementById("jpClear").hidden = false;
@@ -1212,7 +1214,7 @@ function jpPick(place){
 
 function jpExit(){
   jpStopMore();
-  JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1; JP.expanded = -1; JP.places = []; JP.cache = {walk:null, cycle:null};
+  JP.active = false; JP.dest = null; JP.options = []; JP.sel = -1; JP.expanded = -1; JP.places = []; JP.cache = {walk:null, cycle:null}; JP.fast = {cycle:null};
   document.body.classList.remove("planning");
   cols.classList.remove("planning");
   document.getElementById("jpPanel").hidden = true;
@@ -1231,20 +1233,36 @@ async function jpLoad(keep){
   const tok = ++JP.loadTok;
   const opts = document.getElementById("jpOptions");
   if(!keep){ opts.innerHTML = `<div class="jploading">Planning your journey…</div>`; jpLayer.clearLayers(); }
-  const one = m => fetch(`/api/journey?to=${JP.dest.lat},${JP.dest.lon}&mode=${m}`).then(r => r.json()).then(d => d.options || []).catch(() => []);
-  const other = JP.mode === "walk" ? "cycle" : "walk";
-  try{
-    // Show the current mode as soon as it's ready; prefetch the other in the background
-    // so the toggle is still instant — don't make the user wait for both up front.
-    const cur = await one(JP.mode);
-    if(tok !== JP.loadTok || !JP.active) return;
-    JP.cache[JP.mode] = cur; JP.updated = Date.now();
-    jpShowMode(keep);
-    one(other).then(r => { if(tok === JP.loadTok && JP.active) JP.cache[other] = r; });
-  }catch{ if(tok === JP.loadTok && !keep) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
+  const one = (m, stage) => fetch(`/api/journey?to=${JP.dest.lat},${JP.dest.lon}&mode=${m}${stage ? "&stage=" + stage : ""}`).then(r => r.json()).then(d => d.options || []).catch(() => []);
+  const live = () => tok === JP.loadTok && JP.active;
+  // Walk's transit query is already ~1s; cycle+transit routing is slow, so for cycle we
+  // fetch the cycle-only route first (a couple of seconds) and paint it with a "loading
+  // cycle + transit" note, then swap in the full result. Both modes load concurrently so
+  // the walk/cycle toggle is instant.
+  const loadMode = async m => {
+    if(m === "cycle"){
+      const fast = await one("cycle", "fast");
+      if(!live()) return;
+      JP.fast.cycle = fast;
+      if(JP.mode === "cycle" && !JP.cache.cycle){ JP.updated = Date.now(); jpShowMode(keep); }
+      const full = await one("cycle", "full");
+      if(!live()) return;
+      JP.cache.cycle = full; JP.updated = Date.now();
+      if(JP.mode === "cycle") jpShowMode(keep);
+    } else {
+      const full = await one("walk");
+      if(!live()) return;
+      JP.cache.walk = full; JP.updated = Date.now();
+      if(JP.mode === "walk") jpShowMode(keep);
+    }
+  };
+  try{ await Promise.all([loadMode(JP.mode), loadMode(JP.mode === "walk" ? "cycle" : "walk")]); }
+  catch{ if(tok === JP.loadTok && !keep && !JP.options.length) document.getElementById("jpOptions").innerHTML = `<div class="jperr">Couldn't plan that journey. Try again.</div>`; }
 }
+// True while the cycle+transit routes are still being fetched (cycle-only shown meanwhile).
+function jpCycleLoading(){ return JP.mode === "cycle" && !JP.cache.cycle; }
 function jpShowMode(keep){
-  JP.options = JP.cache[JP.mode] || [];
+  JP.options = (JP.mode === "cycle" ? (JP.cache.cycle || JP.fast.cycle) : JP.cache.walk) || [];
   const u = document.getElementById("jpUpdated");
   if(u) u.textContent = JP.updated ? `Updated ${to12h(new Date(JP.updated))}` : "";
   if(keep && JP.sel >= 0){ JP.sel = Math.min(JP.sel, JP.options.length - 1); JP.expanded = JP.sel; }
@@ -1273,7 +1291,9 @@ function jpElevSvg(o){
 function jpRenderOptions(){
   jpStopMore();   // any open mini-board is about to be re-rendered away
   const opts = document.getElementById("jpOptions");
-  if(!JP.options.length){ opts.innerHTML = `<div class="jperr">No routes found for this trip.</div>`; return; }
+  const loading = jpCycleLoading();
+  const note = loading ? `<div class="jploading jpmore-note">${mi("route", 18)} Loading cycle + transit routes…</div>` : "";
+  if(!JP.options.length){ opts.innerHTML = loading ? note : `<div class="jperr">No routes found for this trip.</div>`; return; }
   opts.innerHTML = JP.options.map((o,i) => {
     const open = i === JP.expanded;
     const chips = o.legs.map(l =>
@@ -1305,7 +1325,7 @@ function jpRenderOptions(){
       </div>
       <div class="jplegs" ${open ? "" : "hidden"}>${body}</div>
     </div>`;
-  }).join("");
+  }).join("") + note;
   for(const card of opts.querySelectorAll(".jpopt"))
     card.addEventListener("click", e => { if(e.target.closest(".jplegs")) return; jpToggle(+card.dataset.i); });
   for(const b of opts.querySelectorAll(".jpmore"))

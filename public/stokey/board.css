@@ -316,6 +316,9 @@ body.planning .warnkey,body.planning #disrupt{display:none}
 .jpoptions{display:flex;flex-direction:column;gap:9px;overflow:auto;flex:1;min-height:0;padding-right:4px;
            scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
 .jploading,.jperr{color:var(--muted);font-size:14px;padding:18px 4px}
+.jpmore-note{display:flex;align-items:center;gap:7px;padding:12px 4px 4px;animation:jppulse 1.4s ease-in-out infinite}
+.jpmore-note .mi{opacity:.7}
+@keyframes jppulse{0%,100%{opacity:.5}50%{opacity:1}}
 .jpopt{background:var(--row);border:1px solid var(--rule);border-radius:13px;padding:11px 13px;cursor:pointer;
        transition:border-color .12s ease}
 .jpopt:hover{border-color:#3a4356}

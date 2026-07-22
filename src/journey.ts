@@ -335,8 +335,90 @@ async function jp(env: Env, to: string, params: Record<string, string>, from = `
 
 const TRANSIT = "bus,tube,dlr,overground,elizabeth-line,national-rail,tram,river-bus";
 
-export async function planJourney(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle"): Promise<{ options: JOption[]; dest: { lat: number; lon: number } }> {
+// ---------- custom cycle+transit router (cycle to a nearest station) ----------
+// TfL's own bike+transit routing is slow and picks awkward stations. Instead: take the
+// board's precomputed nearest stations, cycle to one (Valhalla), take TRANSIT from
+// there (a fast query), and cycle the last mile from the alighting station (Valhalla).
+// This surfaces the routes TfL hides (cycle 1 min to Stoke Newington -> Weaver -> …).
+const STATIONS = ((home as any).stations as any[]).filter(s => s.lat && s.lon && s.cycMin != null).sort((a, b) => a.cycMin - b.cycMin);
+
+function hhmm(ms: number): string {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(ms);
+  return (p.find(x => x.type === "hour")?.value ?? "00") + (p.find(x => x.type === "minute")?.value ?? "00");
+}
+
+async function bikeLeg(env: Env, from: [number, number], to: [number, number], mins?: number): Promise<JLeg | null> {
+  const key = SKEY(env); if (!key) return null;
+  try {
+    const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ locations: [{ lat: from[0], lon: from[1] }, { lat: to[0], lon: to[1] }], costing: "bicycle", costing_options: { bicycle: { use_hills: 0.2, use_roads: 0.4, bicycle_type: "Hybrid", cycling_speed: 15 } }, directions_options: { units: "kilometers" } }),
+    });
+    if (!r.ok) return null;
+    const d: any = await r.json(); const trip = d.trip; if (!trip?.legs?.length) return null;
+    const path: [number, number][] = [];
+    for (const l of trip.legs) path.push(...decodePolyline(l.shape, 6));
+    return { mode: "bicycle", kind: "cycle", label: "Cycle", color: "#20c05b", line: null, lineId: null, duration: mins ?? Math.round(num(trip.summary?.time) / 60), from: "", to: "", fromId: null, fromAlt: null, dep: null, arr: null, instruction: "", path, stops: [] };
+  } catch { return null; }
+}
+
+async function nearbyStationRoutes(env: Env, toLat: number, toLon: number): Promise<JOption[]> {
+  if (!SKEY(env)) return [];
+  const now = Date.now();
+  // Try the ~6 nearest stations, not just the closest: cycling a few extra minutes to a
+  // hub with a fast direct line (e.g. Finsbury Park + Victoria) often beats the nearest
+  // station's slower service. Dominance pruning drops the ones that don't pay off.
+  const out = await Promise.all(STATIONS.slice(0, 6).map(async (s): Promise<JOption | null> => {
+    const cycMin = Math.max(1, Math.round(s.cycMin));
+    // Transit from the station, departing when you'd get there by bike.
+    const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${TRANSIT}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${s.lat},${s.lon}`);
+    const j = journeys[0]; if (!j) return null;
+    const parsed = parseJourney(j, 0);
+    if (!parsed.legs.some(l => l.kind === "transit")) return null;   // just walking from the station -> useless
+    const access = await bikeLeg(env, [HOME.lat, HOME.lon], [s.lat, s.lon], cycMin);
+    if (!access) return null;
+    access.to = s.name;
+    // Drop trailing walk(s) and cycle from the last alighting point to the destination.
+    const legs = parsed.legs.slice();
+    while (legs.length && legs[legs.length - 1].kind === "walk") legs.pop();
+    const lastTransit = [...legs].reverse().find(l => l.kind === "transit");
+    const egress = lastTransit?.path.length ? await bikeLeg(env, lastTransit.path[lastTransit.path.length - 1], [toLat, toLon]) : null;
+    const all = [access, ...legs, ...(egress ? [egress] : [])];
+    const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
+    const cycleMins = all.filter(l => l.kind === "cycle").reduce((a, l) => a + l.duration, 0);
+    const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
+    const arrMs = (parsed.arr ? Date.parse(parsed.arr) : now) + (egress ? egress.duration * 60000 : 0);
+    const dep = j.startDateTime ? new Date(Date.parse(j.startDateTime) - cycMin * 60000).toISOString() : new Date(now).toISOString();
+    const duration = Math.max(1, Math.round((arrMs - Date.parse(dep)) / 60000));
+    return { id: `stn-${s.id}`, duration, dep, arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
+  }));
+  return out.filter(Boolean) as JOption[];
+}
+
+// Fold two Stadia cycle cards (fast/quiet) into one if they're basically identical.
+function dedupStadia(stadias: JOption[]): void {
+  if (stadias.length === 2) {
+    const [fast, quiet] = stadias;
+    if (Math.abs((fast.km ?? 0) - (quiet.km ?? 0)) < 0.15 && Math.abs((fast.ascent ?? 0) - (quiet.ascent ?? 0)) < 6 && Math.abs(fast.duration - quiet.duration) <= 1) {
+      delete fast.label; stadias.pop();
+    }
+  }
+}
+
+export async function planJourney(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle", stage: "fast" | "full" = "full"): Promise<{ options: JOption[]; dest: { lat: number; lon: number } }> {
   const to = `${toLat},${toLon}`;
+  const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
+
+  // FAST stage (cycle only): just the Stadia full-cycle route(s) — a couple of seconds —
+  // so the board can paint the cycle-only card while the slow cycle+transit routing runs.
+  // Walk has no fast stage: its transit query is already ~1s.
+  if (stage === "fast" && mode === "cycle") {
+    const stadias = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])).filter(Boolean) as JOption[];
+    dedupStadia(stadias);
+    await enrichWithTflGeometry(env, stadias);
+    return { options: stadias, dest: { lat: toLat, lon: toLon } };
+  }
+
   // NB: alternativeCycle/alternativeWalking mean "alternative TO that mode" — they
   // swap the cycle/walk-access journeys out for others, so we do NOT want them.
   // LeaveAtStation already returns both cycle-to-station+transit and full-cycle.
@@ -346,28 +428,21 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     ? { mode: TRANSIT, cyclePreference: "TakeOnTransport" }
     : { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
   // Query a couple of journey preferences and merge — TfL's default ranking favours a
-  // direct bus, so leastwalking surfaces the rail routes it hides. Run the TfL queries
-  // and the Stadia full walk/cycle routes ALL in parallel (they're independent) so the
-  // slowest single call, not their sum, sets the latency.
+  // direct bus, so leastwalking surfaces the rail routes it hides. Run the TfL queries,
+  // the Stadia full walk/cycle routes, and (cycle) our own nearest-station router ALL in
+  // parallel (they're independent) so the slowest single call, not their sum, sets latency.
   const prefs = [""];
-  const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
-  const [raws, stadiaArr] = await Promise.all([
+  const [raws, stadiaArr, stationOpts] = await Promise.all([
     Promise.all(prefs.map(p => jp(env, to, p ? { ...base, journeyPreference: p } : base))),
     mode === "cycle"
       ? Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])
       : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
+    mode === "cycle" ? nearbyStationRoutes(env, toLat, toLon) : Promise.resolve([] as JOption[]),
   ]);
 
-  let options = raws.flat().map(parseJourney);
+  let options = raws.flat().map(parseJourney).concat(stationOpts);
   const stadias = stadiaArr.filter(Boolean) as JOption[];
-  // If the quiet route is basically the fast route, don't show two identical cards —
-  // keep one and drop the fastest/quiet distinction.
-  if (stadias.length === 2) {
-    const [fast, quiet] = stadias;
-    if (Math.abs((fast.km ?? 0) - (quiet.km ?? 0)) < 0.15 && Math.abs((fast.ascent ?? 0) - (quiet.ascent ?? 0)) < 6 && Math.abs(fast.duration - quiet.duration) <= 1) {
-      delete fast.label; stadias.pop();
-    }
-  }
+  dedupStadia(stadias);
   if (stadias.length) {
     options = options.filter(o => o.kind !== fullKind).concat(stadias);
   } else if (!options.some(o => o.kind === fullKind)) {
