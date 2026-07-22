@@ -106,7 +106,8 @@ export interface JLeg {
   duration: number;     // minutes
   from: string;
   to: string;
-  fromId: string | null; // boarding-stop naptan, for live "see more" departures
+  fromId: string | null;  // boarding stop for live "see more" — bus wants individualStopId,
+  fromAlt: string | null; // Overground/rail want the naptanId group; try both.
   dep: string | null;   // ISO
   arr: string | null;
   instruction: string;
@@ -146,10 +147,13 @@ function parseLeg(l: any): JLeg {
     duration: Math.round(num(l.duration)),
     from: l.departurePoint?.commonName ?? "",
     to: l.arrivalPoint?.commonName ?? "",
-    // For live "see more" departures. A bus leg's naptanId is the StopArea *group*
-    // (490G…), which /Arrivals rejects; individualStopId (490003307Q) is the actual
-    // stop. Tube/rail have no individualStopId but their naptanId works.
+    // For live "see more" departures. Bus arrivals want individualStopId (490003307Q)
+    // — its naptanId is the StopArea group (490G…) which /Arrivals rejects. Overground/
+    // rail are the reverse: naptanId (910GDALS) works, individualStopId (9100DALS0) 404s.
+    // So carry both and let the endpoint try each.
     fromId: l.departurePoint?.individualStopId ?? l.departurePoint?.naptanId ?? null,
+    fromAlt: l.departurePoint?.naptanId && l.departurePoint?.naptanId !== l.departurePoint?.individualStopId
+      ? l.departurePoint.naptanId : null,
     dep: l.departureTime ?? null,
     arr: l.arrivalTime ?? null,
     instruction: l.instruction?.summary ?? "",
@@ -224,7 +228,8 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
 
 // ---------- live departures for a leg ("see more") ----------
 export interface Departure { etaMin: number; expected: string; to: string; live: boolean; }
-export async function legDepartures(env: Env, stopId: string, lineId: string): Promise<Departure[]> {
+async function arrivalsAt(env: Env, stopId: string, lineId: string): Promise<Departure[]> {
+  if (!stopId) return [];
   const qs = new URLSearchParams();
   if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
   try {
@@ -239,6 +244,13 @@ export async function legDepartures(env: Env, stopId: string, lineId: string): P
       .sort((a, b) => a.etaMin - b.etaMin)
       .slice(0, 6);
   } catch { return []; }
+}
+// Bus vs Overground/rail disagree on which stop-id form /Arrivals accepts, so try
+// the primary then the alternate.
+export async function legDepartures(env: Env, stopId: string, lineId: string, altId = ""): Promise<Departure[]> {
+  const first = await arrivalsAt(env, stopId, lineId);
+  if (first.length || !altId || altId === stopId) return first;
+  return arrivalsAt(env, altId, lineId);
 }
 
 // ---------- geocoding ----------

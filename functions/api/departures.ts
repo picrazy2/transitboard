@@ -6,9 +6,10 @@ import { legDepartures } from "../../src/journey";
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) => {
   const u = new URL(request.url);
   const stop = u.searchParams.get("stop") ?? "";
+  const alt = u.searchParams.get("alt") ?? "";
   const line = u.searchParams.get("line") ?? "";
   if (!stop) return new Response(JSON.stringify({ departures: [] }), { headers: { "content-type": "application/json" } });
-  const departures = await legDepartures(env, stop, line);
+  const departures = await legDepartures(env, stop, line, alt);
   return new Response(JSON.stringify({ departures }), {
     headers: { "content-type": "application/json", "cache-control": "public, max-age=15" },
   });

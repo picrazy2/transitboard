@@ -371,4 +371,6 @@ body.planning .chiprow{display:none}
 .jpdep.gone{opacity:.45}
 .jpbadge{flex:none;min-width:30px;text-align:center;color:#fff;font:800 11px system-ui;padding:2px 5px;border-radius:5px}
 .jpdepto{flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.jpdepeta{flex:none;font:800 14px system-ui;font-variant-numeric:tabular-nums;color:var(--ink)}
+.jpdepright{flex:none;display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.jpdepeta{font:800 14px system-ui;font-variant-numeric:tabular-nums;color:var(--ink)}
+.jpdepclock{font-size:11px;color:var(--muted);font-weight:600}

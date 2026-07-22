@@ -1218,8 +1218,11 @@ function jpRenderOptions(){
     b.addEventListener("click", e => { e.stopPropagation(); jpSeeMore(+b.dataset.o, +b.dataset.l, b); });
 }
 
+// Planner stop names: keep the full first segment. shortStop() strips a leading
+// "Stoke Newington", which turns "Stoke Newington Road / Amhurst Road" into "Road".
+function jpStopName(s){ return (String(s ?? "").split("/")[0].trim()) || String(s ?? ""); }
 function jpLegRow(l, oi, li){
-  const to = shortStop(l.to) || shortDest(l.to);
+  const to = jpStopName(l.to);
   const title = l.kind === "transit" ? `${l.label}${l.line ? " " + esc(l.line) : ""} → ${esc(shortDest(l.to))}`
               : l.kind === "cycle" ? `Cycle to ${esc(to)}`
               : `Walk to ${esc(to)}`;
@@ -1255,18 +1258,20 @@ async function jpSeeMore(oi, li, btn){
   const leg = JP.options[oi]?.legs[li]; if(!leg) return;
   btn.textContent = "Loading…";
   try{
-    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&line=${encodeURIComponent(leg.lineId)}`);
+    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}`);
     const d = await r.json();
     const deps = d.departures || [];
     const col = legColor(leg);
     const rec = leg.dep ? Date.parse(leg.dep) : null;
     box.innerHTML = deps.length
-      ? `<div class="jpminihdr">Live at ${esc(shortStop(leg.from))}</div>` + deps.map(x => {
+      ? `<div class="jpminihdr">Live at ${esc(jpStopName(leg.from))}</div>` + deps.map(x => {
           const mine = rec != null && Math.abs(Date.parse(x.expected) - rec) < 90000;
+          const clock = x.expected ? to12h(new Date(x.expected)) : "";
           return `<div class="jpdep${mine ? " rec" : ""}">
             <span class="jpbadge" style="background:${col}">${esc(leg.line ?? "")}</span>
             <span class="jpdepto">${esc(shortDest(x.to))}</span>
-            <span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span></div>`;
+            <span class="jpdepright"><span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span>
+              ${clock ? `<span class="jpdepclock">${esc(clock)}</span>` : ""}</span></div>`;
         }).join("")
       : `<div class="jpnolive">No live departures right now</div>`;
     box.hidden = false; btn.textContent = "Hide times";
