@@ -1066,7 +1066,7 @@ function injectPlanner(){
   search.className = "jpsearch";
   search.innerHTML =
     `<div class="jpbar"><span class="jpicon">${mi("search", 18)}</span>
-      <input id="jpInput" type="text" placeholder="Plan a journey — address or postcode" autocomplete="off" spellcheck="false">
+      <input id="jpInput" type="text" placeholder="Search…" autocomplete="off" spellcheck="false">
       <button id="jpClear" class="jpx" hidden title="Clear">${mi("close", 20)}</button></div>
      <div class="jpresults" id="jpResults" hidden></div>`;
   mapPanel.appendChild(search);
@@ -1240,12 +1240,16 @@ function jpRenderOptions(){
 function jpStopName(s){ return (String(s ?? "").split("/")[0].trim()) || String(s ?? ""); }
 function jpLegRow(l, oi, li){
   const to = jpStopName(l.to);
+  const verb = l.kind === "cycle" ? "Cycle" : "Walk";
   const title = l.kind === "transit" ? `${l.label}${l.line ? " " + esc(l.line) : ""} → ${esc(shortDest(l.to))}`
-              : l.kind === "cycle" ? `Cycle to ${esc(to)}`
-              : `Walk to ${esc(to)}`;
+              : to ? `${verb} to ${esc(to)}` : verb;   // full walk/cycle has no intermediate stop
   const dep = l.dep ? to12h(new Date(l.dep)) : "";
-  const meta = l.kind === "transit" && dep
-    ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
+  // Keep a non-redundant instruction (Stadia gives the distance, e.g. "8.5 km");
+  // drop the TfL "Walk to …" one that just repeats the title.
+  const note = l.instruction && !/^(walk|cycle)\b/i.test(l.instruction)
+    ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : "";
+  const meta = note + (l.kind === "transit" && dep
+    ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "");
   const more = l.kind === "transit" && l.fromId && l.lineId
     ? `<button class="jpmore" data-o="${oi}" data-l="${li}">See more times</button><div class="jptimes" hidden></div>` : "";
   // No instruction subtitle for walk/cycle — it just repeats the "Walk to …" title.

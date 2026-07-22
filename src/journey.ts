@@ -226,6 +226,59 @@ function parseJourney(j: any, i: number): JOption {
   };
 }
 
+// ---------- Stadia Maps (hosted Valhalla) for full walk / cycle ----------
+// Elevation-aware bike routing and any-distance walking, which TfL can't do. Only
+// used for the full-walk / full-cycle options; transit stays on TfL.
+const SKEY = (env: Env) => (env as any).STADIA_KEY as string | undefined;
+
+function decodePolyline(str: string, precision = 6): [number, number][] {
+  let index = 0, lat = 0, lon = 0; const out: [number, number][] = []; const factor = Math.pow(10, precision);
+  while (index < str.length) {
+    let shift = 0, result = 0, byte: number;
+    do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+    lon += (result & 1) ? ~(result >> 1) : (result >> 1);
+    out.push([lat / factor, lon / factor]);
+  }
+  return out;
+}
+
+async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle"): Promise<JOption | null> {
+  const key = SKEY(env); if (!key) return null;
+  const costing = mode === "cycle" ? "bicycle" : "pedestrian";
+  const body: any = {
+    locations: [{ lat: HOME.lat, lon: HOME.lon }, { lat: toLat, lon: toLon }],
+    costing, directions_options: { units: "kilometers" },
+  };
+  if (costing === "bicycle") body.costing_options = { bicycle: { use_hills: 0.5, bicycle_type: "Hybrid" } };
+  try {
+    const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const trip = d.trip; if (!trip?.legs?.length) return null;
+    const path: [number, number][] = [];
+    for (const leg of trip.legs) path.push(...decodePolyline(leg.shape, 6));
+    const dur = Math.round(num(trip.summary?.time) / 60);
+    const kmTxt = `${(num(trip.summary?.length)).toFixed(1)} km`;
+    const jleg: JLeg = {
+      mode: costing, kind: mode, label: mode === "cycle" ? "Cycle" : "Walk",
+      color: mode === "cycle" ? "#20c05b" : "#8a93a5", line: null, lineId: null,
+      duration: dur, from: "Home", to: "", fromId: null, fromAlt: null,
+      dep: null, arr: null, instruction: kmTxt, path, stops: [],
+    };
+    return {
+      id: mode === "cycle" ? "fullcycle" : "fullwalk", duration: dur, dep: null, arr: null,
+      walkMins: mode === "cycle" ? 0 : dur, cycleMins: mode === "cycle" ? dur : 0, changes: 0,
+      kind: mode === "cycle" ? "full-cycle" : "full-walk",
+      summary: [{ label: jleg.label, color: jleg.color, line: null }], legs: [jleg],
+    };
+  } catch { return null; }
+}
+
 async function jp(env: Env, to: string, params: Record<string, string>): Promise<any[]> {
   const qs = new URLSearchParams(params);
   if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
@@ -249,14 +302,15 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
 
   let options = raw.map(parseJourney);
 
-  // Guarantee a full option of the chosen kind.
-  if (mode === "cycle" && !options.some(o => o.kind === "full-cycle")) {
-    const full = (await jp(env, to, { mode: "cycle", cyclePreference: "AllTheWay" })).map(parseJourney);
-    options = options.concat(full);
-  }
-  if (mode === "walk" && !options.some(o => o.kind === "full-walk")) {
-    const full = (await jp(env, to, { mode: "walking" })).map(parseJourney);
-    options = options.concat(full);   // 404s for long walks -> empty, which is fine
+  // Full walk / cycle: prefer Stadia (Valhalla) — elevation-aware bike, any-distance
+  // walk, detailed geometry — and drop TfL's version. Fall back to TfL if no key.
+  const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
+  const stadia = await stadiaFull(env, toLat, toLon, mode);
+  if (stadia) {
+    options = options.filter(o => o.kind !== fullKind).concat(stadia);
+  } else if (!options.some(o => o.kind === fullKind)) {
+    const full = (await jp(env, to, mode === "cycle" ? { mode: "cycle", cyclePreference: "AllTheWay" } : { mode: "walking" })).map(parseJourney);
+    options = options.concat(full);   // TfL walking 404s for long walks -> empty, which is fine
   }
 
   // De-duplicate identical leg-signatures, keep soonest/shortest first.
