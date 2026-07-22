@@ -1217,8 +1217,9 @@ function jpRenderOptions(){
     ).join(`<span class="jparrow">›</span>`);
     const tag = o.kind === "full-walk" ? "Full walk" : o.kind === "full-cycle" ? "Full cycle"
               : `${o.changes} change${o.changes === 1 ? "" : "s"}`;
-    const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : ""].filter(Boolean).join(" · ");
-    const arr = o.arr ? `arrive ${to12h(new Date(o.arr))}` : "";
+    const extra = [o.walkMins ? `${o.walkMins} min walk` : "", o.cycleMins ? `${o.cycleMins} min cycle` : "",
+                   o.km ? `${o.km} km` : "", o.ascent != null ? `↑ ${o.ascent} m` : ""].filter(Boolean).join(" · ");
+    const arr = [o.dep ? `leave ${to12h(new Date(o.dep))}` : "", o.arr ? `arrive ${to12h(new Date(o.arr))}` : ""].filter(Boolean).join(" · ");
     return `<div class="jpopt ${i === JP.sel ? "sel" : ""} ${open ? "open" : ""}" data-i="${i}">
       <div class="jpopthead">
         <div class="jpdur">${o.duration}<span>min</span></div>
@@ -1244,19 +1245,15 @@ function jpLegRow(l, oi, li){
   const title = l.kind === "transit" ? `${l.label}${l.line ? " " + esc(l.line) : ""} → ${esc(shortDest(l.to))}`
               : to ? `${verb} to ${esc(to)}` : verb;   // full walk/cycle has no intermediate stop
   const dep = l.dep ? to12h(new Date(l.dep)) : "";
-  // Keep a non-redundant instruction (Stadia gives the distance, e.g. "8.5 km");
-  // drop the TfL "Walk to …" one that just repeats the title.
-  const note = l.instruction && !/^(walk|cycle)\b/i.test(l.instruction)
-    ? `<div class="jpleginstr">${esc(l.instruction)}</div>` : "";
-  const meta = note + (l.kind === "transit" && dep
-    ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "");
+  const meta = l.kind === "transit" && dep
+    ? `<div class="jplegtime">dep ${dep}${l.stops.length ? ` · ${l.stops.length} stop${l.stops.length === 1 ? "" : "s"}` : ""}</div>` : "";
   const more = l.kind === "transit" && l.fromId && l.lineId
     ? `<button class="jpmore" data-o="${oi}" data-l="${li}">See more times</button><div class="jptimes" hidden></div>` : "";
-  // No instruction subtitle for walk/cycle — it just repeats the "Walk to …" title.
+  // Duration is a prominent badge at the start of the segment, not small grey text.
   return `<div class="jpleg" style="--c:${legColor(l)}">
+    <div class="jplegdur">${l.duration}<span>m</span></div>
     <div class="jplegrail"><span class="jplegdot"></span></div>
-    <div class="jplegbody"><div class="jplegtitle">${LEG_ICON(l)} ${title} <span class="jplegdur">${l.duration}m</span></div>
-      ${meta}${more}</div>
+    <div class="jplegbody"><div class="jplegtitle">${LEG_ICON(l)} ${title}</div>${meta}${more}</div>
   </div>`;
 }
 

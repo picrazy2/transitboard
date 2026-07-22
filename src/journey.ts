@@ -168,6 +168,8 @@ export interface JOption {
   kind: "full-walk" | "full-cycle" | "transit";
   summary: { label: string; color: string; line: string | null }[]; // one chip per leg
   legs: JLeg[];
+  km?: number;        // full walk/cycle distance
+  ascent?: number;    // full-cycle total climb, metres (from Stadia elevation)
 }
 
 const num = (s: any) => (typeof s === "number" ? s : parseFloat(s) || 0);
@@ -245,6 +247,25 @@ function decodePolyline(str: string, precision = 6): [number, number][] {
   return out;
 }
 
+// Total climb (m) along a route, from Stadia's elevation (Valhalla /height). Sampled
+// to keep the request small.
+async function stadiaAscent(key: string, path: [number, number][]): Promise<number | null> {
+  if (path.length < 2) return null;
+  const step = Math.max(1, Math.floor(path.length / 150));
+  const shape = path.filter((_, i) => i % step === 0 || i === path.length - 1).map(([lat, lon]) => ({ lat, lon }));
+  try {
+    const r = await fetch(`https://api.stadiamaps.com/elevation/v1?api_key=${key}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shape }),
+    });
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const h: number[] = d.height ?? [];
+    let asc = 0;
+    for (let i = 1; i < h.length; i++) { const dh = h[i] - h[i - 1]; if (dh > 0) asc += dh; }
+    return Math.round(asc);
+  } catch { return null; }
+}
+
 async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle"): Promise<JOption | null> {
   const key = SKEY(env); if (!key) return null;
   const costing = mode === "cycle" ? "bicycle" : "pedestrian";
@@ -252,7 +273,8 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
     locations: [{ lat: HOME.lat, lon: HOME.lon }, { lat: toLat, lon: toLon }],
     costing, directions_options: { units: "kilometers" },
   };
-  if (costing === "bicycle") body.costing_options = { bicycle: { use_hills: 0.5, bicycle_type: "Hybrid" } };
+  // Fastest bike route: don't detour to avoid hills, willing to use main roads.
+  if (costing === "bicycle") body.costing_options = { bicycle: { use_hills: 0.1, use_roads: 0.5, bicycle_type: "Hybrid" } };
   try {
     const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -263,18 +285,20 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
     const path: [number, number][] = [];
     for (const leg of trip.legs) path.push(...decodePolyline(leg.shape, 6));
     const dur = Math.round(num(trip.summary?.time) / 60);
-    const kmTxt = `${(num(trip.summary?.length)).toFixed(1)} km`;
+    const km = Math.round(num(trip.summary?.length) * 10) / 10;
+    const ascent = costing === "bicycle" ? await stadiaAscent(key, path) : null;
     const jleg: JLeg = {
       mode: costing, kind: mode, label: mode === "cycle" ? "Cycle" : "Walk",
       color: mode === "cycle" ? "#20c05b" : "#8a93a5", line: null, lineId: null,
       duration: dur, from: "Home", to: "", fromId: null, fromAlt: null,
-      dep: null, arr: null, instruction: kmTxt, path, stops: [],
+      dep: null, arr: null, instruction: "", path, stops: [],
     };
     return {
       id: mode === "cycle" ? "fullcycle" : "fullwalk", duration: dur, dep: null, arr: null,
       walkMins: mode === "cycle" ? 0 : dur, cycleMins: mode === "cycle" ? dur : 0, changes: 0,
       kind: mode === "cycle" ? "full-cycle" : "full-walk",
       summary: [{ label: jleg.label, color: jleg.color, line: null }], legs: [jleg],
+      km, ...(ascent != null ? { ascent } : {}),
     };
   } catch { return null; }
 }
@@ -313,12 +337,25 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     options = options.concat(full);   // TfL walking 404s for long walks -> empty, which is fine
   }
 
-  // De-duplicate identical leg-signatures, keep soonest/shortest first.
+  // De-duplicate identical leg-signatures.
   const seen = new Set<string>();
   options = options.filter(o => {
     const sig = o.legs.map(l => `${l.mode}:${l.duration}`).join("|");
     if (seen.has(sig)) return false; seen.add(sig); return true;
-  }).sort((a, b) => a.duration - b.duration).slice(0, 6);
+  });
+
+  // Drop a transit option if another transit option is at least as good on every axis
+  // (total time, walk, cycle, interchanges, arrival) and strictly better on one — it's
+  // never worth choosing. Full walk/cycle are a different trade-off, so keep them.
+  const axes = (o: JOption) => [o.duration, o.walkMins, o.cycleMins, o.changes, o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000];
+  const dominates = (a: JOption, b: JOption) => {
+    const A = axes(a), B = axes(b);
+    return A.every((v, i) => v <= B[i]) && A.some((v, i) => v < B[i]);
+  };
+  options = options.filter(b => b.kind !== "transit" || !options.some(a => a !== b && a.kind === "transit" && dominates(a, b)));
+
+  const arrMs = (o: JOption) => o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000;
+  options = options.sort((a, b) => arrMs(a) - arrMs(b)).slice(0, 6);   // soonest arrival first
 
   await enrichWithTflGeometry(env, options);   // fix Elizabeth/Heathrow-style bad geometry
   return { options, dest: { lat: toLat, lon: toLon } };
@@ -398,7 +435,11 @@ function keepDir(seqs: string[][], f: string, t: string, d: string): boolean {
 export async function legDepartures(env: Env, stopId: string, lineId: string, altId = "", fromName = "", toName = ""): Promise<Departure[]> {
   let deps = await arrivalsAt(env, stopId, lineId);
   if (!deps.length && altId && altId !== stopId) deps = await arrivalsAt(env, altId, lineId);
-  if (fromName && toName) {
+  // A physical bus stop only serves one direction, so the direction filter is both
+  // unnecessary and risky there (bus destinations often aren't in the route sequence).
+  // Only filter rail/tube/Overground, where a station has both directions.
+  const isBus = /^n?\d+$/i.test(lineId);
+  if (fromName && toName && !isBus) {
     const seqs = await lineSequences(env, lineId);
     if (seqs.length) { const f = normName(fromName), t = normName(toName); deps = deps.filter(x => keepDir(seqs, f, t, normName(x.to))); }
   }

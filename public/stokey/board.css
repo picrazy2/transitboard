@@ -302,10 +302,12 @@ body.planning .chiprow{display:none}
 .jpback:hover{border-color:#3a4356}
 .jptitle{font-size:16px;font-weight:800;letter-spacing:-.01em;line-height:1.15}
 .jpsub{font-size:12px;color:var(--muted)}
-.jptabs{display:flex;gap:6px;margin-bottom:12px}
-.jptabs button{flex:1;background:var(--row);border:1px solid var(--rule);color:var(--muted);
-               border-radius:999px;padding:7px 10px;font:700 12.5px system-ui;cursor:pointer}
-.jptabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+/* Segmented pill, like the board's Default/All and Walk/Cycle toggles. */
+.jptabs{display:inline-flex;align-self:flex-start;background:#0c0e13;border:1px solid var(--rule);
+        border-radius:999px;padding:2px;margin-bottom:13px}
+.jptabs button{background:transparent;border:0;color:var(--muted);cursor:pointer;border-radius:999px;
+               padding:7px 13px;font:700 12px/1 system-ui;display:inline-flex;align-items:center;gap:5px}
+.jptabs button.on{background:var(--ink);color:var(--bg)}
 .jpoptions{display:flex;flex-direction:column;gap:9px;overflow:auto;flex:1;min-height:0;padding-right:4px;
            scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
 .jploading,.jperr{color:var(--muted);font-size:14px;padding:18px 4px}
@@ -328,7 +330,11 @@ body.planning .chiprow{display:none}
 .jpmeta{font-size:11.5px;color:var(--muted);margin-top:5px}
 .jplegs{margin-top:11px;padding-top:11px;border-top:1px solid var(--rule);display:flex;flex-direction:column}
 .jplegs[hidden],.jptimes[hidden]{display:none}
-.jpleg{display:flex;gap:11px}
+.jpleg{display:flex;gap:9px}
+/* Prominent duration badge at the start of each segment. */
+.jplegdur{flex:none;width:34px;text-align:right;font:800 13.5px system-ui;color:var(--ink);
+          padding-top:1px;line-height:1.35;font-variant-numeric:tabular-nums}
+.jplegdur span{font-size:10px;font-weight:600;color:var(--muted);margin-left:1px}
 /* Timeline: a dot at each leg's title, a connector flowing down to the next. */
 .jplegrail{display:flex;flex-direction:column;align-items:center;flex:none;width:11px}
 .jplegdot{width:11px;height:11px;border-radius:50%;background:var(--c);border:2px solid var(--bg);flex:none;margin-top:3px}
@@ -337,7 +343,6 @@ body.planning .chiprow{display:none}
 .jplegbody{padding-bottom:14px;min-width:0;flex:1}
 .jpleg:last-child .jplegbody{padding-bottom:2px}
 .jplegtitle{font-size:13px;font-weight:700;line-height:1.3}
-.jplegdur{color:var(--muted);font-weight:600;font-size:11.5px;margin-left:4px}
 .jpleginstr{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
 .jplegtime{font-size:11px;color:var(--muted);margin-top:2px}
 
