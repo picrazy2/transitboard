@@ -14,8 +14,13 @@ const RAIL_WALK_S = 348;           // walk: 491 m to Stoke Newington station
 const LINE_COLOR = {
   "Weaver":"#823a62", "Mildmay":"#3a6ea5", "Windrush":"#dc241f", "Suffragette":"#57ad6d",
   "Lioness":"#c99e28", "Liberty":"#5d6067", "Victoria":"#0098d4", "Piccadilly":"#0a338c",
-  "Northern":"#111", "Central":"#e32017", "Elizabeth line":"#6950a1",
+  "Northern":"#111", "Central":"#e32017", "Elizabeth line":"#6950a1", "Elizabeth":"#6950a1",
   "Greater Anglia":"#d70428", "Great Northern":"#0a493e", "Thameslink":"#e05aa6",
+  // Rest of the tube + a few NR operators, so journey-planner legs get their real colour.
+  "Bakerloo":"#b36305", "Circle":"#ffd300", "District":"#00782a", "Hammersmith & City":"#f3a9bb",
+  "Jubilee":"#a0a5a9", "Metropolitan":"#9b0056", "Waterloo & City":"#95cdba", "DLR":"#00a4a7",
+  "Tram":"#5fb130", "Heathrow Express":"#532e63", "Southern":"#8cc63f", "Southeastern":"#389cff",
+  "South Western Railway":"#24215e", "c2c":"#b6153c", "Chiltern Railways":"#00bfff",
 };
 // Walk colours a line by kind (bus red, night blue, Weaver purple); cycle by brand.
 function colorOf(line){

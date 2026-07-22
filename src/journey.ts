@@ -48,16 +48,10 @@ function sliceLL(poly: [number, number][], cum: number[], a: number, b: number):
   pts.push(pointOnPoly(poly, cum, hi));
   return a > b ? pts.reverse() : pts;
 }
-// Swap a sparse transit leg's straight line for the board's own track when both
-// its endpoints sit on one of that line's drawn spines.
-function enrichLeg(leg: JLeg) {
-  if (leg.kind !== "transit" || !leg.lineId || leg.path.length < 2) return;
-  const cands = LINE_SPINES[leg.lineId]; if (!cands) return;
-  // Enrich when TfL's geometry is sparse OR suspiciously straight (its length barely
-  // exceeds the crow-flies distance — real routes bend). Detailed, bendy paths are left.
-  let plen = 0; for (let i = 0; i < leg.path.length - 1; i++) plen += metresLL(leg.path[i], leg.path[i + 1]);
-  const straight = plen / (metresLL(leg.path[0], leg.path[leg.path.length - 1]) || 1);
-  if (leg.path.length >= 20 && straight > 1.2) return;
+// Replace a leg's path with the slice of a candidate polyline between its endpoints,
+// if they sit close enough to it. Returns true if it snapped.
+function snapToPolys(leg: JLeg, cands: [number, number][][], maxPerp: number): boolean {
+  if (leg.path.length < 2) return false;
   const start = leg.path[0], end = leg.path[leg.path.length - 1];
   let best: { seg: [number, number][]; perp: number } | null = null;
   for (const poly of cands) {
@@ -67,8 +61,57 @@ function enrichLeg(leg: JLeg) {
     if (Math.abs(a.arc - b.arc) < 100) continue;
     if (!best || a.perp + b.perp < best.perp) best = { seg: sliceLL(poly, cum, a.arc, b.arc), perp: a.perp + b.perp };
   }
-  if (best && best.perp < 500 && best.seg.length >= 2)
+  if (best && best.perp < maxPerp && best.seg.length >= 2) {
     leg.path = best.seg.map((p) => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+    return true;
+  }
+  return false;
+}
+// Sync pass: snap onto the board's own precise OSM spines (local lines + buses).
+function enrichLeg(leg: JLeg) {
+  if (leg.kind !== "transit" || !leg.lineId) return;
+  const cands = LINE_SPINES[leg.lineId];
+  if (cands) snapToPolys(leg, cands, 500);
+}
+
+// TfL's own line geometry (Route/Sequence), cached per isolate. Each lineString is a
+// stringified GeoJSON coord array wrapped once: JSON.parse(s)[0] = [[lon,lat],…].
+const tflGeomCache = new Map<string, [number, number][][]>();
+async function tflLineGeometry(env: Env, lineId: string): Promise<[number, number][][]> {
+  if (tflGeomCache.has(lineId)) return tflGeomCache.get(lineId)!;
+  const polys: [number, number][][] = [];
+  try {
+    const qs = new URLSearchParams({ serviceTypes: "Regular", excludeCrowding: "true" });
+    if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
+    const r = await fetch(`${TFL}/Line/${lineId}/Route/Sequence/outbound?${qs}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" }, cf: { cacheTtl: 604800, cacheEverything: true },
+    });
+    if (r.ok) {
+      const d: any = await r.json();
+      for (const ls of d.lineStrings ?? []) {
+        try { const arr = JSON.parse(ls)[0]; if (Array.isArray(arr)) polys.push(arr.map((p: any) => [num(p[1]), num(p[0])] as [number, number])); } catch { /* skip */ }
+      }
+    }
+  } catch { /* ignore */ }
+  tflGeomCache.set(lineId, polys);
+  return polys;
+}
+// Async pass: for lines with no local spine whose TfL leg geometry is bad — sparse
+// (Heathrow Express: a straight line) or street-following (Elizabeth: 1000s of road
+// points) — snap onto TfL's authoritative line track. Good tube geometry is left alone.
+async function enrichWithTflGeometry(env: Env, options: JOption[]): Promise<void> {
+  const need = new Map<string, JLeg[]>();
+  for (const o of options) for (const l of o.legs) {
+    if (l.kind !== "transit" || !l.lineId || LINE_SPINES[l.lineId]) continue;
+    const stops = Math.max(1, l.stops.length);
+    if (l.path.length < 4 || l.path.length > 30 * stops)
+      (need.get(l.lineId) ?? need.set(l.lineId, []).get(l.lineId)!).push(l);
+  }
+  if (!need.size) return;
+  await Promise.all([...need].map(async ([lid, legs]) => {
+    const polys = await tflLineGeometry(env, lid);
+    if (polys.length) for (const l of legs) snapToPolys(l, polys, 900);
+  }));
 }
 
 // Journey planning is TfL's Journey Planner (free, London-complete, native
@@ -223,6 +266,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     if (seen.has(sig)) return false; seen.add(sig); return true;
   }).sort((a, b) => a.duration - b.duration).slice(0, 6);
 
+  await enrichWithTflGeometry(env, options);   // fix Elizabeth/Heathrow-style bad geometry
   return { options, dest: { lat: toLat, lon: toLon } };
 }
 
