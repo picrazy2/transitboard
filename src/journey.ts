@@ -763,7 +763,13 @@ function rankOptions(options: JOption[]): JOption[] {
   // greenlight every transfer). If no one-seat ride exists, transfers are all we have.
   const noTransfer = options.filter(o => (o.kind === "transit" && o.changes === 0) || o.kind === "full-walk");
   const baseArr = noTransfer.length ? Math.min(...noTransfer.map(arrMs)) : Infinity;
-  options = options.filter(o => o.kind !== "transit" || o.changes === 0 || arrMs(o) < baseArr);
+  // ALWAYS keep the single fastest transit route so the quickest option is never hidden even
+  // when it needs a change (e.g. Piccadilly one-seat vs a faster Victoria+District). The
+  // one-seat preference then only drops transfer routes that are BOTH slower than the best
+  // no-transfer AND not the fastest overall.
+  const transitArrs = options.filter(o => o.kind === "transit").map(arrMs);
+  const fastestArr = transitArrs.length ? Math.min(...transitArrs) : Infinity;
+  options = options.filter(o => o.kind !== "transit" || o.changes === 0 || arrMs(o) < baseArr || arrMs(o) <= fastestArr);
 
   options.sort((a, b) => arrMs(a) - arrMs(b));   // soonest arrival first
   // Always keep the full walk/cycle option(s) — they're a mode the user explicitly wants

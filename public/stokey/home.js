@@ -300,8 +300,10 @@ async function loadRoutes(keep) {
   // clobber a newer load's staging. The token guards make a superseded load a no-op.
   let finalDone = false, shownAny = false;
   try {
-    // Fast stage (full-cycle / full-walk) paints in ~1s; the rail routes swap in after.
-    const fastP = one("fast").then(opts => { if (tok === H.loadTok && !finalDone && opts.length) { paint(opts, true); shownAny = true; } });
+    // Fast stage (full-cycle / full-walk) paints in ~1s; the rail routes swap in after. On a
+    // background refresh (keep) we already have full results on screen, so DON'T flash the
+    // cycle-only fast result over them — keep the old list until the new full result lands.
+    const fastP = one("fast").then(opts => { if (tok === H.loadTok && !finalDone && !keep && opts.length) { paint(opts, true); shownAny = true; } });
     const full = await one("full");
     if (tok !== H.loadTok) return;   // a newer load (e.g. a toggle) superseded this one
     finalDone = true;
