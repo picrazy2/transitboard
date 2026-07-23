@@ -156,6 +156,8 @@ export interface JLeg {
   instruction: string;
   path: [number, number][]; // [lat,lon]
   stops: string[];      // intermediate stop names (transit legs)
+  fromLL?: [number, number] | null;  // boarding STATION point (not the track end) — cycle/walk target
+  toLL?: [number, number] | null;    // alighting station point
 }
 export interface JOption {
   id: string;
@@ -237,6 +239,10 @@ function parseLeg(l: any): JLeg {
     arr: londonIso(l.arrivalTime),
     instruction: l.instruction?.summary ?? "",
     path, stops,
+    // The STATION point (an entrance/hub), unlike path[0] which is the track/platform end
+    // and can be on the far side of a big interchange — cycling there means a loop.
+    fromLL: (l.departurePoint?.lat != null && l.departurePoint?.lon != null) ? [num(l.departurePoint.lat), num(l.departurePoint.lon)] : null,
+    toLL: (l.arrivalPoint?.lat != null && l.arrivalPoint?.lon != null) ? [num(l.arrivalPoint.lat), num(l.arrivalPoint.lon)] : null,
   };
 }
 
@@ -436,21 +442,23 @@ async function assembleCycleRoute(cbike: ReturnType<typeof bikeCache>, startPt: 
   const legs = parseJourney(j, 0).legs;
   const tIdx = legs.map((l, i) => (l.kind === "transit" ? i : -1)).filter(i => i >= 0);
   if (!tIdx.length) return [];
+  const boardOf = (i: number) => legs[i].fromLL || legs[i].path[0];       // station point, not track end
+  const alightOf = (i: number) => legs[i].toLL || legs[i].path[legs[i].path.length - 1];
   const startChoices = [0];
   if (tIdx.length >= 2) {
-    const secondBoard = legs[tIdx[1]].path[0];   // where you'd board if you cycle past the first hop
+    const secondBoard = boardOf(tIdx[1]);   // where you'd board if you cycle past the first hop
     if (secondBoard && haversineKm(secondBoard, startPt) <= 3) startChoices.push(1);
   }
   const endChoices = [tIdx.length - 1];
   if (tIdx.length >= 2) {
-    const dropAlight = legs[tIdx[tIdx.length - 2]].path.slice(-1)[0];
+    const dropAlight = alightOf(tIdx[tIdx.length - 2]);
     if (dropAlight && haversineKm(dropAlight, endPt) <= 3) endChoices.push(tIdx.length - 2);
   }
   const combos: [number, number][] = [];
   for (const si of startChoices) for (const ei of endChoices) if (si <= ei) combos.push([si, ei]);
   const built = await Promise.all(combos.map(async ([si, ei], variant): Promise<JOption | null> => {
     const bi = tIdx[si], li = tIdx[ei];
-    const board = legs[bi].path[0], alight = legs[li].path[legs[li].path.length - 1];
+    const board = boardOf(bi), alight = alightOf(li);
     if (!board || !alight) return null;
     const [access, egress] = await Promise.all([cbike(startPt, board), cbike(alight, endPt)]);
     if (!access || !egress) return null;
@@ -480,7 +488,7 @@ async function walkAccurate(cbike: ReturnType<typeof bikeCache>, startPt: [numbe
   const tIdx = legs.map((l, i) => (l.kind === "transit" ? i : -1)).filter(i => i >= 0);
   if (!tIdx.length) return o;   // full walk — nothing to fix
   const fi = tIdx[0], li = tIdx[tIdx.length - 1];
-  const board = legs[fi].path[0], alight = legs[li].path[legs[li].path.length - 1];
+  const board = legs[fi].fromLL || legs[fi].path[0], alight = legs[li].toLL || legs[li].path[legs[li].path.length - 1];
   const [access, egress] = await Promise.all([
     board ? cbike(startPt, board, undefined, "pedestrian") : Promise.resolve(null),
     alight ? cbike(alight, endPt, undefined, "pedestrian") : Promise.resolve(null),
