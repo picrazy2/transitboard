@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Get me home</title>
-<meta name="description" content="Cycle + transit routes home to Stoke Newington from wherever you are.">
+<title>Plan a journey</title>
+<meta name="description" content="Plan a cycle + transit journey anywhere across London.">
 <link rel="manifest" href="/stokey/manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -22,14 +22,14 @@
 <div class="hbar" id="hbar">
   <div class="hrow">
     <span class="hdot from"></span>
-    <input id="hOrigin" type="text" placeholder="Finding your location…" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <input id="hOrigin" type="text" placeholder="Start" autocomplete="off" spellcheck="false" enterkeyhint="search">
     <button id="hLocate" class="hiconbtn" title="Use my location" aria-label="Use my location"></button>
   </div>
   <div class="hrule"></div>
   <div class="hrow">
     <span class="hdot to"></span>
-    <input id="hDest" type="text" value="Home · Stoke Newington" autocomplete="off" spellcheck="false" enterkeyhint="search">
-    <button id="hHomeBtn" class="hiconbtn" title="Reset to home" aria-label="Reset destination to home"></button>
+    <input id="hDest" type="text" placeholder="Where to?" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <button id="hHomeBtn" class="hiconbtn" title="Set destination to home" aria-label="Set destination to home"></button>
   </div>
   <div class="hresults" id="hResults" hidden></div>
 </div>
@@ -39,10 +39,10 @@
 <div class="drawer" id="drawer" data-snap="mid">
   <div class="draghandle" id="dragHandle"><span></span></div>
   <div class="drawerhdr">
-    <div class="drawertitle">Ways home</div>
+    <div class="drawertitle">Plan a journey</div>
     <div class="drawerupd" id="hUpdated"></div>
   </div>
-  <div class="hoptions" id="hOptions"><div class="jploading">Getting your location…</div></div>
+  <div class="hoptions" id="hOptions"><div class="jploading">Enter a start and destination to see routes.</div></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

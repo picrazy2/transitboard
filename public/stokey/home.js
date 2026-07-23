@@ -70,11 +70,13 @@ const legColor = l => l.kind === "transit" && l.line ? colorOf(l.line) : l.color
 const legStyle = l => l.kind !== "transit" ? l.kind : (l.mode === "bus" ? "bus" : "rail");
 
 // ---------- state ----------
+// PLAN mode (/plan) is a generic anywhere->anywhere planner: no home default for the
+// destination. The default view (/home, /stokey/home) is "get me home" — dest defaults home.
+const PLAN = /(^|\/)plan\/?$/.test(location.pathname);
 const HOME_PLACE = { name: "Home · Stoke Newington", lat: HOME[0], lon: HOME[1], home: true };
-// from/to are {name,lat,lon}; to defaults to home ("get me home"). activeField tracks which
-// input the search results apply to.
-const H = { from: null, to: { ...HOME_PLACE }, activeField: "origin", options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
-const toPt = () => [H.to.lat, H.to.lon];
+// from/to are {name,lat,lon} or null. activeField tracks which input the search applies to.
+const H = { from: null, to: PLAN ? null : { ...HOME_PLACE }, activeField: "origin", options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
+const toPt = () => H.to ? [H.to.lat, H.to.lon] : null;
 
 // ---------- map ----------
 const map = L.map("map", { zoomControl: false, attributionControl: false, zoomSnap: 0.25 });
@@ -87,9 +89,10 @@ const hLayer = L.layerGroup().addTo(map);
 // ---------- route drawing (mirrors board.js jpDrawMap) ----------
 function drawRoute() {
   hLayer.clearLayers();
-  H.options.forEach((o, i) => { if (i !== H.sel) for (const l of o.legs) drawLeg(l, false); });
   const o = H.options[H.sel];
-  endpoint(toPt(), "#20c05b");
+  const overview = !o;   // nothing selected -> draw every option at full opacity
+  H.options.forEach((opt, i) => { if (i !== H.sel) for (const l of opt.legs) drawLeg(l, overview); });
+  if (H.to) endpoint(toPt(), "#20c05b");
   if (H.from) endpoint([H.from.lat, H.from.lon], "#e6e8ee");
   if (!o) return;
   for (const l of o.legs) drawLeg(l, true);
@@ -125,7 +128,7 @@ function fit() {
   const pts = [];
   const legs = H.sel >= 0 ? (H.options[H.sel]?.legs ?? []) : H.options.flatMap(o => o.legs);
   for (const l of legs) for (const p of l.path) pts.push(p);
-  pts.push(toPt()); if (H.from) pts.push([H.from.lat, H.from.lon]);
+  if (H.to) pts.push(toPt()); if (H.from) pts.push([H.from.lat, H.from.lon]);
   if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts), drawerPadding());
   showFab(false);   // the route is framed now; the recenter FAB is only for after you pan away
 }
@@ -142,7 +145,7 @@ function showFab(v) { const f = document.getElementById("hRecenter"); if (f) f.s
 // ---------- options list ----------
 function renderOptions() {
   const box = document.getElementById("hOptions");
-  const note = H.loading ? `<div class="jploading jpmore-note">${mi("route", 18)} Loading rail routes home…</div>` : "";
+  const note = H.loading ? `<div class="jploading jpmore-note">${mi("route", 18)} Loading rail routes…</div>` : "";
   if (!H.options.length) { box.innerHTML = H.loading ? note : `<div class="jperr">No routes home found right now.</div>`; return; }
   const u = document.getElementById("hUpdated");
   if (u) u.textContent = H.updated ? `Updated ${to12h(new Date(H.updated))}` : "";
@@ -267,9 +270,9 @@ if (!location.search.includes("notick")) setInterval(() => {
 
 // ---------- loading routes ----------
 async function loadRoutes(keep) {
-  if (!H.from) return;
-  const tok = ++H.loadTok;
   const box = document.getElementById("hOptions");
+  if (!H.from || !H.to) { box.innerHTML = `<div class="jploading">${!H.from ? "Set a starting point" : "Enter a destination"} to see routes.</div>`; return; }
+  const tok = ++H.loadTok;
   const goingHome = !!H.to.home;
   if (!keep) box.innerHTML = `<div class="jploading">Finding ${goingHome ? "ways home" : "routes"}…</div>`;
   const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}`)
@@ -277,8 +280,9 @@ async function loadRoutes(keep) {
   const paint = (opts, loading) => {
     if (tok !== H.loadTok) return;
     H.options = opts; H.updated = Date.now(); H.loading = loading;
+    // Don't auto-select/expand on load — start in overview (all options shown on the map).
     if (keep && H.sel >= 0) { H.sel = Math.min(H.sel, H.options.length - 1); H.expanded = H.sel; }
-    else if (H.sel < 0) { H.sel = H.options.length ? 0 : -1; H.expanded = H.sel; }
+    else { H.sel = -1; H.expanded = -1; }
     renderOptions(); drawRoute(); if (!keep && !loading) fit();
   };
   try {
@@ -293,7 +297,7 @@ async function loadRoutes(keep) {
   }
 }
 
-function updateTitle() { const t = document.querySelector(".drawertitle"); if (t) t.textContent = H.to.home ? "Ways home" : "Routes"; }
+function updateTitle() { const t = document.querySelector(".drawertitle"); if (t) t.textContent = PLAN ? "Plan a journey" : (H.to && H.to.home ? "Ways home" : "Routes"); }
 function setPlace(field, place, refit) {
   if (field === "dest") { H.to = place; document.getElementById("hDest").value = place.name || ""; updateTitle(); }
   else { H.from = place; document.getElementById("hOrigin").value = place.name || "Current location"; }
@@ -466,6 +470,7 @@ function init() {
   };
   wireField(origin, "origin");
   wireField(dest, "dest");
+  if (PLAN) { origin.placeholder = "Start"; dest.placeholder = "Where to?"; }
   document.getElementById("hHomeBtn").innerHTML = mi("home", 20);
   document.getElementById("hHomeBtn").addEventListener("click", () => setPlace("dest", { ...HOME_PLACE }, true));
   document.addEventListener("click", e => { if (!e.target.closest(".hbar")) document.getElementById("hResults").hidden = true; });
@@ -475,7 +480,7 @@ function init() {
   const parse = s => { const c = (s || "").split(",").map(Number); return c.length === 2 && c.every(Number.isFinite) ? c : null; };
   const tc = parse(qp.get("to"));
   if (tc) H.to = { name: qp.get("toName") || "Destination", lat: tc[0], lon: tc[1] };
-  document.getElementById("hDest").value = H.to.name;
+  document.getElementById("hDest").value = H.to ? H.to.name : "";
   updateTitle();
   const fc = parse(qp.get("from"));
   if (fc) setOrigin({ name: "Pinned start", lat: fc[0], lon: fc[1] }, true);
