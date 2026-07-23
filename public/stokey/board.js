@@ -1247,12 +1247,18 @@ async function jpLoad(keep){
       if(JP.mode === "cycle" && !JP.cache.cycle){ JP.updated = Date.now(); jpShowMode(keep); }
       const full = await one("cycle", "full");
       if(!live()) return;
-      JP.cache.cycle = full; JP.updated = Date.now();
+      // A transient empty full result must not wipe the cycle-only options we already
+      // showed — keep those (or a prior good result) rather than flashing "no routes".
+      JP.cache.cycle = full.length ? full
+        : (JP.fast.cycle && JP.fast.cycle.length) ? JP.fast.cycle
+        : (JP.cache.cycle && JP.cache.cycle.length) ? JP.cache.cycle : full;
+      JP.updated = Date.now();
       if(JP.mode === "cycle") jpShowMode(keep);
     } else {
       const full = await one("walk");
       if(!live()) return;
-      JP.cache.walk = full; JP.updated = Date.now();
+      if(full.length || !(JP.cache.walk && JP.cache.walk.length)) JP.cache.walk = full;
+      JP.updated = Date.now();
       if(JP.mode === "walk") jpShowMode(keep);
     }
   };

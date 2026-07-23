@@ -285,15 +285,22 @@ async function loadRoutes(keep) {
     else { H.sel = -1; H.expanded = -1; }
     renderOptions(); drawRoute(); if (!keep && !loading) fit();
   };
+  // finalDone is LOCAL to this load (not shared state) so toggling mode mid-load can't
+  // clobber a newer load's staging. The token guards make a superseded load a no-op.
+  let finalDone = false, shownAny = false;
   try {
-    // Full-cycle paints in ~1s; the rail routes swap in when ready.
-    const fast = await one("fast");
-    if (tok === H.loadTok && !H.optionsFinal) paint(fast, true);
+    // Fast stage (full-cycle / full-walk) paints in ~1s; the rail routes swap in after.
+    const fastP = one("fast").then(opts => { if (tok === H.loadTok && !finalDone && opts.length) { paint(opts, true); shownAny = true; } });
     const full = await one("full");
-    H.optionsFinal = true;
-    paint(full, false);
+    if (tok !== H.loadTok) return;   // a newer load (e.g. a toggle) superseded this one
+    finalDone = true;
+    // A transient empty full result must not wipe out options we already showed — only
+    // show "no routes" when we genuinely have nothing.
+    if (full.length || !shownAny) paint(full, false);
+    else { H.loading = false; renderOptions(); }
+    await fastP.catch(() => {});
   } catch {
-    if (tok === H.loadTok && !keep) document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't plan that route. Try again.</div>`;
+    if (tok === H.loadTok && !keep && !shownAny) document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't plan that route. Try again.</div>`;
   }
 }
 
