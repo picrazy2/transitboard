@@ -1136,8 +1136,12 @@ function injectPlanner(){
     if(q.length < 2){ jpShowRecents(); return; }   // empty/short -> your recent destinations
     timer = setTimeout(() => jpGeocode(q), 220);
   });
-  input.addEventListener("focus", () => { if(input.value.trim().length < 2) jpShowRecents(); });
-  document.getElementById("jpClear").addEventListener("click", () => { input.value = ""; document.getElementById("jpClear").hidden = true; input.focus(); jpShowRecents(); });
+  // Focusing the search shows your recent destinations first (before you type).
+  input.addEventListener("focus", () => jpShowRecents());
+  // The clear (X) behaves like tapping empty map: wipe the field, drop the keyboard, hide the list.
+  document.getElementById("jpClear").addEventListener("click", () => {
+    input.value = ""; document.getElementById("jpClear").hidden = true; input.blur(); results.hidden = true;
+  });
   document.getElementById("jpBack").addEventListener("click", jpExit);
   document.getElementById("jpTabs").addEventListener("click", e => {
     const b = e.target.closest("[data-jm]"); if(!b || b.dataset.jm === JP.mode) return;
