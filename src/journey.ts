@@ -176,6 +176,30 @@ export interface JOption {
 
 const num = (s: any) => (typeof s === "number" ? s : parseFloat(s) || 0);
 
+// TfL returns NAIVE London times ("2026-07-23T09:19:00", no offset). Date.parse would
+// read them in the runtime's zone — fine locally (BST) but an hour off on the UTC Worker,
+// which shifted displayed times and (worse) made rankOptions compare TfL times against
+// Date.now() incorrectly, dropping every walk+transit route. Parse them as Europe/London.
+function londonOffsetMs(utcMs: number): number {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(utcMs);
+  const g = (t: string) => p.find(x => x.type === t)!.value;
+  const wall = Date.parse(`${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g("minute")}:${g("second")}Z`);
+  return wall - utcMs;
+}
+// A naive London ISO -> true UTC ms (runtime-zone independent).
+function londonMs(iso: string): number {
+  if (!iso) return NaN;
+  if (/Z$|[+-]\d\d:?\d\d$/.test(iso)) return Date.parse(iso);   // already has an offset — trust it
+  const asUtc = Date.parse(iso + "Z");
+  return asUtc - londonOffsetMs(asUtc);
+}
+// A naive London ISO -> a proper UTC ISO string (with Z) for storage/transport.
+const londonIso = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const ms = londonMs(iso);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+};
+
 // Great-circle distance in km between two [lat, lon] points.
 function haversineKm(a: [number, number], b: [number, number]): number {
   const R = 6371, toR = Math.PI / 180;
@@ -209,8 +233,8 @@ function parseLeg(l: any): JLeg {
     fromId: l.departurePoint?.individualStopId ?? l.departurePoint?.naptanId ?? null,
     fromAlt: l.departurePoint?.naptanId && l.departurePoint?.naptanId !== l.departurePoint?.individualStopId
       ? l.departurePoint.naptanId : null,
-    dep: l.departureTime ?? null,
-    arr: l.arrivalTime ?? null,
+    dep: londonIso(l.departureTime),
+    arr: londonIso(l.arrivalTime),
     instruction: l.instruction?.summary ?? "",
     path, stops,
   };
@@ -228,8 +252,8 @@ function parseJourney(j: any, i: number): JOption {
   return {
     id: `opt${i}`,
     duration: Math.round(num(j.duration)),
-    dep: j.startDateTime ?? null,
-    arr: j.arrivalDateTime ?? null,
+    dep: londonIso(j.startDateTime),
+    arr: londonIso(j.arrivalDateTime),
     walkMins, cycleMins,
     changes: Math.max(0, transitLegs.length - 1),
     kind,
