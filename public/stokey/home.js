@@ -363,7 +363,7 @@ function showResults(places, isRecent) {
   const special = [["locate", "mylocation", "My location"], ["map", "place", "Choose on map"], ["home", "home", "Home"]]
     .map(([sp, icon, label]) => `<button class="jpresult" data-sp="${sp}">${mi(icon, 18)}<span class="jprestext"><span class="jpresname">${label}</span></span></button>`).join("");
   box.innerHTML = special + places.map((p, i) =>
-    `<button class="jpresult" data-i="${i}">${mi(isRecent ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
+    `<button class="jpresult" data-i="${i}">${mi((isRecent || p.recent) ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
       <span class="jprestext"><span class="jpresname">${esc(p.name)}</span>${p.detail ? `<span class="jpresdetail">${esc(p.detail)}</span>` : ""}</span></button>`
   ).join("");
   for (const b of box.querySelectorAll(".jpresult")) {
@@ -376,11 +376,17 @@ function showResults(places, isRecent) {
 }
 async function geocode(q) {
   const tok = ++H.geoTok;
+  // Matching recents lead the list (they resolve instantly), then the geocode results.
+  const ql = q.toLowerCase();
+  const rec = recents().filter(p => `${p.name} ${p.detail || ""}`.toLowerCase().includes(ql)).map(p => ({ ...p, recent: true }));
   try {
     const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&session=${geoSession || ""}`);
     const d = await r.json();
-    if (tok === H.geoTok) showResults(d.places || [], false);
-  } catch {}
+    if (tok !== H.geoTok) return;
+    const seen = new Set(rec.map(p => (p.name || "").toLowerCase()));
+    const geo = (d.places || []).filter(p => !seen.has((p.name || "").toLowerCase()));
+    showResults([...rec, ...geo], false);
+  } catch { if (tok === H.geoTok) showResults(rec, false); }
 }
 async function choose(place) {
   const field = H.activeField;

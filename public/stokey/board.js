@@ -1173,7 +1173,7 @@ function jpShowResults(places, recent){
   JP.places = places || [];
   if(!JP.places.length){ results.hidden = true; return; }
   results.innerHTML = JP.places.map((p, i) =>
-    `<button class="jpresult" data-i="${i}">${mi(recent ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
+    `<button class="jpresult" data-i="${i}">${mi((recent || p.recent) ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
        <span class="jprestxt"><b>${esc(p.name)}</b>${p.detail ? `<span>${esc(p.detail)}</span>` : ""}</span></button>`).join("");
   results.hidden = false;
   for(const b of results.querySelectorAll(".jpresult"))
@@ -1183,12 +1183,17 @@ function jpShowResults(places, recent){
 async function jpGeocode(q){
   const tok = ++JP.geoTok;
   if(!jpSession) jpNewSession();
+  // Matching recent destinations lead the list (they resolve instantly), then geocode hits.
+  const ql = q.toLowerCase();
+  const rec = jpRecents().filter(p => `${p.name} ${p.detail || ""}`.toLowerCase().includes(ql)).map(p => ({ ...p, recent: true }));
   try{
     const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&session=${jpSession}`);
     const d = await r.json();
     if(tok !== JP.geoTok) return;
-    jpShowResults(d.places || [], false);
-  }catch{ /* ignore */ }
+    const seen = new Set(rec.map(p => (p.name || "").toLowerCase()));
+    const geo = (d.places || []).filter(p => !seen.has((p.name || "").toLowerCase()));
+    jpShowResults([...rec, ...geo], false);
+  }catch{ if(tok === JP.geoTok) jpShowResults(rec, false); }
 }
 
 // Google predictions have no coords until picked — resolve, then plan. Recents and
