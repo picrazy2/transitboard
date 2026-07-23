@@ -618,7 +618,7 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
       jobs.push(async () => {
         const cycMin = Math.max(1, Math.round(H.cycMin));
         const base: Record<string, string> = { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" };
-        const prefs = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
+        const prefs: Record<string, string>[] = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
         const results = await Promise.all(prefs.map(p => jp(env, `${D.lat},${D.lon}`, { ...base, ...p }, `${H.lat},${H.lon}`)));
         const built = await Promise.all(results.map((journeys, qi) => {
           const j = (journeys as any[])[0];
