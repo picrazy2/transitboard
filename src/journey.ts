@@ -1019,7 +1019,8 @@ async function geocodeGoogle(env: Env, q: string, session?: string): Promise<Pla
     u.searchParams.set("key", key);
     u.searchParams.set("components", "country:gb");
     u.searchParams.set("location", `${HOME.lat},${HOME.lon}`);
-    u.searchParams.set("radius", "40000");   // bias toward London
+    u.searchParams.set("radius", "40000");        // ~40 km circle: all of Greater London, out past the M25
+    u.searchParams.set("strictbounds", "true");   // hard-restrict — drop far-away places (Manchester etc.), don't just deprioritize
     if (session) u.searchParams.set("sessiontoken", session);
     const r = await fetch(u.toString());
     if (!r.ok) return [];
@@ -1078,7 +1079,9 @@ async function geocodePhoton(q: string): Promise<Place[]> {
     }
   } catch { /* ignore */ }
   const seen = new Set<string>();
-  return out.filter(p => { const k = `${p.lat!.toFixed(4)},${p.lon!.toFixed(4)}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 7);
+  return out
+    .filter(p => haversineKm([HOME.lat, HOME.lon], [p.lat!, p.lon!]) <= 45)   // match Google's ~40 km London box
+    .filter(p => { const k = `${p.lat!.toFixed(4)},${p.lon!.toFixed(4)}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 7);
 }
 
 export async function geocode(env: Env, q: string, session?: string): Promise<Place[]> {
