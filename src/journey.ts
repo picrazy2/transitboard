@@ -388,30 +388,33 @@ function hhmm(ms: number): string {
   return (p.find(x => x.type === "hour")?.value ?? "00") + (p.find(x => x.type === "minute")?.value ?? "00");
 }
 
-async function bikeLeg(env: Env, from: [number, number], to: [number, number], mins?: number): Promise<JLeg | null> {
+// A Valhalla (Stadia) self-powered leg — bicycle or pedestrian. TfL's own access/egress
+// walk & cycle times are badly overestimated (11 min for a 6-min walk), so we route them
+// ourselves for both modes.
+async function stadiaLeg(env: Env, from: [number, number], to: [number, number], costing: "bicycle" | "pedestrian" = "bicycle", mins?: number): Promise<JLeg | null> {
   const key = SKEY(env); if (!key) return null;
   try {
-    const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ locations: [{ lat: from[0], lon: from[1] }, { lat: to[0], lon: to[1] }], costing: "bicycle", costing_options: { bicycle: { use_hills: 0.2, use_roads: 0.4, bicycle_type: "Hybrid", cycling_speed: 15 } }, directions_options: { units: "kilometers" } }),
-    });
+    const body: any = { locations: [{ lat: from[0], lon: from[1] }, { lat: to[0], lon: to[1] }], costing, directions_options: { units: "kilometers" } };
+    if (costing === "bicycle") body.costing_options = { bicycle: { use_hills: 0.2, use_roads: 0.4, bicycle_type: "Hybrid", cycling_speed: 15 } };
+    const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${key}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!r.ok) return null;
     const d: any = await r.json(); const trip = d.trip; if (!trip?.legs?.length) return null;
     const path: [number, number][] = [];
     for (const l of trip.legs) path.push(...decodePolyline(l.shape, 6));
-    return { mode: "bicycle", kind: "cycle", label: "Cycle", color: "#20c05b", line: null, lineId: null, duration: mins ?? Math.round(num(trip.summary?.time) / 60), from: "", to: "", fromId: null, fromAlt: null, dep: null, arr: null, instruction: "", path, stops: [] };
+    const walk = costing === "pedestrian";
+    return { mode: costing, kind: walk ? "walk" : "cycle", label: walk ? "Walk" : "Cycle", color: walk ? "#8a93a5" : "#20c05b", line: null, lineId: null, duration: mins ?? Math.round(num(trip.summary?.time) / 60), from: "", to: "", fromId: null, fromAlt: null, dep: null, arr: null, instruction: "", path, stops: [] };
   } catch { return null; }
 }
 
-// Memoised Valhalla cycle legs for one request — many journeys share the same access
-// (home->station) or egress (station->dest) endpoints, so dedupe by rounded coords to
-// bound the number of Stadia calls. Returns a shallow clone so callers can set .to.
+// Memoised Valhalla legs for one request — many journeys share the same access/egress
+// endpoints, so dedupe by rounded coords + costing to bound Stadia calls. Returns a
+// shallow clone so callers can set .to.
 function bikeCache(env: Env) {
   const cache = new Map<string, Promise<JLeg | null>>();
-  return (from: [number, number], to: [number, number], mins?: number): Promise<JLeg | null> => {
-    const k = `${from[0].toFixed(4)},${from[1].toFixed(4)}>${to[0].toFixed(4)},${to[1].toFixed(4)}|${mins ?? ""}`;
+  return (from: [number, number], to: [number, number], mins?: number, costing: "bicycle" | "pedestrian" = "bicycle"): Promise<JLeg | null> => {
+    const k = `${costing}|${from[0].toFixed(4)},${from[1].toFixed(4)}>${to[0].toFixed(4)},${to[1].toFixed(4)}|${mins ?? ""}`;
     let p = cache.get(k);
-    if (!p) { p = bikeLeg(env, from, to, mins); cache.set(k, p); }
+    if (!p) { p = stadiaLeg(env, from, to, costing, mins); cache.set(k, p); }
     return p.then(l => (l ? { ...l } : null));
   };
 }
@@ -465,6 +468,34 @@ async function assembleCycleRoute(cbike: ReturnType<typeof bikeCache>, startPt: 
     return { id: `${idPrefix}-${variant}`, duration, dep: new Date(depMs).toISOString(), arr: new Date(arrMs).toISOString(), walkMins, cycleMins, changes, kind: "transit", summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })), legs: all };
   }));
   return built.filter(Boolean) as JOption[];
+}
+
+// Replace a walk+transit option's leading/trailing walk legs (to the first boarding point
+// and from the last alighting point) with accurate Valhalla pedestrian legs — TfL badly
+// overestimates them (11 min for a 6-min walk). Interchange walks between transit legs
+// stay as TfL's. Times shift to match (you catch the same train, just walk realistically).
+const WALK_PAD = 2;   // getting to/through the station on foot; less than cycle (no bike to handle)
+async function walkAccurate(cbike: ReturnType<typeof bikeCache>, startPt: [number, number], endPt: [number, number], endName: string, o: JOption): Promise<JOption> {
+  const legs = o.legs;
+  const tIdx = legs.map((l, i) => (l.kind === "transit" ? i : -1)).filter(i => i >= 0);
+  if (!tIdx.length) return o;   // full walk — nothing to fix
+  const fi = tIdx[0], li = tIdx[tIdx.length - 1];
+  const board = legs[fi].path[0], alight = legs[li].path[legs[li].path.length - 1];
+  const [access, egress] = await Promise.all([
+    board ? cbike(startPt, board, undefined, "pedestrian") : Promise.resolve(null),
+    alight ? cbike(alight, endPt, undefined, "pedestrian") : Promise.resolve(null),
+  ]);
+  const lead = access ? [Object.assign({ ...access }, { to: legs[fi].from || "" })] : legs.slice(0, fi);
+  const tail = egress ? [Object.assign({ ...egress }, { to: endName })] : legs.slice(li + 1);
+  const all = [...lead, ...legs.slice(fi, li + 1), ...tail];
+  const walkMins = all.filter(l => l.kind === "walk").reduce((a, l) => a + l.duration, 0);
+  const changes = Math.max(0, all.filter(l => l.kind === "transit").length - 1);
+  const boardTime = legs[fi].dep ? Date.parse(legs[fi].dep) : Date.now();
+  const alightTime = legs[li].arr ? Date.parse(legs[li].arr) : boardTime;
+  const depMs = boardTime - ((access?.duration ?? 0) + WALK_PAD) * 60000;
+  const arrMs = alightTime + ((egress?.duration ?? 0) + WALK_PAD) * 60000;
+  const duration = Math.max(1, Math.round((arrMs - depMs) / 60000));
+  return { ...o, duration, dep: new Date(depMs).toISOString(), arr: new Date(arrMs).toISOString(), walkMins, changes, legs: all, summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })) };
 }
 
 async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>): Promise<JOption[]> {
@@ -606,6 +637,11 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   ]);
 
   let options = raws.flat().map(parseJourney).concat(stationOpts, destOpts);
+  // Walk mode: TfL's own access/egress walk times are badly overestimated, so re-route the
+  // leading/trailing walk legs through Valhalla for realistic times.
+  if (mode === "walk") {
+    options = await Promise.all(options.map(o => o.kind === "transit" ? walkAccurate(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", o) : o));
+  }
   const stadias = stadiaArr.filter(Boolean) as JOption[];
   dedupStadia(stadias);
   if (stadias.length) {
@@ -754,15 +790,41 @@ async function nearStationsFor(env: Env, lat: number, lon: number): Promise<{ la
 // station, rail to dest) + dest-side sweep (rail from origin, alight near dest, cycle in)
 // + the direct origin->dest journey, each finished with assembleCycleRoute (cycle to/from
 // real platforms, drop a short first/last hop). Plus the full-cycle option.
-export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = ""): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = "", mode: "cycle" | "walk" = "cycle"): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
   const from: [number, number] = [fromLat, fromLon], to: [number, number] = [toLat, toLon];
   const meta = { from: { lat: fromLat, lon: fromLon }, to: { lat: toLat, lon: toLon } };
+  const cbike = bikeCache(env);
+
+  // WALK mode: TfL walk+transit (all modes AND rail-only, so bus-favoured ranking doesn't
+  // bury rail), with the access/egress walks re-routed through Valhalla, plus the full walk.
+  if (mode === "walk") {
+    if (stage === "fast") {
+      const fw = await stadiaFull(env, toLat, toLon, "walk", undefined, from);
+      const s = (fw ? [fw] : []) as JOption[];
+      await enrichWithTflGeometry(env, s);
+      return { options: s, ...meta };
+    }
+    const wbase: Record<string, string> = { walkingSpeed: "Average", maxWalkingMinutes: "15" };
+    const [rawsArr, fullWalk] = await Promise.all([
+      Promise.all([
+        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${TRANSIT}` }, `${fromLat},${fromLon}`),
+        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${RAIL_MODES}` }, `${fromLat},${fromLon}`),
+      ]),
+      stadiaFull(env, toLat, toLon, "walk", undefined, from),
+    ]);
+    let options = (rawsArr.flat() as any[]).map(parseJourney);
+    options = await Promise.all(options.map(o => o.kind === "transit" ? walkAccurate(cbike, from, to, toName, o) : o));
+    options = options.filter(o => o.kind !== "full-walk").concat(fullWalk ? [fullWalk] : []);
+    options = rankOptions(options);
+    await enrichWithTflGeometry(env, options);
+    return { options, ...meta };
+  }
+
   if (stage === "fast") {
     const s = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)])).filter(Boolean) as JOption[];
     dedupStadia(s); await enrichWithTflGeometry(env, s);
     return { options: s, ...meta };
   }
-  const cbike = bikeCache(env);
   const [stadiaArr, originStns, destStns] = await Promise.all([
     Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)]),
     nearStationsFor(env, fromLat, fromLon),
