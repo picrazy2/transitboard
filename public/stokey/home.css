@@ -53,7 +53,7 @@ body.homeapp #map {
   background: var(--rule);
   margin: 0 10px 0 27px;
 }
-#hOrigin {
+#hOrigin, #hDest {
   flex: 1 1 auto;
   min-width: 0;
   background: none;
@@ -63,8 +63,10 @@ body.homeapp #map {
   font-size: 16px;              /* 16px keeps iOS from zooming on focus */
   font-family: inherit;
   padding: 2px 0;
+  appearance: none;
+  -webkit-appearance: none;
 }
-#hOrigin::placeholder { color: var(--muted); }
+#hOrigin::placeholder, #hDest::placeholder { color: var(--muted); }
 .hdestlbl {
   flex: 1 1 auto;
   color: var(--ink);
@@ -174,6 +176,46 @@ body.homeapp #map {
 }
 .drawertitle { font-size: 16px; font-weight: 700; }
 .drawerupd { font-size: 12px; color: var(--muted); }
+
+/* Cycle / Walk toggle */
+.hmodetog {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  margin: 8px 16px 2px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 3px;
+}
+.hmodetog button {
+  flex: 1 1 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 600 13.5px system-ui;
+  padding: 7px 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.hmodetog button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .4); }
+
+/* "Choose on map" hint banner */
+.hmappick {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top) + 148px);
+  z-index: 600;
+  background: var(--ok);
+  color: #05210f;
+  font: 700 13px system-ui;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+  white-space: nowrap;
+}
+body.homeapp.picking #map { cursor: crosshair; }
 .hoptions {
   flex: 1 1 auto;
   overflow-y: auto;

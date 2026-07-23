@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/stokey/board.css?v=20260722233512">
-<link rel="stylesheet" href="/stokey/home.css?v=20260723093652">
+<link rel="stylesheet" href="/stokey/home.css?v=20260723095137">
 </head>
 <body class="homeapp">
 <div id="map"></div>
@@ -23,7 +23,6 @@
   <div class="hrow">
     <span class="hdot from"></span>
     <input id="hOrigin" type="text" placeholder="Start" autocomplete="off" spellcheck="false" enterkeyhint="search">
-    <button id="hLocate" class="hiconbtn" title="Use my location" aria-label="Use my location"></button>
   </div>
   <div class="hrule"></div>
   <div class="hrow">
@@ -34,6 +33,7 @@
   <div class="hresults" id="hResults" hidden></div>
 </div>
 
+<div class="hmappick" id="hMapPick" hidden></div>
 <button id="hRecenter" class="hfab" title="Recentre" aria-label="Recentre"></button>
 
 <div class="drawer" id="drawer" data-snap="mid">
@@ -42,11 +42,15 @@
     <div class="drawertitle">Plan a journey</div>
     <div class="drawerupd" id="hUpdated"></div>
   </div>
+  <div class="hmodetog" id="hModeTog">
+    <button data-m="cycle" class="on" type="button">Cycle</button>
+    <button data-m="walk" type="button">Walk</button>
+  </div>
   <div class="hoptions" id="hOptions"><div class="jploading">Enter a start and destination to see routes.</div></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="/stokey/home.js?v=20260723093652"></script>
+<script src="/stokey/home.js?v=20260723095137"></script>
 </body>
 </html>

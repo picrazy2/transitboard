@@ -75,7 +75,7 @@ const legStyle = l => l.kind !== "transit" ? l.kind : (l.mode === "bus" ? "bus" 
 const PLAN = /(^|\/)plan\/?$/.test(location.pathname);
 const HOME_PLACE = { name: "Home · Stoke Newington", lat: HOME[0], lon: HOME[1], home: true };
 // from/to are {name,lat,lon} or null. activeField tracks which input the search applies to.
-const H = { from: null, to: PLAN ? null : { ...HOME_PLACE }, activeField: "origin", options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
+const H = { from: null, to: PLAN ? null : { ...HOME_PLACE }, mode: "cycle", activeField: "origin", mapPick: null, options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
 const toPt = () => H.to ? [H.to.lat, H.to.lon] : null;
 
 // ---------- map ----------
@@ -275,7 +275,7 @@ async function loadRoutes(keep) {
   const tok = ++H.loadTok;
   const goingHome = !!H.to.home;
   if (!keep) box.innerHTML = `<div class="jploading">Finding ${goingHome ? "ways home" : "routes"}…</div>`;
-  const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}`)
+  const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&mode=${H.mode}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}`)
     .then(r => r.json()).then(d => d.options || []).catch(() => []);
   const paint = (opts, loading) => {
     if (tok !== H.loadTok) return;
@@ -304,44 +304,68 @@ function setPlace(field, place, refit) {
   H.sel = -1; H.expanded = -1; H.optionsFinal = false;
   loadRoutes(false);
   if (refit) {
-    const pts = []; if (H.from) pts.push([H.from.lat, H.from.lon]); pts.push(toPt());
+    const pts = []; if (H.from) pts.push([H.from.lat, H.from.lon]); if (H.to) pts.push(toPt());
     if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts), drawerPadding()); else map.setView([place.lat, place.lon], 13);
   }
 }
 const setOrigin = (place, refit) => setPlace("origin", place, refit);
 
 // ---------- geolocation ----------
-function locate() {
-  const input = document.getElementById("hOrigin");
-  if (!navigator.geolocation) { input.placeholder = "Search where you are"; input.value = ""; document.getElementById("hOptions").innerHTML = `<div class="jperr">Location unavailable — search your start point above.</div>`; return; }
-  input.placeholder = "Finding your location…";
+function locateInto(field) {
+  const el = document.getElementById(field === "dest" ? "hDest" : "hOrigin");
+  if (!navigator.geolocation) { el.placeholder = "Search a place"; return; }
+  el.value = ""; el.placeholder = "Finding your location…";
   navigator.geolocation.getCurrentPosition(
-    pos => setOrigin({ name: "Current location", lat: pos.coords.latitude, lon: pos.coords.longitude }, true),
-    () => { input.placeholder = "Search where you are"; document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't get your location — search your start point above.</div>`; },
+    pos => setPlace(field, { name: "My location", lat: pos.coords.latitude, lon: pos.coords.longitude }, true),
+    () => { el.placeholder = "Search a place"; if (field === "origin") document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't get your location — search a start point above.</div>`; },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
   );
 }
+const locate = () => locateInto("origin");
+
+// ---------- choose on map ----------
+function startMapPick(field) {
+  H.mapPick = field;
+  document.body.classList.add("picking");
+  const hint = document.getElementById("hMapPick");
+  hint.textContent = `Tap the map to set your ${field === "dest" ? "destination" : "start"}`;
+  hint.hidden = false;
+  document.getElementById("hResults").hidden = true;
+}
+function endMapPick() { H.mapPick = null; document.body.classList.remove("picking"); document.getElementById("hMapPick").hidden = true; }
+map.on("click", e => {
+  if (!H.mapPick) return;
+  const field = H.mapPick; endMapPick();
+  setPlace(field, { name: "Pinned location", lat: e.latlng.lat, lon: e.latlng.lng }, false);
+});
 
 // ---------- origin search (Google Places via /api/geocode + /api/place) ----------
 let geoSession = null;
 function newSession() { geoSession = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.round(Math.random() * 1e9); }
 function recents() { try { return JSON.parse(localStorage.getItem("jpRecents") || "[]"); } catch { return []; } }
 function addRecent(p) {
-  if (p.name === "Current location") return;
+  if (p.name === "My location" || p.name === "Pinned location" || p.name === "Current location") return;
   const list = recents().filter(x => x.name !== p.name);
   list.unshift({ name: p.name, detail: p.detail || "", lat: p.lat, lon: p.lon, type: p.type || "place" });
   try { localStorage.setItem("jpRecents", JSON.stringify(list.slice(0, 6))); } catch {}
 }
+// The dropdown always leads with "My location" and "Choose on map", then recents/results.
 function showResults(places, isRecent) {
   const box = document.getElementById("hResults");
   H.places = places;
-  if (!places.length) { box.hidden = true; return; }
-  box.innerHTML = places.map((p, i) =>
+  const special = [
+    `<button class="jpresult" data-sp="locate">${mi("mylocation", 18)}<span class="jprestext"><span class="jpresname">My location</span></span></button>`,
+    `<button class="jpresult" data-sp="map">${mi("place", 18)}<span class="jprestext"><span class="jpresname">Choose on map</span></span></button>`,
+  ].join("");
+  box.innerHTML = special + places.map((p, i) =>
     `<button class="jpresult" data-i="${i}">${mi(isRecent ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
       <span class="jprestext"><span class="jpresname">${esc(p.name)}</span>${p.detail ? `<span class="jpresdetail">${esc(p.detail)}</span>` : ""}</span></button>`
   ).join("");
-  for (const b of box.querySelectorAll(".jpresult"))
-    b.addEventListener("click", () => choose(places[+b.dataset.i]));
+  for (const b of box.querySelectorAll(".jpresult")) {
+    if (b.dataset.sp === "locate") b.addEventListener("click", () => { box.hidden = true; locateInto(H.activeField); });
+    else if (b.dataset.sp === "map") b.addEventListener("click", () => startMapPick(H.activeField));
+    else b.addEventListener("click", () => choose(places[+b.dataset.i]));
+  }
   box.hidden = false;
 }
 async function geocode(q) {
@@ -445,13 +469,20 @@ function initDrawer() {
 function init() {
   newSession();
   initDrawer();
-  document.getElementById("hLocate").innerHTML = mi("mylocation", 20);
   document.getElementById("hRecenter").innerHTML = mi("recenter", 22);
   showFab(false);
-  document.getElementById("hLocate").addEventListener("click", locate);
   document.getElementById("hRecenter").addEventListener("click", fit);   // re-frame the selected route
   // Show the recenter FAB once you pan/zoom off a selected route (not on programmatic fits).
   map.on("dragstart", () => showFab(true));
+
+  // Cycle / Walk toggle (defaults to cycle+transit).
+  for (const b of document.querySelectorAll("#hModeTog button")) b.addEventListener("click", () => {
+    if (b.dataset.m === H.mode) return;
+    H.mode = b.dataset.m;
+    for (const x of document.querySelectorAll("#hModeTog button")) x.classList.toggle("on", x.dataset.m === H.mode);
+    H.sel = -1; H.expanded = -1; H.optionsFinal = false;
+    loadRoutes(false);
+  });
 
   // Wire both the origin and destination inputs. The search results apply to whichever
   // field is focused (H.activeField).
@@ -465,7 +496,8 @@ function init() {
       timer = setTimeout(() => geocode(q), 220);
     });
     const selectAll = () => setTimeout(() => { try { el.select(); } catch {} }, 0);   // easy clear+retype (iOS timeout)
-    el.addEventListener("focus", () => { H.activeField = field; selectAll(); if (el.value.trim().length < 2) showResults(recents(), true); });
+    // On focus always open the dropdown (with My location / Choose on map + recents).
+    el.addEventListener("focus", () => { H.activeField = field; selectAll(); showResults(el.value.trim().length >= 2 ? H.places || [] : recents(), el.value.trim().length < 2); });
     el.addEventListener("click", () => { H.activeField = field; selectAll(); });
   };
   wireField(origin, "origin");
