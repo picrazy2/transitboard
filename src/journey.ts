@@ -600,6 +600,7 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
     // TRANSFER from a dest line (per the transfer matrix); (3) the 2 nearest as a fallback.
     // Dedup and cap at 3 per dest so total subrequests stay well under Cloudflare's cap.
     const sameLine = D.lines.flatMap(id => HOME_LINE_STATIONS[id] ?? []);
+    const sameLineSet = new Set(sameLine);
     const oneTransfer: any[] = [];
     for (const dLine of D.lines) for (const hLine of Object.keys(HOME_LINE_STATIONS))
       if (((lineTransfers as any)[hLine] || []).includes(dLine)) oneTransfer.push(...HOME_LINE_STATIONS[hLine]);
@@ -608,9 +609,16 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
       if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     }
     for (const H of homeStns) {
+      // Tier-1 pairs share a line, so ask TfL for the LEAST-INTERCHANGE ride between them —
+      // otherwise its default (least-time) reintroduces a change (Finsbury Park -> Gloucester
+      // Rd comes back as Victoria + District, burying the one-seat Piccadilly ride the whole
+      // pairing exists to surface). The faster with-a-change route still comes from other pairs.
+      const oneSeat = sameLineSet.has(H);
       jobs.push(async () => {
         const cycMin = Math.max(1, Math.round(H.cycMin));
-        const journeys = await jp(env, `${D.lat},${D.lon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${H.lat},${H.lon}`);
+        const params: Record<string, string> = { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" };
+        if (oneSeat) params.journeyPreference = "leastinterchange";
+        const journeys = await jp(env, `${D.lat},${D.lon}`, params, `${H.lat},${H.lon}`);
         const j = (journeys as any[])[0]; if (!j) return [];
         return assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}`);
       });
