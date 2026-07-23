@@ -573,10 +573,11 @@ for lid in sorted(kept_lines):
           f"spine {len(poly)} vertices")
 
 # ---------- National Rail geometry: drawn + snapped by CRS for live pins ----------
-# Great Northern and Greater Anglia are drawn from their OSM spine. Thameslink
-# shares the Great Northern corridor through Finsbury Park (its own route diverges
-# far to the south), so it is positioned on that spine but not drawn separately.
-NR_DRAW = {"great-northern": 6336420, "greater-anglia": 9107254}
+# Great Northern and Greater Anglia are drawn from their OSM spine. Thameslink shares
+# the Great Northern corridor through Finsbury Park near home (its own route diverges far
+# to the south, outside the board's view), so it's drawn along that same corridor — now
+# that its departures show, a missing track would look inconsistent.
+NR_DRAW = {"great-northern": 6336420, "greater-anglia": 9107254, "thameslink": 6336420}
 NR_PIN = {"great-northern": 6336420, "greater-anglia": 9107254, "thameslink": 6336420}
 nr_routes = {}   # lineId -> {track: [...], crs: {CRS: offset_m}}
 for lid, rel_id in NR_PIN.items():
