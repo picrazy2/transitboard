@@ -106,12 +106,15 @@ const wmoLabel = code => (WMO[code] ?? ["","","—"])[2];
 function renderWeather(w){
   if(w === undefined){ wx.innerHTML = ""; return; }          // not loaded yet
   if(!w){ wx.innerHTML = `<div class="meta" style="color:var(--bad)">⚠ weather unavailable</div>`; return; }
+  // The day's HIGH is the number that matters at a glance in the morning, so it's the big
+  // one; the low sits beside it and the current temp is the small line below.
+  const r = Math.round;
   wx.innerHTML = `
     <div class="now"><span class="icon">${wmoIcon(w.code, w.isDay)}</span>
-      <span class="temp">${Math.round(w.tempC)}°</span></div>
-    <div class="meta">${esc(wmoLabel(w.code))}
-      ${w.maxC != null ? `<br><span class="hilo"><span class="hi">H ${Math.round(w.maxC)}°</span>
-        &nbsp;<span class="lo">L ${Math.round(w.minC)}°</span></span>` : ""}</div>`;
+      ${w.maxC != null
+        ? `<span class="temp hi">${r(w.maxC)}°</span><span class="templo lo">${r(w.minC)}°</span>`
+        : `<span class="temp">${r(w.tempC)}°</span>`}</div>
+    <div class="meta">${esc(wmoLabel(w.code))}<br>now ${r(w.tempC)}°</div>`;
 }
 
 // ---------- weather modal ----------
@@ -993,12 +996,20 @@ async function refresh(){
     // warm the other mode in the background so the toggle is instant
     const other = MODE === "walk" ? "cycle" : "walk";
     fetchBoard(other).catch(() => {}); loadGeo(other).catch(() => {});
+    return true;
   }catch(e){
     const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
     stamp.className = "stamp " + (lastOk ? "stale" : "err");
-    stamp.textContent = lastOk ? `Stale — last update ${age}s ago` : `Cannot reach board API (${e.message})`;
+    stamp.textContent = lastOk ? `Stale — tap to retry (${age}s)` : `Cannot reach board API — tap to retry`;
+    return false;
   }
 }
+// Self-scheduling refresh: normal cadence when healthy, retry fast while stale (covers a
+// failed fetch or a throttled timer on the kiosk). Any tick reschedules the next.
+let refreshTimer = null;
+function scheduleRefresh(ms){ clearTimeout(refreshTimer); refreshTimer = setTimeout(runRefresh, ms); }
+async function runRefresh(){ const ok = await refresh(); scheduleRefresh(ok ? REFRESH_MS : 15000); }
+function forceRefresh(){ stamp.textContent = "Refreshing…"; runRefresh(); }
 
 // ---------- mode toggle (in place, no reload) ----------
 function reconfigure(mode){
@@ -1483,8 +1494,8 @@ function jpFit(){
   renderFilters();
   await loadGeo(MODE).catch(e => console.error("geo", e));
   buildMap();
-  await refresh();
-  setInterval(refresh, REFRESH_MS);
-  document.addEventListener("visibilitychange", () => { if(!document.hidden) refresh(); });
+  await runRefresh();   // self-schedules the next tick (fast retry while stale)
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) forceRefresh(); });
+  stamp.style.cursor = "pointer"; stamp.title = "Tap to refresh"; stamp.addEventListener("click", forceRefresh);
   let _rt; addEventListener("resize", () => { clearTimeout(_rt); _rt = setTimeout(() => map.invalidateSize(), 200); });
 })();
