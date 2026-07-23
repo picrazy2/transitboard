@@ -1143,6 +1143,8 @@ function injectPlanner(){
     input.value = ""; document.getElementById("jpClear").hidden = true; input.blur(); results.hidden = true;
   });
   document.getElementById("jpBack").addEventListener("click", jpExit);
+  const upd = document.getElementById("jpUpdated");
+  if(upd){ upd.style.cursor = "pointer"; upd.title = "Refresh"; upd.addEventListener("click", () => { if(JP.dest){ JP.cache = {walk:null, cycle:null}; JP.fast = {cycle:null}; jpLoad(); } }); }
   document.getElementById("jpTabs").addEventListener("click", e => {
     const b = e.target.closest("[data-jm]"); if(!b || b.dataset.jm === JP.mode) return;
     JP.mode = b.dataset.jm; jpSyncTabs();
@@ -1290,7 +1292,7 @@ function jpCycleLoading(){ return JP.mode === "cycle" && !JP.cache.cycle; }
 function jpShowMode(keep){
   JP.options = (JP.mode === "cycle" ? (JP.cache.cycle || JP.fast.cycle) : JP.cache.walk) || [];
   const u = document.getElementById("jpUpdated");
-  if(u) u.textContent = JP.updated ? `Updated ${to12h(new Date(JP.updated))}` : "";
+  if(u) u.textContent = "↻ " + (JP.updated ? `Updated ${to12h(new Date(JP.updated))}` : "Refresh");
   if(keep && JP.sel >= 0){ JP.sel = Math.min(JP.sel, JP.options.length - 1); JP.expanded = JP.sel; }
   else { JP.sel = JP.options.length ? 0 : -1; JP.expanded = JP.sel; }
   jpRenderOptions(); jpDrawMap();

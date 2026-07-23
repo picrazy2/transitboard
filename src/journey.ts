@@ -818,6 +818,12 @@ async function nearStationsFor(env: Env, lat: number, lon: number): Promise<{ la
 export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = "", mode: "cycle" | "walk" = "cycle"): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
   const from: [number, number] = [fromLat, fromLon], to: [number, number] = [toLat, toLon];
   const meta = { from: { lat: fromLat, lon: fromLon }, to: { lat: toLat, lon: toLon } };
+  // From home (or right next to it), the mobile planner routes EXACTLY like the board —
+  // same station sweeps, dest-station line pairing, curated-boarding rule and ranking.
+  if (isHome(fromLat, fromLon)) {
+    const r = await planJourney(env, toLat, toLon, mode, stage);
+    return { options: r.options, ...meta };
+  }
   const cbike = bikeCache(env);
 
   // WALK mode: TfL walk+transit (all modes AND rail-only, so bus-favoured ranking doesn't
@@ -855,10 +861,12 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
     nearStationsFor(env, fromLat, fromLon),
     nearStationsFor(env, toLat, toLon),
   ]);
-  // One journey per station on the sweeps (the direct query keeps 2) — keeps total
-  // subrequests well under Cloudflare's per-request cap and the latency down.
+  // One journey per station on the sweeps (the direct query keeps 2). Query ALL of the
+  // curated home stations when an end is home (nearStationsFor returns the 7 of them, e.g.
+  // so Finsbury Park + Victoria is considered, not just the 3 nearest), and the handful of
+  // dynamic stations otherwise — still well under Cloudflare's per-request subrequest cap.
   const sweep = async (stns: { lat: number; lon: number }[], toQuery: string, fromQuery: string, tag: string) =>
-    (await Promise.all(stns.slice(0, 3).map(async (S, si) => {
+    (await Promise.all(stns.slice(0, 8).map(async (S, si) => {
       const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}` }, fromQuery.replace("$", `${S.lat},${S.lon}`));
       const j = (journeys as any[])[0];
       return j ? assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-0`) : [];
