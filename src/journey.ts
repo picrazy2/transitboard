@@ -1,6 +1,7 @@
 import { Env } from "./tfl";
 import home from "./cycle-stops.json";
 import spinesRail from "./cycle-routes.json";
+import lineTransfers from "./line-transfers.json";   // lineId -> [lineIds it interchanges with (one transfer)]
 import spinesBus from "./stokey-routes.json";
 
 // lineId -> candidate polylines ([lat,lon]) from the board's own precise OSM
@@ -593,14 +594,17 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
   const now = Date.now();
   const jobs: (() => Promise<JOption[]>)[] = [];
   for (const D of dests) {
-    // Pair each dest station with the home station(s) ON ITS LINE first — that's the
-    // no-transfer ride, and the right home station may not be a nearest one (a Victoria-
-    // line dest wants Seven Sisters, Piccadilly wants Finsbury Park). Add the 2 nearest
-    // home stations as a fallback for transfer routes. Dedup and cap so the matrix stays
-    // small (<= ~3 per dest) and total subrequests stay well under Cloudflare's cap.
+    // Pair each dest station with home stations by line connectivity, cheapest first:
+    // (1) a home station ON the dest's line — a no-transfer ride (the right one may not be
+    // nearest: Victoria dest -> Finsbury Park); (2) a home station whose line is ONE
+    // TRANSFER from a dest line (per the transfer matrix); (3) the 2 nearest as a fallback.
+    // Dedup and cap at 3 per dest so total subrequests stay well under Cloudflare's cap.
     const sameLine = D.lines.flatMap(id => HOME_LINE_STATIONS[id] ?? []);
+    const oneTransfer: any[] = [];
+    for (const dLine of D.lines) for (const hLine of Object.keys(HOME_LINE_STATIONS))
+      if (((lineTransfers as any)[hLine] || []).includes(dLine)) oneTransfer.push(...HOME_LINE_STATIONS[hLine]);
     const homeStns: any[] = [];
-    for (const H of [...sameLine, ...STATIONS.slice(0, 2)]) {
+    for (const H of [...sameLine, ...oneTransfer, ...STATIONS.slice(0, 2)]) {
       if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     }
     for (const H of homeStns) {
@@ -759,10 +763,14 @@ async function originStationRoutes(env: Env, fromLat: number, fromLon: number, c
   if (!origins.length) return [];
   const jobs: (() => Promise<JOption[]>)[] = [];
   for (const O of origins) {
-    // Pair with the home station on the origin station's line first (no-transfer ride).
+    // Pair with the home station on the origin station's line (no transfer), then one a
+    // transfer away (matrix), then the 2 nearest as a fallback.
     const sameLine = O.lines.flatMap(id => HOME_LINE_STATIONS[id] ?? []);
+    const oneTransfer: any[] = [];
+    for (const oLine of O.lines) for (const hLine of Object.keys(HOME_LINE_STATIONS))
+      if (((lineTransfers as any)[hLine] || []).includes(oLine)) oneTransfer.push(...HOME_LINE_STATIONS[hLine]);
     const homeStns: any[] = [];
-    for (const H of [...sameLine, ...STATIONS.slice(0, 2)]) if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
+    for (const H of [...sameLine, ...oneTransfer, ...STATIONS.slice(0, 2)]) if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     for (const H of homeStns) {
       jobs.push(async () => {
         const journeys = await jp(env, `${H.lat},${H.lon}`, { mode: `walking,${RAIL_MODES}` }, `${O.lat},${O.lon}`);

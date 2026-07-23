@@ -161,8 +161,8 @@
       "destDir": {
         "Stevenage": "out",
         "Horsham": "in",
-        "Moorgate": "in",
         "Cambridge": "out",
+        "Moorgate": "in",
         "Welwyn Garden City": "out",
         "London Kings Cross": "in",
         "Brighton": "in",

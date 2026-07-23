@@ -634,6 +634,50 @@ for nid, e in allstops.items():
     n_added += 1
 print(f"  {n_added} additional line stops drawn")
 
+# ---------- line-to-line transfer matrix (share a station => one transfer) ----------
+# The router uses this to prioritise which (origin-station, dest-station) pairs to spend a
+# TfL query on: 0 transfers if their lines share (tier 1), 1 transfer if their lines share
+# an interchange station (tier 2). Derived from each line's StopPoints — two lines that
+# call at the same naptan interchange. Regenerated here so it tracks TfL line changes.
+print("line transfer matrix ...", flush=True)
+# Match stations by NAME, not naptan: the same interchange has different naptans for its
+# tube vs Overground/rail parts (Liverpool Street 940GZZLULVT vs 910GLIVST), so naptan
+# intersection misses Overground<->tube transfers.
+def norm_sta(nm):
+    for suf in (" Underground Station", " Rail Station", " DLR Station", " Station"):
+        nm = nm.replace(suf, "")
+    return nm.strip().lower()
+line_stops = {}   # TfL lineId -> set(normalised station name)
+try:
+    tfl_lines = tfl("/Line/Mode/tube,overground,elizabeth-line,dlr,tram")
+except Exception:
+    tfl_lines = []
+for ln in tfl_lines:
+    lid = ln.get("id")
+    if not lid:
+        continue
+    try:
+        sps = tfl(f"/Line/{lid}/StopPoints")
+    except Exception:
+        continue
+    line_stops[lid] = {norm_sta(sp["commonName"]) for sp in sps if sp.get("commonName")}
+transfers = {}
+for a in line_stops:
+    transfers[a] = sorted({b for b in line_stops if b != a and (line_stops[a] & line_stops[b])})
+# National Rail lines (our GN / Thameslink / Greater Anglia) aren't in the TfL StopPoints
+# set, so seed their key interchanges by hand (symmetric). These change very rarely.
+NR_TRANSFERS = {
+    "great-northern": ["victoria", "piccadilly", "northern", "circle", "hammersmith-city", "metropolitan", "elizabeth"],
+    "thameslink":     ["victoria", "piccadilly", "northern", "circle", "hammersmith-city", "metropolitan", "elizabeth", "bakerloo"],
+    "greater-anglia": ["central", "circle", "hammersmith-city", "elizabeth", "weaver", "windrush", "mildmay", "suffragette"],
+}
+for lid, conn in NR_TRANSFERS.items():
+    transfers[lid] = sorted(set(transfers.get(lid, [])) | set(conn))
+    for c in conn:
+        transfers[c] = sorted(set(transfers.get(c, [])) | {lid})
+(ROOT / "src" / "line-transfers.json").write_text(json.dumps(transfers, separators=(",", ":")) + "\n")
+print(f"  wrote src/line-transfers.json ({len(transfers)} lines)")
+
 out = ROOT / "public" / "stokey" / "cycle" / "geo.json"
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":")) + "\n")
