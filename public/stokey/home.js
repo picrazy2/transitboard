@@ -86,6 +86,15 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 const hLayer = L.layerGroup().addTo(map);
 
+// Destination search is restricted to ~40 km around home (strictbounds in journey.ts).
+// Draw that same boundary so it's clear why a far-off place won't come up — only once
+// you've zoomed out far enough to see it.
+const geoBoundary = L.circle(HOME, { radius: 40000, interactive: false, color: "#7d93e0",
+  weight: 1.5, dashArray: "6 8", opacity: 0, fillColor: "#7d93e0", fillOpacity: 0 }).addTo(map);
+function updateBoundary() { const show = map.getZoom() <= 10.5;
+  geoBoundary.setStyle({ opacity: show ? .55 : 0, fillOpacity: show ? .04 : 0 }); }
+map.on("zoomend", updateBoundary); updateBoundary();
+
 // ---------- route drawing (mirrors board.js jpDrawMap) ----------
 function drawRoute() {
   hLayer.clearLayers();
@@ -114,6 +123,8 @@ function drawLeg(l, bold) {
   const st = legStyle(l);
   const dash = st === "walk" ? "1 9" : st === "cycle" ? "5 8" : null;
   const weight = bold ? (st === "rail" ? 7 : st === "bus" ? 4.5 : 4) : 3;
+  if (st === "rail")   // white casing so dark rail lines read on the dark base map
+    L.polyline(l.path, { color: "#eef1f6", weight: weight + 3, opacity: bold ? .8 : .22, lineCap: "round", lineJoin: "round" }).addTo(hLayer);
   L.polyline(l.path, { color: legColor(l), weight, opacity: bold ? .95 : .28, dashArray: dash, lineCap: "round", lineJoin: "round" }).addTo(hLayer);
 }
 function transfer(latlng) {

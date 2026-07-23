@@ -546,6 +546,15 @@ const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y
 let showPassed = false;   // toggled by the map FAB; passed/Due vehicles are grey
 map.setView(HOME, C.openZoom);
 
+// Planner destination search is restricted to ~40 km around home (strictbounds in
+// journey.ts). Draw that same boundary so it's clear why a far-off place won't come up —
+// only once you've zoomed out far enough to see it.
+const geoBoundary = L.circle(HOME, {radius:40000, interactive:false, color:"#7d93e0",
+  weight:1.5, dashArray:"6 8", opacity:0, fillColor:"#7d93e0", fillOpacity:0}).addTo(map);
+function updateBoundary(){ const show = map.getZoom() <= 10.5;
+  geoBoundary.setStyle({opacity: show ? .55 : 0, fillOpacity: show ? .04 : 0}); }
+updateBoundary();
+
 // On focus, only the lines stay (dimmed) for context; every other layer — off-line
 // stops, their labels, off-focus vehicle pins — is hidden outright, not just faded.
 const DIM = {line:.05};
@@ -598,7 +607,7 @@ function filterToLinesNear(latlng){
 }
 
 function clearMapLayers(){
-  for(const l of lineLayers) map.removeLayer(l.poly);
+  for(const l of lineLayers){ map.removeLayer(l.poly); if(l.casing) map.removeLayer(l.casing); }
   for(const n of nodeMarkers) map.removeLayer(n.marker);
   for(const a of arrowMarkers) map.removeLayer(a.marker);
   if(homeMarker) map.removeLayer(homeMarker);
@@ -635,10 +644,15 @@ function buildMap(){
   }
   for(const f of of("rail")){
     const line = f.properties.line ?? "Weaver", col = colorOf(line);
-    const poly = L.geoJSON(f, {style:{color:col, weight: MODE === "cycle" ? 3.5 : 5, opacity:.9,
+    const w = MODE === "cycle" ? 3.5 : 5;
+    // White casing under every rail line so dark ones (Northern, National Rail) read on the
+    // dark base map, and rail is clearly distinct from the (casing-less) bus lines.
+    const casing = L.geoJSON(f, {interactive:false, style:{color:"#eef1f6", weight: w + 3, opacity:.85,
+      lineCap:"round", lineJoin:"round"}}).addTo(map);
+    const poly = L.geoJSON(f, {style:{color:col, weight: w, opacity:.9,
       lineCap:"round", lineJoin:"round"}}).addTo(map);
     poly.on("click", e => { L.DomEvent.stopPropagation(e); filterToLinesNear(e.latlng); });
-    lineLayers.push({poly, line, rail:true});
+    lineLayers.push({poly, casing, line, rail:true});
   }
 
   for(const f of of("stop")){
@@ -784,7 +798,7 @@ function renderPins(){
 // ---------- map filtering ----------
 function applyMapFilter(){
   if(typeof JP !== "undefined" && JP.active){   // planner mode: hide the board's own layers
-    for(const l of lineLayers) l.poly.setStyle({opacity:0});
+    for(const l of lineLayers){ l.poly.setStyle({opacity:0}); if(l.casing) l.casing.setStyle({opacity:0}); }
     for(const a of arrowMarkers) a.marker.setOpacity(0);
     for(const s of nodeMarkers){ if(s.marker.setOpacity) s.marker.setOpacity(0); else s.marker.setStyle({opacity:0, fillOpacity:0}); const t = s.marker.getTooltip && s.marker.getTooltip(); if(t && t.getElement()) t.getElement().style.opacity = 0; }
     if(homeMarker) homeMarker.setOpacity(0);
@@ -801,11 +815,11 @@ function applyMapFilter(){
     const dim = focused ? (l.pair ? !FS.keys.has(`bus|${l.pair}`) : !active.has(l.line))
                         : (active.size > 0 && !active.has(l.line));
     const base = l.rail ? (MODE === "cycle" ? .85 : .95) : (l.night ? .45 : .6);
-    l.poly.setStyle({
-      opacity: !on ? 0 : dim ? DIM.line : attention ? .95 : base,
-      weight: l.rail ? (MODE === "cycle" ? 3.5 : 5)
-                     : (!dim && attention ? (l.night ? 3.5 : 4.5) : (l.night ? 2.5 : 3.5)),
-    });
+    const op = !on ? 0 : dim ? DIM.line : attention ? .95 : base;
+    const w = l.rail ? (MODE === "cycle" ? 3.5 : 5)
+                     : (!dim && attention ? (l.night ? 3.5 : 4.5) : (l.night ? 2.5 : 3.5));
+    l.poly.setStyle({opacity: op, weight: w});
+    if(l.casing) l.casing.setStyle({opacity: op ? Math.min(.85, op) : 0, weight: w + 3});
   }
   for(const a of arrowMarkers){
     const live = a.lines.some(onMap);
@@ -911,7 +925,7 @@ async function syncFleet(){
 
 // Re-thin intermediate stops as the user zooms (fitFocus early-returns on the same
 // focus signature, so this never fights a manual zoom).
-map.on("zoomend", () => { if(geoCache[MODE]) applyMapFilter(); });
+map.on("zoomend", () => { updateBoundary(); if(geoCache[MODE]) applyMapFilter(); });
 
 // ---------- map controls ----------
 map.on("click", () => {
@@ -1479,6 +1493,9 @@ function jpLeg(l, bold){
   const st = legStyle(l);
   const dash = st === "walk" ? "1 9" : st === "cycle" ? "5 8" : null;
   const weight = bold ? (st === "rail" ? 7 : st === "bus" ? 4.5 : 4) : 3;
+  if(st === "rail")   // white casing so dark rail lines read on the dark base map
+    L.polyline(l.path, {color:"#eef1f6", weight: weight + 3, opacity: bold ? .8 : .22,
+      lineCap:"round", lineJoin:"round"}).addTo(jpLayer);
   L.polyline(l.path, {color:legColor(l), weight, opacity: bold ? .95 : .28,
     dashArray:dash, lineCap:"round", lineJoin:"round"}).addTo(jpLayer);
 }

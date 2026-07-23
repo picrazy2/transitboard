@@ -25,80 +25,147 @@
 <meta name="twitter:description" content="Live London departure boards — pick Stoke Newington or Stratford.">
 <meta name="twitter:image" content="https://board.akguo.com/og.png">
 <style>
-  :root{--bg:#0f1115;--ink:#e6e8ee;--muted:#9aa3b2;--rule:#242a36;--panel:#161a22}
+  :root{
+    --bg:#0e1014;--ink:#eef1f7;--muted:#9aa3b2;--rule:#232a36;--panel:#161b24;
+    --panel2:#1b2130;
+  }
   *{box-sizing:border-box}
-  html,body{height:100%}
+  html{height:100%}
   body{
-    margin:0;background:var(--bg);color:var(--ink);
+    margin:0;background:
+      radial-gradient(1100px 620px at 15% -8%,rgba(32,192,91,.10),transparent 60%),
+      radial-gradient(1000px 640px at 100% 0%,rgba(105,80,161,.14),transparent 55%),
+      var(--bg);
+    color:var(--ink);
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial;
-    min-height:100dvh;display:flex;flex-direction:column;justify-content:center;
-    padding:max(24px,env(safe-area-inset-top)) 24px max(24px,env(safe-area-inset-bottom));
+    min-height:100dvh;
+    display:flex;flex-direction:column;justify-content:safe center;
+    padding:max(28px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));
+    -webkit-tap-highlight-color:transparent;
   }
-  header{text-align:center;margin-bottom:40px}
-  h1{margin:0;font-size:clamp(28px,5vw,44px);font-weight:800;letter-spacing:-.02em}
-  .sub{margin-top:10px;color:var(--muted);font-size:16px}
-  .boards{
-    display:grid;gap:20px;width:100%;max-width:860px;margin:0 auto;
-    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  .shell{width:100%;max-width:900px;margin:0 auto}
+  header{margin:8px 4px 26px}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;
   }
-  a.board{
-    display:flex;flex-direction:column;gap:6px;text-decoration:none;color:inherit;
-    background:var(--panel);border:1px solid var(--rule);border-radius:18px;
-    padding:28px 26px;min-height:190px;justify-content:flex-end;
-    transition:transform .15s ease,border-color .15s ease;
+  .eyebrow .dot{width:8px;height:8px;border-radius:50%;background:#20c05b;box-shadow:0 0 0 4px rgba(32,192,91,.18)}
+  h1{
+    margin:0;font-size:clamp(34px,8vw,56px);font-weight:850;letter-spacing:-.03em;line-height:1;
+    background:linear-gradient(100deg,#eef1f7 30%,#8fb7ff 70%,#7de0b0);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
   }
-  a.board:hover,a.board:focus-visible{transform:translateY(-3px);border-color:#3a4356;outline:none}
-  .name{font-size:30px;font-weight:800;letter-spacing:-.01em}
-  .desc{color:var(--muted);font-size:15px;line-height:1.45}
-  .modes{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-  .pill{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;color:#fff}
-  footer{margin-top:44px;text-align:center;color:var(--muted);font-size:13px}
+  .sub{margin-top:12px;color:var(--muted);font-size:16px;max-width:44ch}
+
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+  a.card{
+    position:relative;display:flex;flex-direction:column;text-decoration:none;color:inherit;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border:1px solid var(--rule);border-radius:20px;padding:22px 22px 20px;overflow:hidden;
+    min-height:184px;
+    transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+  }
+  a.card::before{  /* top accent bar in the card's theme colour(s) */
+    content:"";position:absolute;inset:0 0 auto 0;height:4px;
+    background:linear-gradient(90deg,var(--a),var(--b));
+  }
+  a.card:hover,a.card:focus-visible{
+    transform:translateY(-4px);outline:none;
+    border-color:color-mix(in srgb,var(--a) 55%,var(--rule));
+    box-shadow:0 14px 34px -18px var(--a);
+  }
+  .kicker{font-size:11.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .name{font-size:27px;font-weight:820;letter-spacing:-.02em;margin:8px 0 0}
+  .desc{color:var(--muted);font-size:14px;line-height:1.5;margin:8px 0 0}
+  .modes{display:flex;gap:6px;font-size:15px;opacity:.9}
+  .spacer{flex:1;min-height:12px}
+
+  /* line chips — every chip is a real line, coloured authentically */
+  .lines{display:flex;flex-wrap:wrap;gap:6px}
+  .line{
+    font-size:11.5px;font-weight:750;padding:4px 9px;border-radius:7px;color:#fff;line-height:1.3;
+    background:var(--c);border:1px solid rgba(255,255,255,.14);
+  }
+  .line.dark{color:#0e1014;border-color:rgba(0,0,0,.18)}
+  /* mode chips — for the journey cards, which have no fixed lines. Icon + label, neutral. */
+  .mchip{
+    display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+    padding:5px 11px;border-radius:999px;color:var(--ink);
+    background:rgba(255,255,255,.05);border:1px solid var(--rule);
+  }
+  .mchip b{font-weight:800}
+
+  footer{margin:34px 4px 4px;color:var(--muted);font-size:13px}
   footer a{color:var(--muted)}
 </style>
 </head>
 <body>
+ <div class="shell">
   <header>
-    <h1>Transit Boards</h1>
-    <div class="sub">Live departures. Pick a board.</div>
+    <div class="eyebrow"><span class="dot"></span> Live · London</div>
+    <h1>Transit&nbsp;Boards</h1>
+    <div class="sub">Real-time departures and cycle-first journeys around London. Pick where you're standing.</div>
   </header>
 
-  <main class="boards">
-    <a class="board" href="/stokey/">
-      <div class="name">Stokey board</div>
-      <div class="desc">Stoke Newington departures — Weaver line, 10 buses and weather (walk), plus trains within a 10-minute cycle (cycle). Toggle walk / cycle.</div>
-      <div class="modes">
-        <span class="pill" style="background:#823a62">Weaver</span>
-        <span class="pill" style="background:#e1251b">Bus</span>
-        <span class="pill" style="background:#0a7d6b">Cycle</span>
-        <span class="pill" style="background:#0098d4">Victoria</span>
+  <main class="grid">
+    <a class="card" href="/stokey/" style="--a:#823a62;--b:#20c05b">
+      <div class="head">
+        <span class="kicker">Departure board</span>
+        <span class="modes" aria-label="walk and cycle">🚶 🚲</span>
+      </div>
+      <div class="name">Stokey</div>
+      <div class="desc">Stoke Newington — Weaver line, 10 nearest buses and the weather on foot; trains within a 10-minute cycle. Toggle walk / cycle.</div>
+      <div class="spacer"></div>
+      <div class="lines">
+        <span class="line" style="--c:#823a62">Weaver</span>
+        <span class="line" style="--c:#0098d4">Victoria</span>
+        <span class="line" style="--c:#0a338c">Piccadilly</span>
       </div>
     </a>
 
-    <a class="board" href="/stratford/">
-      <div class="name">Stratford board</div>
-      <div class="desc">Central, Jubilee, Elizabeth, Mildmay, DLR and National Rail.</div>
-      <div class="modes">
-        <span class="pill" style="background:#e32017">Central</span>
-        <span class="pill" style="background:#a0a5a9;color:#111">Jubilee</span>
-        <span class="pill" style="background:#6950a1">Elizabeth</span>
-        <span class="pill" style="background:#00afad;color:#062">DLR</span>
+    <a class="card" href="/stratford/" style="--a:#e32017;--b:#6950a1">
+      <div class="head">
+        <span class="kicker">Departure board</span>
+        <span class="modes" aria-label="rail">🚆</span>
+      </div>
+      <div class="name">Stratford</div>
+      <div class="desc">Everything through the interchange — tube, Elizabeth line, DLR, Overground and National Rail.</div>
+      <div class="spacer"></div>
+      <div class="lines">
+        <span class="line" style="--c:#e32017">Central</span>
+        <span class="line dark" style="--c:#a0a5a9">Jubilee</span>
+        <span class="line" style="--c:#6950a1">Elizabeth</span>
+        <span class="line" style="--c:#00a4a7">DLR</span>
+        <span class="line" style="--c:#3a6ea5">Mildmay</span>
       </div>
     </a>
 
-    <a class="board" href="/plan">
+    <a class="card" href="/plan" style="--a:#20c05b;--b:#5b76c8">
+      <div class="head">
+        <span class="kicker">Journey planner</span>
+        <span class="modes" aria-label="cycle and walk">🚲 🚶</span>
+      </div>
       <div class="name">Plan</div>
-      <div class="desc">Plan a cycle + transit journey anywhere across London — from anywhere to anywhere.</div>
-      <div class="modes">
-        <span class="pill" style="background:#20c05b;color:#052">Cycle + transit</span>
-        <span class="pill" style="background:#5b76c8">Walk + transit</span>
+      <div class="desc">Anywhere to anywhere across London, on a map — cycle to the fastest line, or walk.</div>
+      <div class="spacer"></div>
+      <div class="lines">
+        <span class="mchip">🚲 <b>Cycle</b> + transit</span>
+        <span class="mchip">🚶 <b>Walk</b> + transit</span>
       </div>
     </a>
 
-    <a class="board" href="/stokey/home">
+    <a class="card" href="/stokey/home" style="--a:#20c05b;--b:#0a7d6b">
+      <div class="head">
+        <span class="kicker">Journey planner</span>
+        <span class="modes" aria-label="cycle">🚲</span>
+      </div>
       <div class="name">Home</div>
-      <div class="desc">Get me home to Stoke Newington with the bike from wherever you are.</div>
-      <div class="modes">
-        <span class="pill" style="background:#20c05b;color:#052">Get me home</span>
+      <div class="desc">Get me home to Stoke Newington on the bike from wherever I am — reverse of the Stokey board.</div>
+      <div class="spacer"></div>
+      <div class="lines">
+        <span class="mchip">🚲 <b>Cycle</b> + transit</span>
+        <span class="mchip">📍 From here</span>
       </div>
     </a>
   </main>
@@ -108,5 +175,6 @@
     <a href="https://raildata.org.uk" target="_blank" rel="noopener">Rail Data Marketplace</a> and
     <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>.
   </footer>
+ </div>
 </body>
 </html>
