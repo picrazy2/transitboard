@@ -149,24 +149,24 @@
       "nr": true,
       "crs": "FPK",
       "opLines": {
-        "GN": {
-          "lineId": "great-northern",
-          "name": "Great Northern"
-        },
         "TL": {
           "lineId": "thameslink",
           "name": "Thameslink"
+        },
+        "GN": {
+          "lineId": "great-northern",
+          "name": "Great Northern"
         }
       },
       "destDir": {
-        "Stevenage": "out",
         "Horsham": "in",
         "Cambridge": "out",
         "Moorgate": "in",
         "Welwyn Garden City": "out",
         "London Kings Cross": "in",
         "Brighton": "in",
-        "Peterborough": "out"
+        "Peterborough": "out",
+        "Stevenage": "out"
       },
       "nrServe": [
         "great-northern|in",

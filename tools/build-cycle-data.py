@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 """Regenerate the Stoke Newington *cycle* datasets — trains only.
 
 Writes:
@@ -640,14 +641,12 @@ print(f"  {n_added} additional line stops drawn")
 # an interchange station (tier 2). Derived from each line's StopPoints — two lines that
 # call at the same naptan interchange. Regenerated here so it tracks TfL line changes.
 print("line transfer matrix ...", flush=True)
-# Match stations by NAME, not naptan: the same interchange has different naptans for its
-# tube vs Overground/rail parts (Liverpool Street 940GZZLULVT vs 910GLIVST), so naptan
-# intersection misses Overground<->tube transfers.
-def norm_sta(nm):
-    for suf in (" Underground Station", " Rail Station", " DLR Station", " Station"):
-        nm = nm.replace(suf, "")
-    return nm.strip().lower()
-line_stops = {}   # TfL lineId -> set(normalised station name)
+# Group stops by TfL's own interchange grouping — hubNaptanCode (an in-station interchange,
+# e.g. HUBKGX = King's Cross St Pancras tube + NR), falling back to stationNaptan. This is
+# the source of truth: it captures Bank<->Monument (one hub, >300 m apart) and keeps
+# Leicester Square / Covent Garden separate (different hubs, ~260 m apart) — which naptan,
+# name or distance matching all get wrong. Two lines interchange if they share a hub.
+line_hubs = {}   # lineId -> set(hub/station code)
 try:
     tfl_lines = tfl("/Line/Mode/tube,overground,elizabeth-line,dlr,tram")
 except Exception:
@@ -660,10 +659,10 @@ for ln in tfl_lines:
         sps = tfl(f"/Line/{lid}/StopPoints")
     except Exception:
         continue
-    line_stops[lid] = {norm_sta(sp["commonName"]) for sp in sps if sp.get("commonName")}
+    line_hubs[lid] = {(sp.get("hubNaptanCode") or sp.get("stationNaptan") or sp.get("naptanId")) for sp in sps if sp.get("naptanId")}
 transfers = {}
-for a in line_stops:
-    transfers[a] = sorted({b for b in line_stops if b != a and (line_stops[a] & line_stops[b])})
+for a in line_hubs:
+    transfers[a] = sorted({b for b in line_hubs if b != a and (line_hubs[a] & line_hubs[b])})
 # National Rail lines (our GN / Thameslink / Greater Anglia) aren't in the TfL StopPoints
 # set, so seed their key interchanges by hand (symmetric). These change very rarely.
 NR_TRANSFERS = {
