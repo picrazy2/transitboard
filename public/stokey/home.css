@@ -178,16 +178,36 @@ body.homeapp #map {
 .drawerupd { font-size: 12px; color: var(--muted); }
 
 /* Cycle / Walk toggle */
-.hmodetog {
+.hcontrols {
   flex: 0 0 auto;
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin: 8px 16px 2px;
+}
+.hmodetog {
+  flex: 1 1 140px;
+  display: flex;
+  gap: 4px;
   background: var(--row);
   border: 1px solid var(--rule);
   border-radius: 10px;
   padding: 3px;
 }
+.htime { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; }
+.htimesel {
+  appearance: none; -webkit-appearance: none;
+  background: var(--row) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239aa3b2' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--rule); color: var(--ink);
+  font: 600 13px system-ui; padding: 8px 28px 8px 12px; border-radius: 10px; cursor: pointer;
+}
+.htimeat {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--row); border: 1px solid var(--rule); color: var(--ink);
+  font: 600 13px system-ui; padding: 7px 10px; border-radius: 10px;
+}
+.htimeat::-webkit-calendar-picker-indicator { filter: invert(.7); }
 .hmodetog button {
   flex: 1 1 0;
   border: 0;

@@ -75,7 +75,7 @@ const legStyle = l => l.kind !== "transit" ? l.kind : (l.mode === "bus" ? "bus" 
 const PLAN = /(^|\/)plan\/?$/.test(location.pathname);
 const HOME_PLACE = { name: "Home · Stoke Newington", lat: HOME[0], lon: HOME[1], home: true };
 // from/to are {name,lat,lon} or null. activeField tracks which input the search applies to.
-const H = { from: null, to: PLAN ? null : { ...HOME_PLACE }, mode: "cycle", activeField: "origin", mapPick: null, options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0 };
+const H = { from: null, to: PLAN ? null : { ...HOME_PLACE }, mode: "cycle", activeField: "origin", mapPick: null, options: [], sel: -1, expanded: -1, updated: 0, geoTok: 0, loadTok: 0, when: null };
 const toPt = () => H.to ? [H.to.lat, H.to.lon] : null;
 
 // ---------- map ----------
@@ -286,7 +286,8 @@ async function loadRoutes(keep) {
   const tok = ++H.loadTok;
   const goingHome = !!H.to.home;
   if (!keep) box.innerHTML = `<div class="jploading">Finding ${goingHome ? "ways home" : "routes"}…</div>`;
-  const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&mode=${H.mode}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}`)
+  const whenQS = H.when ? `&at=${H.when.at}&timeIs=${H.when.arriving ? "arrive" : "depart"}` : "";
+  const one = stage => fetch(`/api/route?from=${H.from.lat},${H.from.lon}&to=${H.to.lat},${H.to.lon}&mode=${H.mode}&toName=${encodeURIComponent(H.to.name || "")}${stage ? "&stage=" + stage : ""}${whenQS}`)
     .then(r => r.json()).then(d => d.options || []).catch(() => []);
   const paint = (opts, loading) => {
     if (tok !== H.loadTok) return;
@@ -508,6 +509,28 @@ function init() {
     H.sel = -1; H.expanded = -1; H.optionsFinal = false;
     loadRoutes(false);
   });
+
+  // Leave now / Depart at / Arrive by. datetime-local reads in the device's local zone
+  // (London for this board); we send the epoch ms and whether it's an arrival to /api/route.
+  const whenMode = document.getElementById("hWhenMode");
+  const whenAt = document.getElementById("hWhenAt");
+  const pad = n => String(n).padStart(2, "0");
+  const localValue = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  function applyWhen() {
+    const m = whenMode.value;
+    if (m === "now") { H.when = null; whenAt.hidden = true; return; }
+    if (!whenAt.value) {                                   // seed a sensible default the first time
+      const d = new Date(Date.now() + (m === "depart" ? 15 : 45) * 60000);
+      d.setMinutes(Math.round(d.getMinutes() / 5) * 5, 0, 0);
+      whenAt.value = localValue(d);
+    }
+    whenAt.min = localValue(new Date());
+    whenAt.hidden = false;
+    const ms = new Date(whenAt.value).getTime();
+    H.when = Number.isFinite(ms) ? { at: ms, arriving: m === "arrive" } : null;
+  }
+  whenMode.addEventListener("change", () => { applyWhen(); if (H.from && H.to) loadRoutes(false); });
+  whenAt.addEventListener("change", () => { applyWhen(); if (H.from && H.to) loadRoutes(false); });
 
   // Wire both the origin and destination inputs. The search results apply to whichever
   // field is focused (H.activeField).

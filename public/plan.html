@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/stokey/board.css?v=20260722233512">
-<link rel="stylesheet" href="/stokey/home.css?v=20260723173717">
+<link rel="stylesheet" href="/stokey/home.css?v=20260723220000">
 </head>
 <body class="homeapp">
 <div id="map"></div>
@@ -41,15 +41,25 @@
     <div class="drawertitle">Plan a journey</div>
     <div class="drawerupd" id="hUpdated"></div>
   </div>
-  <div class="hmodetog" id="hModeTog">
-    <button data-m="cycle" class="on" type="button">Cycle</button>
-    <button data-m="walk" type="button">Walk</button>
+  <div class="hcontrols">
+    <div class="hmodetog" id="hModeTog">
+      <button data-m="cycle" class="on" type="button">Cycle</button>
+      <button data-m="walk" type="button">Walk</button>
+    </div>
+    <div class="htime">
+      <select id="hWhenMode" class="htimesel" aria-label="When">
+        <option value="now">Leave now</option>
+        <option value="depart">Depart at…</option>
+        <option value="arrive">Arrive by…</option>
+      </select>
+      <input id="hWhenAt" class="htimeat" type="datetime-local" aria-label="Time" hidden>
+    </div>
   </div>
   <div class="hoptions" id="hOptions"><div class="jploading">Enter a start and destination to see routes.</div></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<script src="/stokey/home.js?v=20260723213000"></script>
+<script src="/stokey/home.js?v=20260723220000"></script>
 </body>
 </html>
