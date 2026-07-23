@@ -1,0 +1,41 @@
+name: Refresh cycle data
+
+# Rebuilds the cycle board's station/geometry data and the line-to-line transfer matrix
+# monthly, so it tracks TfL line renames/reroutes and station changes without a manual run.
+# Commits only if something changed; the commit auto-deploys via the Cloudflare Pages
+# GitHub integration. Needs repo secrets TFL_APP_KEY and RTT_TOKEN (Settings -> Secrets ->
+# Actions). Run it by hand anytime from the Actions tab (workflow_dispatch).
+
+on:
+  schedule:
+    - cron: "0 4 1 * *"   # 04:00 UTC on the 1st of each month
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Provide API tokens
+        run: printf 'TFL_APP_KEY="%s"\nRTT_TOKEN="%s"\n' '${{ secrets.TFL_APP_KEY }}' '${{ secrets.RTT_TOKEN }}' > .dev.vars
+      - name: Rebuild cycle data + transfer matrix
+        run: python3 tools/build-cycle-data.py
+      - name: Commit if changed
+        run: |
+          rm -f .dev.vars
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          FILES="src/cycle-stops.json src/cycle-routes.json src/line-transfers.json public/stokey/cycle/geo.json"
+          if [ -n "$(git status --porcelain $FILES)" ]; then
+            git add $FILES
+            git commit -m "chore: monthly cycle-data refresh (stations, geometry, transfer matrix)"
+            git push
+          else
+            echo "no changes"
+          fi
