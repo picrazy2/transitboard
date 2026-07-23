@@ -15,11 +15,11 @@
   Cache-Control: no-cache
 /stokey/home
   Cache-Control: no-cache
+/stokey/home.html
+  Cache-Control: no-cache
 /plan
   Cache-Control: no-cache
 /plan.html
-  Cache-Control: no-cache
-/stokey/home.html
   Cache-Control: no-cache
 /stokey/home.js
   Cache-Control: no-cache

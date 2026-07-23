@@ -719,6 +719,29 @@ function rankOptions(options: JOption[]): JOption[] {
 
   const arrMs = (o: JOption) => o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000;
 
+  // Collapse routes that are identical (same lines, same boarding/alighting stops) and
+  // differ only by when you leave — TfL returns "leave now" and "leave in 5 min" as two
+  // cards taking the exact same trains, differing only in transfer wait. Keep the earliest
+  // arrival; keep a later same-route option only if it arrives >=3 min later (a genuinely
+  // useful "or catch the next one"), not just a slightly longer wait.
+  {
+    const ll = (p?: [number, number] | null) => (p ? `${p[0].toFixed(3)},${p[1].toFixed(3)}` : "?");
+    const routeSig = (o: JOption) => o.legs.filter(l => l.kind === "transit")
+      .map(l => `${l.line ?? l.mode}@${ll(l.fromLL ?? l.path?.[0])}>${ll(l.toLL ?? l.path?.[l.path.length - 1])}`).join("|");
+    const groups = new Map<string, JOption[]>();
+    for (const o of options) {
+      if (o.kind !== "transit") continue;   // full walk/cycle handled separately below
+      const k = routeSig(o); const g = groups.get(k) ?? []; g.push(o); groups.set(k, g);
+    }
+    const drop = new Set<JOption>();
+    for (const g of groups.values()) {
+      g.sort((a, b) => arrMs(a) - arrMs(b));
+      let lastKept = -Infinity;
+      for (const o of g) { const a = arrMs(o); if (a - lastKept >= 3 * 60000) lastKept = a; else drop.add(o); }
+    }
+    options = options.filter(o => !drop.has(o));
+  }
+
   // Strongly prefer one-seat rides: a cycle+transit route with a transfer is only worth
   // showing if there's no no-transfer option at all, or it's genuinely faster than every
   // no-transfer one (one-seat transit + full cycle/walk). Otherwise the extra change isn't
