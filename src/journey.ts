@@ -609,18 +609,22 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
       if (!homeStns.includes(H) && homeStns.length < 3) homeStns.push(H);
     }
     for (const H of homeStns) {
-      // Tier-1 pairs share a line, so ask TfL for the LEAST-INTERCHANGE ride between them —
-      // otherwise its default (least-time) reintroduces a change (Finsbury Park -> Gloucester
-      // Rd comes back as Victoria + District, burying the one-seat Piccadilly ride the whole
-      // pairing exists to surface). The faster with-a-change route still comes from other pairs.
+      // Tier-1 pairs share a line, so also ask TfL for the LEAST-INTERCHANGE ride: its default
+      // (least-time) reintroduces a change (Finsbury Park -> Gloucester Rd comes back as
+      // Victoria + District, burying the one-seat Piccadilly ride the pairing exists to
+      // surface). Run both for same-line pairs so the simple one-seat AND the faster
+      // with-a-change route both appear; rankOptions dedups and orders them.
       const oneSeat = sameLineSet.has(H);
       jobs.push(async () => {
         const cycMin = Math.max(1, Math.round(H.cycMin));
-        const params: Record<string, string> = { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" };
-        if (oneSeat) params.journeyPreference = "leastinterchange";
-        const journeys = await jp(env, `${D.lat},${D.lon}`, params, `${H.lat},${H.lon}`);
-        const j = (journeys as any[])[0]; if (!j) return [];
-        return assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}`);
+        const base: Record<string, string> = { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" };
+        const prefs = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
+        const results = await Promise.all(prefs.map(p => jp(env, `${D.lat},${D.lon}`, { ...base, ...p }, `${H.lat},${H.lon}`)));
+        const built = await Promise.all(results.map((journeys, qi) => {
+          const j = (journeys as any[])[0];
+          return j ? assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}-${qi}`) : Promise.resolve([] as JOption[]);
+        }));
+        return built.flat();
       });
     }
   }
