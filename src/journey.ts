@@ -412,6 +412,25 @@ function hhmm(ms: number): string {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(ms);
   return (p.find(x => x.type === "hour")?.value ?? "00") + (p.find(x => x.type === "minute")?.value ?? "00");
 }
+// London-zone yyyyMMdd for TfL's `date` param.
+function ymd(ms: number): string {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(ms);
+  const g = (t: string) => p.find(x => x.type === t)!.value;
+  return g("year") + g("month") + g("day");
+}
+
+// A requested trip time: leave (or arrive) at a specific moment instead of "now".
+export interface When { ms: number; arriving: boolean; }
+// TfL date/time/timeIs params for a query whose vehicle is boarded after `offsetMin` of
+// self-powered access (cycle/walk to the boarding station). With no `when`, preserves the
+// original behaviour (depart at now + offset). Departing shifts the anchor to the chosen
+// time; arriving hands TfL the target arrival and lets it plan backwards (no access offset —
+// the access is added on our side by assembleCycleRoute).
+function whenParams(when: When | null | undefined, anchorNow: number, offsetMin: number): Record<string, string> {
+  if (!when) return { time: hhmm(anchorNow + offsetMin * 60000), timeIs: "Departing" };
+  if (when.arriving) return { date: ymd(when.ms), time: hhmm(when.ms), timeIs: "Arriving" };
+  return { date: ymd(when.ms), time: hhmm(when.ms + offsetMin * 60000), timeIs: "Departing" };
+}
 
 // A Valhalla (Stadia) self-powered leg — bicycle or pedestrian. TfL's own access/egress
 // walk & cycle times are badly overestimated (11 min for a 6-min walk), so we route them
@@ -525,7 +544,7 @@ async function walkAccurate(cbike: ReturnType<typeof bikeCache>, startPt: [numbe
   return { ...o, duration, dep: new Date(depMs).toISOString(), arr: new Date(arrMs).toISOString(), walkMins, changes, legs: all, summary: all.map(l => ({ label: l.line ?? l.label, color: l.color, line: l.line })) };
 }
 
-async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>): Promise<JOption[]> {
+async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>, when?: When | null): Promise<JOption[]> {
   if (!SKEY(env)) return [];
   const now = Date.now();
   // Try all the board's cycle-reachable stations, not just the closest: cycling a few
@@ -538,7 +557,7 @@ async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike
     // 2 journeys per station (a lower-ranked one may need much less cycling, e.g. Stoke
     // Newington + Weaver + Elizabeth to Heathrow). assembleCycleRoute cycles to/from the
     // real platforms and adds a drop-the-last-hop variant; dominance keeps what pays off.
-    const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" }, `${s.lat},${s.lon}`);
+    const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...whenParams(when, now, cycMin) }, `${s.lat},${s.lon}`);
     const built = await Promise.all((journeys as any[]).slice(0, 2).map((j, k) =>
       assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `stn-${s.id}-${k}`)));
     return built.flat();
@@ -587,7 +606,7 @@ async function nearDestStations(env: Env, toLat: number, toLon: number): Promise
 // Routes that alight at a station NEAR THE DESTINATION and cycle the last stretch — even
 // when that station is too far to WALK to (so TfL would never pick it). Mirror of the
 // home side: bike home->H, rail H->D (a near-dest station), bike D->dest.
-async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>): Promise<JOption[]> {
+async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: ReturnType<typeof bikeCache>, when?: When | null): Promise<JOption[]> {
   if (!SKEY(env)) return [];
   const dests = await nearDestStations(env, toLat, toLon);
   if (!dests.length) return [];
@@ -617,7 +636,7 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
       const oneSeat = sameLineSet.has(H);
       jobs.push(async () => {
         const cycMin = Math.max(1, Math.round(H.cycMin));
-        const base: Record<string, string> = { mode: `walking,${RAIL_MODES}`, time: hhmm(now + cycMin * 60000), timeIs: "Departing" };
+        const base: Record<string, string> = { mode: `walking,${RAIL_MODES}`, ...whenParams(when, now, cycMin) };
         const prefs: Record<string, string>[] = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
         const results = await Promise.all(prefs.map(p => jp(env, `${D.lat},${D.lon}`, { ...base, ...p }, `${H.lat},${H.lon}`)));
         const built = await Promise.all(results.map((journeys, qi) => {
@@ -641,7 +660,7 @@ function dedupStadia(stadias: JOption[]): void {
   }
 }
 
-export async function planJourney(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle", stage: "fast" | "full" = "full"): Promise<{ options: JOption[]; dest: { lat: number; lon: number } }> {
+export async function planJourney(env: Env, toLat: number, toLon: number, mode: "walk" | "cycle", stage: "fast" | "full" = "full", when?: When | null): Promise<{ options: JOption[]; dest: { lat: number; lon: number } }> {
   const to = `${toLat},${toLon}`;
   const fullKind = mode === "cycle" ? "full-cycle" : "full-walk";
 
@@ -669,13 +688,13 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   const cbike = bikeCache(env);   // shared across both cycle routers so access legs aren't recomputed
   const [raws, stadiaArr, stationOpts, destOpts] = await Promise.all([
     mode === "walk"
-      ? Promise.all([jp(env, to, { ...base, mode: `walking,${TRANSIT}` }), jp(env, to, { ...base, mode: `walking,${RAIL_MODES}` })]).then(a => a.flat())
+      ? Promise.all([jp(env, to, { ...base, mode: `walking,${TRANSIT}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }), jp(env, to, { ...base, mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) })]).then(a => a.flat())
       : Promise.resolve([] as any[]),
     mode === "cycle"
       ? Promise.all([stadiaFull(env, toLat, toLon, "cycle")])
       : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
-    mode === "cycle" ? nearbyStationRoutes(env, toLat, toLon, cbike) : Promise.resolve([] as JOption[]),
-    mode === "cycle" ? destStationRoutes(env, toLat, toLon, cbike) : Promise.resolve([] as JOption[]),
+    mode === "cycle" ? nearbyStationRoutes(env, toLat, toLon, cbike, when) : Promise.resolve([] as JOption[]),
+    mode === "cycle" ? destStationRoutes(env, toLat, toLon, cbike, when) : Promise.resolve([] as JOption[]),
   ]);
 
   let options = raws.flat().map(parseJourney).concat(stationOpts, destOpts);
@@ -864,13 +883,13 @@ async function nearStationsFor(env: Env, lat: number, lon: number): Promise<{ la
 // station, rail to dest) + dest-side sweep (rail from origin, alight near dest, cycle in)
 // + the direct origin->dest journey, each finished with assembleCycleRoute (cycle to/from
 // real platforms, drop a short first/last hop). Plus the full-cycle option.
-export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = "", mode: "cycle" | "walk" = "cycle"): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
+export async function planRoute(env: Env, fromLat: number, fromLon: number, toLat: number, toLon: number, stage: "fast" | "full" = "full", toName = "", mode: "cycle" | "walk" = "cycle", when?: When | null): Promise<{ options: JOption[]; from: { lat: number; lon: number }; to: { lat: number; lon: number } }> {
   const from: [number, number] = [fromLat, fromLon], to: [number, number] = [toLat, toLon];
   const meta = { from: { lat: fromLat, lon: fromLon }, to: { lat: toLat, lon: toLon } };
   // From home (or right next to it), the mobile planner routes EXACTLY like the board —
   // same station sweeps, dest-station line pairing, curated-boarding rule and ranking.
   if (isHome(fromLat, fromLon)) {
-    const r = await planJourney(env, toLat, toLon, mode, stage);
+    const r = await planJourney(env, toLat, toLon, mode, stage, when);
     return { options: r.options, ...meta };
   }
   const cbike = bikeCache(env);
@@ -887,8 +906,8 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
     const wbase: Record<string, string> = { walkingSpeed: "Average", maxWalkingMinutes: "15" };
     const [rawsArr, fullWalk] = await Promise.all([
       Promise.all([
-        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${TRANSIT}` }, `${fromLat},${fromLon}`),
-        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${RAIL_MODES}` }, `${fromLat},${fromLon}`),
+        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${TRANSIT}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, `${fromLat},${fromLon}`),
+        jp(env, `${toLat},${toLon}`, { ...wbase, mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, `${fromLat},${fromLon}`),
       ]),
       stadiaFull(env, toLat, toLon, "walk", undefined, from),
     ]);
@@ -916,14 +935,14 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   // dynamic stations otherwise — still well under Cloudflare's per-request subrequest cap.
   const sweep = async (stns: { lat: number; lon: number }[], toQuery: string, fromQuery: string, tag: string) =>
     (await Promise.all(stns.slice(0, 8).map(async (S, si) => {
-      const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}` }, fromQuery.replace("$", `${S.lat},${S.lon}`));
+      const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, fromQuery.replace("$", `${S.lat},${S.lon}`));
       const j = (journeys as any[])[0];
       return j ? assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-0`) : [];
     }))).flat();
   const [originSweep, destSweep, directJ] = await Promise.all([
     sweep(originStns, `${toLat},${toLon}`, "$", "o"),        // cycle to a near-origin station, rail to dest
     sweep(destStns, "$", `${fromLat},${fromLon}`, "d"),      // rail from origin, alight near dest, cycle in
-    jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}` }, `${fromLat},${fromLon}`),
+    jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, `${fromLat},${fromLon}`),
   ]);
   const direct = (await Promise.all((directJ as any[]).slice(0, 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
   const stadias = stadiaArr.filter(Boolean) as JOption[];
