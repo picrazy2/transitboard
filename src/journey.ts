@@ -586,13 +586,18 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // awkward stations. Our nearest-station router (below) covers the same ground —
   // cycle to a station, transit, cycle the last mile — faster and with better picks.
   // Walk still queries TfL directly (that query is ~1s). maxWalkingMinutes caps access.
-  const base: Record<string, string> = { mode: `walking,${TRANSIT}`, walkingSpeed: "Average", maxWalkingMinutes: "15" };
-  // Run the walk query (walk mode only), the Stadia full walk/cycle routes, and (cycle)
+  // Run TWO walk queries in parallel: all modes (bus included) AND rail only. TfL's default
+  // ranking favours a direct bus and buries rail routes (e.g. Weaver + Central to Holborn),
+  // so the rail-only query surfaces them; the two merge and get ranked together.
+  const base: Record<string, string> = { walkingSpeed: "Average", maxWalkingMinutes: "15" };
+  // Run the walk queries (walk mode only), the Stadia full walk/cycle routes, and (cycle)
   // our own nearest-station router ALL in parallel so the slowest single call, not their
   // sum, sets latency.
   const cbike = bikeCache(env);   // shared across both cycle routers so access legs aren't recomputed
   const [raws, stadiaArr, stationOpts, destOpts] = await Promise.all([
-    mode === "walk" ? jp(env, to, base) : Promise.resolve([] as any[]),
+    mode === "walk"
+      ? Promise.all([jp(env, to, { ...base, mode: `walking,${TRANSIT}` }), jp(env, to, { ...base, mode: `walking,${RAIL_MODES}` })]).then(a => a.flat())
+      : Promise.resolve([] as any[]),
     mode === "cycle"
       ? Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])
       : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
@@ -635,7 +640,11 @@ function rankOptions(options: JOption[]): JOption[] {
   // on one. This kills the nonsense "cycle 30 min to a station, short hop, cycle again"
   // routes that a straight 23-min ride beats outright. Full walk/cycle are always kept.
   const axes = (o: JOption) => [o.duration, o.walkMins, o.cycleMins, o.changes, o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000];
+  const hasBus = (o: JOption) => o.legs.some(l => l.kind === "transit" && l.mode === "bus");
   const dominates = (a: JOption, b: JOption) => {
+    // A bus route never dominates a rail-only one — rail is preferred even if a bit slower,
+    // so a marginally-faster bus shouldn't hide the Weaver+Central-style option.
+    if (hasBus(a) && !hasBus(b)) return false;
     const A = axes(a), B = axes(b);
     return A.every((v, i) => v <= B[i]) && A.some((v, i) => v < B[i]);
   };
