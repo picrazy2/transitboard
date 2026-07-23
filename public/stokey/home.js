@@ -360,10 +360,8 @@ function addRecent(p) {
 function showResults(places, isRecent) {
   const box = document.getElementById("hResults");
   H.places = places;
-  const special = [
-    `<button class="jpresult" data-sp="locate">${mi("mylocation", 18)}<span class="jprestext"><span class="jpresname">My location</span></span></button>`,
-    `<button class="jpresult" data-sp="map">${mi("place", 18)}<span class="jprestext"><span class="jpresname">Choose on map</span></span></button>`,
-  ].join("");
+  const special = [["locate", "mylocation", "My location"], ["map", "place", "Choose on map"], ["home", "home", "Home"]]
+    .map(([sp, icon, label]) => `<button class="jpresult" data-sp="${sp}">${mi(icon, 18)}<span class="jprestext"><span class="jpresname">${label}</span></span></button>`).join("");
   box.innerHTML = special + places.map((p, i) =>
     `<button class="jpresult" data-i="${i}">${mi(isRecent ? "recent" : (PLACE_ICON[p.type] || "place"), 18)}
       <span class="jprestext"><span class="jpresname">${esc(p.name)}</span>${p.detail ? `<span class="jpresdetail">${esc(p.detail)}</span>` : ""}</span></button>`
@@ -371,6 +369,7 @@ function showResults(places, isRecent) {
   for (const b of box.querySelectorAll(".jpresult")) {
     if (b.dataset.sp === "locate") b.addEventListener("click", () => { box.hidden = true; locateInto(H.activeField); });
     else if (b.dataset.sp === "map") b.addEventListener("click", () => startMapPick(H.activeField));
+    else if (b.dataset.sp === "home") b.addEventListener("click", () => { box.hidden = true; document.getElementById(H.activeField === "dest" ? "hDest" : "hOrigin").blur(); setPlace(H.activeField, { ...HOME_PLACE }, true); });
     else b.addEventListener("click", () => choose(places[+b.dataset.i]));
   }
   box.hidden = false;
@@ -510,8 +509,6 @@ function init() {
   wireField(origin, "origin");
   wireField(dest, "dest");
   if (PLAN) { origin.placeholder = "Start"; dest.placeholder = "Where to?"; }
-  document.getElementById("hHomeBtn").innerHTML = mi("home", 20);
-  document.getElementById("hHomeBtn").addEventListener("click", () => setPlace("dest", { ...HOME_PLACE }, true));
   document.addEventListener("click", e => { if (!e.target.closest(".hbar")) document.getElementById("hResults").hidden = true; });
 
   // ?from / ?to pin start / destination (shareable link / testing); else GPS for origin.
