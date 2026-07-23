@@ -349,7 +349,7 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
       duration: dur, from: "Home", to: "", fromId: null, fromAlt: null,
       dep: null, arr: null, instruction: "", path, stops: [],
     };
-    const label = mode === "cycle" ? (variant === "quiet" ? "Quiet" : "Fastest") : undefined;
+    const label = mode === "cycle" ? (variant === "quiet" ? "Quiet" : variant === "fast" ? "Fastest" : undefined) : undefined;
     return {
       id: mode === "cycle" ? (variant === "quiet" ? "fullcyclequiet" : "fullcycle") : "fullwalk",
       duration: dur, dep: null, arr: null,
@@ -386,8 +386,26 @@ const STATIONS = ((home as any).stations as any[]).filter(s => s.lat && s.lon &&
 // with the home station that shares its line (a no-transfer ride) even when that home
 // station isn't one of the nearest — e.g. a Victoria-line destination -> Seven Sisters,
 // a Piccadilly-line destination -> Finsbury Park.
-const HOME_LINE_STATIONS: Record<string, any[]> = {};
-for (const s of STATIONS) for (const id of Object.keys(s.lineNames || {})) (HOME_LINE_STATIONS[id] ||= []).push(s);
+const HOME_LINE_STATIONS: Record<string, any[]> = {};        // lineId -> curated home stations
+const HOME_LINE_STATIONS_NAME: Record<string, any[]> = {};   // lowercased line name -> same (NR legs carry a name, not our lineId)
+for (const s of STATIONS) for (const [id, name] of Object.entries((s.lineNames || {}) as Record<string, string>)) {
+  (HOME_LINE_STATIONS[id] ||= []).push(s);
+  (HOME_LINE_STATIONS_NAME[String(name).toLowerCase()] ||= []).push(s);
+}
+// If a cycle+transit route boards a line we HAVE a curated home station for, it must board
+// at that station — cycling to our designated stop for the line is the whole point. Reject
+// ones that board it elsewhere (Weaver at Hackney Downs when it should be Stoke Newington /
+// Clapton; Victoria at Highbury when it should be Finsbury Park). Lines with no curated home
+// station (e.g. a tube we don't sit on) are unaffected.
+function curatedBoardingOk(o: JOption): boolean {
+  const ft = o.legs.find(l => l.kind === "transit");
+  if (!ft) return true;
+  const stns = HOME_LINE_STATIONS[ft.lineId || ""] || HOME_LINE_STATIONS_NAME[(ft.line || "").toLowerCase()];
+  if (!stns || !stns.length) return true;
+  const b = ft.fromLL || ft.path[0];
+  if (!b) return true;
+  return stns.some((s: any) => haversineKm([s.lat, s.lon], b) <= 0.5);
+}
 
 function hhmm(ms: number): string {
   const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(ms);
@@ -615,7 +633,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   // so the board can paint the cycle-only card while the slow cycle+transit routing runs.
   // Walk has no fast stage: its transit query is already ~1s.
   if (stage === "fast" && mode === "cycle") {
-    const stadias = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])).filter(Boolean) as JOption[];
+    const stadias = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle")])).filter(Boolean) as JOption[];
     dedupStadia(stadias);
     await enrichWithTflGeometry(env, stadias);
     return { options: stadias, dest: { lat: toLat, lon: toLon } };
@@ -638,7 +656,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
       ? Promise.all([jp(env, to, { ...base, mode: `walking,${TRANSIT}` }), jp(env, to, { ...base, mode: `walking,${RAIL_MODES}` })]).then(a => a.flat())
       : Promise.resolve([] as any[]),
     mode === "cycle"
-      ? Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast"), stadiaFull(env, toLat, toLon, "cycle", "quiet")])
+      ? Promise.all([stadiaFull(env, toLat, toLon, "cycle")])
       : Promise.all([stadiaFull(env, toLat, toLon, "walk")]),
     mode === "cycle" ? nearbyStationRoutes(env, toLat, toLon, cbike) : Promise.resolve([] as JOption[]),
     mode === "cycle" ? destStationRoutes(env, toLat, toLon, cbike) : Promise.resolve([] as JOption[]),
@@ -659,6 +677,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
     options = options.concat(full);   // TfL walking 404s for long walks -> empty, which is fine
   }
 
+  if (mode === "cycle") options = options.filter(curatedBoardingOk);   // board our lines at our stations
   options = rankOptions(options);
   await enrichWithTflGeometry(env, options);   // fix Elizabeth/Heathrow-style bad geometry
   return { options, dest: { lat: toLat, lon: toLon } };
@@ -761,8 +780,7 @@ export async function planHomeward(env: Env, fromLat: number, fromLon: number, s
   // while the slower rail routing runs.
   if (stage === "fast") {
     const s = (await Promise.all([
-      stadiaFull(env, HOME.lat, HOME.lon, "cycle", "fast", [fromLat, fromLon]),
-      stadiaFull(env, HOME.lat, HOME.lon, "cycle", "quiet", [fromLat, fromLon]),
+      stadiaFull(env, HOME.lat, HOME.lon, "cycle", undefined, [fromLat, fromLon]),
     ])).filter(Boolean) as JOption[];
     dedupStadia(s);
     await enrichWithTflGeometry(env, s);
@@ -771,8 +789,7 @@ export async function planHomeward(env: Env, fromLat: number, fromLon: number, s
   const cbike = bikeCache(env);
   const [stadiaArr, stationOpts, originOpts] = await Promise.all([
     Promise.all([
-      stadiaFull(env, HOME.lat, HOME.lon, "cycle", "fast", [fromLat, fromLon]),
-      stadiaFull(env, HOME.lat, HOME.lon, "cycle", "quiet", [fromLat, fromLon]),
+      stadiaFull(env, HOME.lat, HOME.lon, "cycle", undefined, [fromLat, fromLon]),
     ]),
     homewardStationRoutes(env, fromLat, fromLon, cbike),
     originStationRoutes(env, fromLat, fromLon, cbike),
@@ -829,12 +846,12 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   }
 
   if (stage === "fast") {
-    const s = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)])).filter(Boolean) as JOption[];
+    const s = (await Promise.all([stadiaFull(env, toLat, toLon, "cycle", undefined, from)])).filter(Boolean) as JOption[];
     dedupStadia(s); await enrichWithTflGeometry(env, s);
     return { options: s, ...meta };
   }
   const [stadiaArr, originStns, destStns] = await Promise.all([
-    Promise.all([stadiaFull(env, toLat, toLon, "cycle", "fast", from), stadiaFull(env, toLat, toLon, "cycle", "quiet", from)]),
+    Promise.all([stadiaFull(env, toLat, toLon, "cycle", undefined, from)]),
     nearStationsFor(env, fromLat, fromLon),
     nearStationsFor(env, toLat, toLon),
   ]);
@@ -855,6 +872,7 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   const stadias = stadiaArr.filter(Boolean) as JOption[];
   dedupStadia(stadias);
   let options = [...originSweep, ...destSweep, ...direct, ...stadias];
+  if (isHome(fromLat, fromLon)) options = options.filter(curatedBoardingOk);   // from home: board our lines at our stations
   options = rankOptions(options);
   await enrichWithTflGeometry(env, options);
   return { options, ...meta };
