@@ -728,7 +728,11 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
 function rankOptions(options: JOption[], when?: When | null): JOption[] {
   const arriving = !!when?.arriving;
   const arrMs = (o: JOption) => (o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000);
-  const key = (o: JOption) => (arriving ? -arrMs(o) : arrMs(o));   // lower is better in both modes
+  const depMs = (o: JOption) => (o.dep ? Date.parse(o.dep) : arrMs(o) - o.duration * 60000);
+  // Lower is better. Departing: soonest arrival wins. Arrive-by: leave as LATE as possible,
+  // i.e. latest departure wins — which also naturally prefers a short simple ride over a long
+  // early one that happens to arrive a couple minutes closer to the deadline.
+  const key = (o: JOption) => (arriving ? -depMs(o) : arrMs(o));
   // Arrive-by: the DOOR arrival (after the cycle/walk out of the last station) must land by
   // the deadline — TfL only guarantees the station arrival, and our egress pushes it a few
   // minutes past. Drop transit options that overshoot; keep them only if all do.
