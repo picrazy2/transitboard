@@ -152,6 +152,7 @@ export interface JLeg {
   to: string;
   fromId: string | null;  // boarding stop for live "see more" — bus wants individualStopId,
   fromAlt: string | null; // Overground/rail want the naptanId group; try both.
+  toId: string | null;    // alighting stop naptan — needed for the scheduled Timetable lookup
   dep: string | null;   // ISO
   arr: string | null;
   instruction: string;
@@ -236,6 +237,7 @@ function parseLeg(l: any): JLeg {
     fromId: l.departurePoint?.individualStopId ?? l.departurePoint?.naptanId ?? null,
     fromAlt: l.departurePoint?.naptanId && l.departurePoint?.naptanId !== l.departurePoint?.individualStopId
       ? l.departurePoint.naptanId : null,
+    toId: l.arrivalPoint?.naptanId ?? l.arrivalPoint?.individualStopId ?? null,
     dep: londonIso(l.departureTime),
     arr: londonIso(l.arrivalTime),
     instruction: l.instruction?.summary ?? "",
@@ -347,7 +349,7 @@ async function stadiaFull(env: Env, toLat: number, toLon: number, mode: "walk" |
     const jleg: JLeg = {
       mode: costing, kind: mode, label: mode === "cycle" ? "Cycle" : "Walk",
       color: mode === "cycle" ? "#20c05b" : "#8a93a5", line: null, lineId: null,
-      duration: dur, from: "Home", to: "", fromId: null, fromAlt: null,
+      duration: dur, from: "Home", to: "", fromId: null, fromAlt: null, toId: null,
       dep: null, arr: null, instruction: "", path, stops: [],
     };
     const label = mode === "cycle" ? (variant === "quiet" ? "Quiet" : variant === "fast" ? "Fastest" : undefined) : undefined;
@@ -449,7 +451,7 @@ async function stadiaLeg(env: Env, from: [number, number], to: [number, number],
     const path: [number, number][] = [];
     for (const l of trip.legs) path.push(...decodePolyline(l.shape, 6));
     const walk = costing === "pedestrian";
-    return { mode: costing, kind: walk ? "walk" : "cycle", label: walk ? "Walk" : "Cycle", color: walk ? "#8a93a5" : "#20c05b", line: null, lineId: null, duration: mins ?? Math.round(num(trip.summary?.time) / 60), from: "", to: "", fromId: null, fromAlt: null, dep: null, arr: null, instruction: "", path, stops: [] };
+    return { mode: costing, kind: walk ? "walk" : "cycle", label: walk ? "Walk" : "Cycle", color: walk ? "#8a93a5" : "#20c05b", line: null, lineId: null, duration: mins ?? Math.round(num(trip.summary?.time) / 60), from: "", to: "", fromId: null, fromAlt: null, toId: null, dep: null, arr: null, instruction: "", path, stops: [] };
   } catch { return null; }
 }
 
@@ -1054,6 +1056,61 @@ export async function legDepartures(env: Env, stopId: string, lineId: string, al
     if (seqs.length) { const f = normName(fromName), t = normName(toName); deps = deps.filter(x => keepDir(seqs, f, t, normName(x.to))); }
   }
   return deps.slice(0, 12);
+}
+
+// London weekday (0=Sun..6=Sat) and date (yyyy-mm-dd) for a moment.
+function londonParts(ms: number): { dow: number; date: string } {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(ms);
+  const g = (t: string) => p.find(x => x.type === t)!.value;
+  const days: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { dow: days[g("weekday")] ?? 1, date: `${g("year")}-${g("month")}-${g("day")}` };
+}
+// TfL timetable schedules are named by day-type ("Monday - Thursday", "Friday", "Saturday
+// (also Good Friday)", "Sunday"). Pick the one covering `dow`.
+function pickSchedule(schedules: any[], dow: number): any | null {
+  if (!schedules?.length) return null;
+  const find = (re: RegExp) => schedules.find(s => re.test(s.name || ""));
+  if (dow === 0) return find(/sunday/i) || null;
+  if (dow === 6) return find(/saturday/i) || null;
+  if (dow === 5) return find(/friday/i) || find(/monday/i) || null;
+  return find(/monday|weekday|mon/i) || find(/friday/i) || null;
+}
+// Scheduled departures at a leg's boarding stop from TfL's Timetable API — for a trip planned
+// far enough ahead that the live arrivals feed (~30 min) doesn't reach it. `knownJourneys`
+// are the timetabled departure times at the from-stop toward the to-stop.
+export async function scheduledDepartures(env: Env, lineId: string, fromStop: string, toStop: string, toName: string, targetMs: number): Promise<Departure[]> {
+  if (!lineId || !fromStop || !toStop) return [];
+  const qs = new URLSearchParams(); if (env.TFL_APP_KEY) qs.set("app_key", env.TFL_APP_KEY);
+  try {
+    const r = await fetch(`${TFL}/Line/${encodeURIComponent(lineId)}/Timetable/${encodeURIComponent(fromStop)}/to/${encodeURIComponent(toStop)}?${qs}`, {
+      headers: { "User-Agent": UA, Accept: "application/json" }, cf: { cacheTtl: 86400, cacheEverything: true },
+    });
+    if (!r.ok) return [];
+    const d: any = await r.json();
+    const { dow, date } = londonParts(targetMs);
+    const mins = new Set<number>();
+    for (const route of d.timetable?.routes ?? []) {
+      const sched = pickSchedule(route.schedules ?? [], dow);
+      for (const kj of sched?.knownJourneys ?? []) {
+        const h = parseInt(kj.hour, 10), m = parseInt(kj.minute, 10);
+        if (Number.isFinite(h) && Number.isFinite(m)) mins.add(h * 60 + m);
+      }
+    }
+    if (!mins.size) return [];
+    const out: Departure[] = [];
+    for (const t of mins) {
+      const dayAdd = Math.floor(t / (24 * 60));   // hour >= 24 -> runs after midnight
+      const hh = String(Math.floor((t % (24 * 60)) / 60)).padStart(2, "0");
+      const mm = String(t % 60).padStart(2, "0");
+      const ms = londonMs(`${date}T${hh}:${mm}:00`) + dayAdd * 86400000;
+      out.push({ etaMin: Math.round((ms - Date.now()) / 60000), expected: new Date(ms).toISOString(), to: toName, live: false });
+    }
+    out.sort((a, b) => Date.parse(a.expected) - Date.parse(b.expected));
+    // Keep a window around the target so the client can centre the list on the journey.
+    const lo = targetMs - 20 * 60000, hi = targetMs + 90 * 60000;
+    const win = out.filter(x => { const t = Date.parse(x.expected); return t >= lo && t <= hi; });
+    return (win.length ? win : out).slice(0, 12);
+  } catch { return []; }
 }
 
 // ---------- geocoding ----------
