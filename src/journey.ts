@@ -822,7 +822,7 @@ function rankOptions(options: JOption[], when?: When | null): JOption[] {
     const arrs = options.filter(o => o.kind === "transit").map(arrMs);
     if (arrs.length) {
       const best = Math.max(...arrs);
-      options = options.filter(o => o.kind !== "transit" || arrMs(o) >= best - 15 * 60000);
+      options = options.filter(o => o.kind !== "transit" || arrMs(o) >= best - 20 * 60000);
     }
   }
 
