@@ -249,22 +249,25 @@ async function seeMore(oi, li, btn) {
 }
 async function renderDeps(leg, box) {
   try {
-    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}&from=${encodeURIComponent(leg.from || "")}&to=${encodeURIComponent(leg.to || "")}`);
+    const at = leg.dep ? Date.parse(leg.dep) : "";   // anchor the list on this train's time
+    const r = await fetch(`/api/departures?stop=${encodeURIComponent(leg.fromId)}&alt=${encodeURIComponent(leg.fromAlt || "")}&line=${encodeURIComponent(leg.lineId)}&from=${encodeURIComponent(leg.from || "")}&to=${encodeURIComponent(leg.to || "")}&toStop=${encodeURIComponent(leg.toId || "")}${at ? `&at=${at}` : ""}`);
     const d = await r.json();
     const all = d.departures || [];
+    const sched = !!d.scheduled;   // far-ahead trip -> timetable, not the live board
     const col = legColor(leg);
     const rec = leg.dep ? Date.parse(leg.dep) : null;
     const recIdx = rec != null ? all.findIndex(x => Math.abs(Date.parse(x.expected) - rec) < 90000) : -1;
     const deps = (recIdx > 0 ? all.slice(recIdx - 1) : all).slice(0, 6);
     box.innerHTML = deps.length
-      ? `<div class="jpminihdr">Live at ${esc(jpStopName(leg.from))}</div>` + deps.map(x => {
+      ? `<div class="jpminihdr">${sched ? "Scheduled" : "Live"} at ${esc(jpStopName(leg.from))}</div>` + deps.map(x => {
           const mine = rec != null && Math.abs(Date.parse(x.expected) - rec) < 90000;
           const clock = x.expected ? to12h(new Date(x.expected)) : "";
           return `<div class="jpdep${mine ? " rec" : ""}">
             <span class="jpbadge ${legStyle(leg)}" style="background:${col};color:${textOn(col)}">${esc(leg.line ?? "")}</span>
             <span class="jpdepto">${esc(shortDest(x.to))}</span>
-            <span class="jpdepright"><span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span>
-              ${clock ? `<span class="jpdepclock">${esc(clock)}</span>` : ""}</span></div>`;
+            <span class="jpdepright">${sched
+              ? `<span class="jpdepclock">${esc(clock)}</span>`
+              : `<span class="jpdepeta" data-exp="${x.expected ?? ""}">${countdown(x.expected, x.etaMin).text}</span>${clock ? `<span class="jpdepclock">${esc(clock)}</span>` : ""}`}</span></div>`;
         }).join("")
       : `<div class="jpnolive">${leg.dep ? `Scheduled ${esc(to12h(new Date(leg.dep)))} · no live times for this service` : "No live departures right now"}</div>`;
     box.hidden = false;
