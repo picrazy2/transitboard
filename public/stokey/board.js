@@ -1149,6 +1149,11 @@ function injectPlanner(){
     if(q.length < 2){ jpShowRecents(); return; }   // empty/short -> your recent destinations
     timer = setTimeout(() => jpGeocode(q), 220);
   });
+  input.addEventListener("keydown", e => {
+    if(e.key !== "Enter") return;
+    e.preventDefault(); clearTimeout(timer); input.blur();
+    jpSubmit(input.value.trim());   // go straight to the first result
+  });
   // Focusing the search shows your recent destinations first (before you type).
   input.addEventListener("focus", () => jpShowRecents());
   // The clear (X) behaves like tapping empty map: wipe the field, drop the keyboard, hide the list.
@@ -1204,11 +1209,19 @@ async function jpGeocode(q){
   try{
     const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&session=${jpSession}`);
     const d = await r.json();
-    if(tok !== JP.geoTok) return;
+    if(tok !== JP.geoTok) return null;
     const seen = new Set(rec.map(p => (p.name || "").toLowerCase()));
     const geo = (d.places || []).filter(p => !seen.has((p.name || "").toLowerCase()));
-    jpShowResults([...rec, ...geo], false);
-  }catch{ if(tok === JP.geoTok) jpShowResults(rec, false); }
+    const list = [...rec, ...geo];
+    jpShowResults(list, false);
+    return list;
+  }catch{ if(tok === JP.geoTok) jpShowResults(rec, false); return tok === JP.geoTok ? rec : null; }
+}
+// Enter goes straight to the first real result, waiting for the geocode if needed.
+async function jpSubmit(q){
+  if(q.length < 2) return;
+  const list = await jpGeocode(q);
+  if(list && list.length) jpChoose(list[0]);
 }
 
 // Google predictions have no coords until picked — resolve, then plan. Recents and

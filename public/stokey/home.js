@@ -349,7 +349,16 @@ function locateInto(field) {
   el.value = ""; el.placeholder = "Finding your location…";
   navigator.geolocation.getCurrentPosition(
     pos => setPlace(field, { name: "My location", lat: pos.coords.latitude, lon: pos.coords.longitude }, true),
-    () => { el.placeholder = "Search a place"; if (field === "origin") document.getElementById("hOptions").innerHTML = `<div class="jperr">Couldn't get your location — search a start point above.</div>`; },
+    err => {
+      el.placeholder = "Search a place";
+      // code 1 = permission denied. iOS won't re-prompt once denied — it can only be turned
+      // back on in Settings — so tell the user where, rather than silently failing.
+      const denied = err && err.code === 1;
+      const msg = denied
+        ? "Location is blocked for this site. Turn it on in the “aA” menu → Website Settings → Location (or iOS Settings → Apps → Safari → Location), then tap My location again."
+        : "Couldn’t get your location. Search a start point above, or use “Choose on map”.";
+      document.getElementById("hOptions").innerHTML = `<div class="jperr">${msg}</div>`;
+    },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
   );
 }
@@ -407,11 +416,21 @@ async function geocode(q) {
   try {
     const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&session=${geoSession || ""}`);
     const d = await r.json();
-    if (tok !== H.geoTok) return;
+    if (tok !== H.geoTok) return null;   // superseded by newer input
     const seen = new Set(rec.map(p => (p.name || "").toLowerCase()));
     const geo = (d.places || []).filter(p => !seen.has((p.name || "").toLowerCase()));
-    showResults([...rec, ...geo], false);
-  } catch { if (tok === H.geoTok) showResults(rec, false); }
+    const list = [...rec, ...geo];
+    showResults(list, false);
+    return list;
+  } catch { if (tok === H.geoTok) showResults(rec, false); return tok === H.geoTok ? rec : null; }
+}
+// Enter in a search box picks the first real result — waiting for the geocode if it hasn't
+// landed yet — and goes straight there (skips the My location / map / Home presets).
+async function submitField(field, q) {
+  if (q.length < 2) return;
+  H.activeField = field;
+  const list = await geocode(q);
+  if (list && list.length) choose(list[0]);
 }
 async function choose(place) {
   const field = H.activeField;
@@ -558,6 +577,11 @@ function init() {
       const q = el.value.trim();
       if (q.length < 2) { showResults(recents(), true); return; }
       timer = setTimeout(() => geocode(q), 220);
+    });
+    el.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      e.preventDefault(); clearTimeout(timer); el.blur();
+      submitField(field, el.value.trim());   // go straight to the first result
     });
     const selectAll = () => setTimeout(() => { try { el.select(); } catch {} }, 0);   // easy clear+retype (iOS timeout)
     // On focus always open the dropdown (with My location / Choose on map + recents).
