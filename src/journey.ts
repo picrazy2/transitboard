@@ -563,7 +563,7 @@ async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike
     // Newington + Weaver + Elizabeth to Heathrow). assembleCycleRoute cycles to/from the
     // real platforms and adds a drop-the-last-hop variant; dominance keeps what pays off.
     const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...whenParams(when, now, cycMin) }, `${s.lat},${s.lon}`);
-    const built = await Promise.all(pickJourneys(journeys as any[], when?.arriving, 2).map((j, k) =>
+    const built = await Promise.all(pickJourneys(journeys as any[], when?.arriving, when?.arriving ? 3 : 2).map((j, k) =>
       assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `stn-${s.id}-${k}`)));
     return built.flat();
   }));
@@ -644,10 +644,12 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
         const base: Record<string, string> = { mode: `walking,${RAIL_MODES}`, ...whenParams(when, now, cycMin) };
         const prefs: Record<string, string>[] = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
         const results = await Promise.all(prefs.map(p => jp(env, `${D.lat},${D.lon}`, { ...base, ...p }, `${H.lat},${H.lon}`)));
-        const built = await Promise.all(results.map((journeys, qi) => {
-          const j = pickJourneys(journeys as any[], when?.arriving, 1)[0];
-          return j ? assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}-${qi}`) : Promise.resolve([] as JOption[]);
-        }));
+        // Arrive-by: build a few of the latest journeys, not just the single latest — its
+        // door arrival (after the egress cycle) may overshoot the deadline and get dropped,
+        // and we want the next-latest as a fallback rather than losing this route entirely.
+        const built = await Promise.all(results.flatMap((journeys, qi) =>
+          pickJourneys(journeys as any[], when?.arriving, when?.arriving ? 3 : 1).map((j, ji) =>
+            assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}-${qi}-${ji}`))));
         return built.flat();
       });
     }
@@ -786,6 +788,10 @@ function rankOptions(options: JOption[], when?: When | null): JOption[] {
     const drop = new Set<JOption>();
     for (const g of groups.values()) {
       g.sort((a, b) => key(a) - key(b));   // best first
+      // Arrive-by: keep only the single best (latest-leaving) trip on each route — the
+      // earlier same-route departures just arrive needlessly early. Departing: also keep a
+      // later one >=3 min apart as an "or catch the next" alternative.
+      if (arriving) { for (let i = 1; i < g.length; i++) drop.add(g[i]); continue; }
       let lastKept = -Infinity;
       for (const o of g) { const a = key(o); if (a - lastKept >= 3 * 60000) lastKept = a; else drop.add(o); }
     }
@@ -955,15 +961,16 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   const sweep = async (stns: { lat: number; lon: number }[], toQuery: string, fromQuery: string, tag: string) =>
     (await Promise.all(stns.slice(0, 8).map(async (S, si) => {
       const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, fromQuery.replace("$", `${S.lat},${S.lon}`));
-      const j = pickJourneys(journeys as any[], when?.arriving, 1)[0];
-      return j ? assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-0`) : [];
+      const built = await Promise.all(pickJourneys(journeys as any[], when?.arriving, when?.arriving ? 3 : 1)
+        .map((j, ji) => assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-${ji}`)));
+      return built.flat();
     }))).flat();
   const [originSweep, destSweep, directJ] = await Promise.all([
     sweep(originStns, `${toLat},${toLon}`, "$", "o"),        // cycle to a near-origin station, rail to dest
     sweep(destStns, "$", `${fromLat},${fromLon}`, "d"),      // rail from origin, alight near dest, cycle in
     jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, `${fromLat},${fromLon}`),
   ]);
-  const direct = (await Promise.all(pickJourneys(directJ as any[], when?.arriving, 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
+  const direct = (await Promise.all(pickJourneys(directJ as any[], when?.arriving, when?.arriving ? 3 : 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
   const stadias = stadiaArr.filter(Boolean) as JOption[];
   dedupStadia(stadias);
   let options = [...originSweep, ...destSweep, ...direct, ...stadias];
