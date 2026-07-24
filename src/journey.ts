@@ -716,7 +716,7 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   }
 
   if (mode === "cycle") options = options.filter(curatedBoardingOk);   // board our lines at our stations
-  options = rankOptions(options, !!when?.arriving);
+  options = rankOptions(options, when);
   await enrichWithTflGeometry(env, options);   // fix Elizabeth/Heathrow-style bad geometry
   return { options, dest: { lat: toLat, lon: toLon } };
 }
@@ -725,9 +725,17 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
 // (planJourney) and homeward (planHomeward) planners. `arriving` flips the sense of "better":
 // departing -> soonest arrival wins; arriving (arrive-by) -> LATEST arrival wins (leave as
 // late as possible). A signed `key` (lower = better) keeps every comparison symmetric.
-function rankOptions(options: JOption[], arriving = false): JOption[] {
+function rankOptions(options: JOption[], when?: When | null): JOption[] {
+  const arriving = !!when?.arriving;
   const arrMs = (o: JOption) => (o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000);
   const key = (o: JOption) => (arriving ? -arrMs(o) : arrMs(o));   // lower is better in both modes
+  // Arrive-by: the DOOR arrival (after the cycle/walk out of the last station) must land by
+  // the deadline — TfL only guarantees the station arrival, and our egress pushes it a few
+  // minutes past. Drop transit options that overshoot; keep them only if all do.
+  if (arriving && when) {
+    const within = options.filter(o => o.kind !== "transit" || arrMs(o) <= when.ms);
+    if (within.some(o => o.kind === "transit")) options = within;
+  }
   // De-duplicate identical leg-signatures.
   const seen = new Set<string>();
   options = options.filter(o => {
@@ -919,7 +927,7 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
     let options = (rawsArr.flat() as any[]).map(parseJourney);
     options = await Promise.all(options.map(o => o.kind === "transit" ? walkAccurate(cbike, from, to, toName, o) : o));
     options = options.filter(o => o.kind !== "full-walk").concat(fullWalk ? [fullWalk] : []);
-    options = rankOptions(options, !!when?.arriving);
+    options = rankOptions(options, when);
     await enrichWithTflGeometry(env, options);
     return { options, ...meta };
   }
@@ -954,7 +962,7 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   dedupStadia(stadias);
   let options = [...originSweep, ...destSweep, ...direct, ...stadias];
   if (isHome(fromLat, fromLon)) options = options.filter(curatedBoardingOk);   // from home: board our lines at our stations
-  options = rankOptions(options, !!when?.arriving);
+  options = rankOptions(options, when);
   await enrichWithTflGeometry(env, options);
   return { options, ...meta };
 }
