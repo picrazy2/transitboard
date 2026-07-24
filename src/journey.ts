@@ -815,6 +815,17 @@ function rankOptions(options: JOption[], when?: When | null): JOption[] {
   const bestKey = transitKeys.length ? Math.min(...transitKeys) : Infinity;
   options = options.filter(o => o.kind !== "transit" || o.changes === 0 || key(o) < baseKey || key(o) <= bestKey);
 
+  // Arrive-by: drop trips that land needlessly early. Once we know the latest achievable
+  // arrival, anything landing more than ~15 min before it just means leaving too soon —
+  // regardless of which station query produced it. (Full cycle/walk have no real arrival.)
+  if (arriving) {
+    const arrs = options.filter(o => o.kind === "transit").map(arrMs);
+    if (arrs.length) {
+      const best = Math.max(...arrs);
+      options = options.filter(o => o.kind !== "transit" || arrMs(o) >= best - 15 * 60000);
+    }
+  }
+
   options.sort((a, b) => key(a) - key(b));   // best first
   // Always keep the full walk/cycle option(s) — they're a mode the user explicitly wants
   // to see — then fill the rest with the best transit routes, capped at 6 total.
