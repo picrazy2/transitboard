@@ -431,6 +431,9 @@ function whenParams(when: When | null | undefined, anchorNow: number, offsetMin:
   if (when.arriving) return { date: ymd(when.ms), time: hhmm(when.ms), timeIs: "Arriving" };
   return { date: ymd(when.ms), time: hhmm(when.ms + offsetMin * 60000), timeIs: "Departing" };
 }
+// TfL returns journeys ascending by time. Departing wants the soonest (first) n; arrive-by
+// wants the LATEST arrivals (last n) so you leave as late as possible.
+const pickJourneys = (js: any[], arriving?: boolean, n = 1): any[] => (arriving ? js.slice(Math.max(0, js.length - n)) : js.slice(0, n));
 
 // A Valhalla (Stadia) self-powered leg — bicycle or pedestrian. TfL's own access/egress
 // walk & cycle times are badly overestimated (11 min for a 6-min walk), so we route them
@@ -558,7 +561,7 @@ async function nearbyStationRoutes(env: Env, toLat: number, toLon: number, cbike
     // Newington + Weaver + Elizabeth to Heathrow). assembleCycleRoute cycles to/from the
     // real platforms and adds a drop-the-last-hop variant; dominance keeps what pays off.
     const journeys = await jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...whenParams(when, now, cycMin) }, `${s.lat},${s.lon}`);
-    const built = await Promise.all((journeys as any[]).slice(0, 2).map((j, k) =>
+    const built = await Promise.all(pickJourneys(journeys as any[], when?.arriving, 2).map((j, k) =>
       assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `stn-${s.id}-${k}`)));
     return built.flat();
   }));
@@ -640,7 +643,7 @@ async function destStationRoutes(env: Env, toLat: number, toLon: number, cbike: 
         const prefs: Record<string, string>[] = oneSeat ? [{}, { journeyPreference: "leastinterchange" }] : [{}];
         const results = await Promise.all(prefs.map(p => jp(env, `${D.lat},${D.lon}`, { ...base, ...p }, `${H.lat},${H.lon}`)));
         const built = await Promise.all(results.map((journeys, qi) => {
-          const j = (journeys as any[])[0];
+          const j = pickJourneys(journeys as any[], when?.arriving, 1)[0];
           return j ? assembleCycleRoute(cbike, [HOME.lat, HOME.lon], [toLat, toLon], "", j, `dst-${H.id}-${Math.round(D.lat * 1e3)}-${qi}`) : Promise.resolve([] as JOption[]);
         }));
         return built.flat();
@@ -713,14 +716,18 @@ export async function planJourney(env: Env, toLat: number, toLon: number, mode: 
   }
 
   if (mode === "cycle") options = options.filter(curatedBoardingOk);   // board our lines at our stations
-  options = rankOptions(options);
+  options = rankOptions(options, !!when?.arriving);
   await enrichWithTflGeometry(env, options);   // fix Elizabeth/Heathrow-style bad geometry
   return { options, dest: { lat: toLat, lon: toLon } };
 }
 
-// Dedup, drop micro-hops and dominated options, sort by arrival, cap. Shared by the
-// outbound (planJourney) and homeward (planHomeward) planners.
-function rankOptions(options: JOption[]): JOption[] {
+// Dedup, drop micro-hops and dominated options, sort, cap. Shared by the outbound
+// (planJourney) and homeward (planHomeward) planners. `arriving` flips the sense of "better":
+// departing -> soonest arrival wins; arriving (arrive-by) -> LATEST arrival wins (leave as
+// late as possible). A signed `key` (lower = better) keeps every comparison symmetric.
+function rankOptions(options: JOption[], arriving = false): JOption[] {
+  const arrMs = (o: JOption) => (o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000);
+  const key = (o: JOption) => (arriving ? -arrMs(o) : arrMs(o));   // lower is better in both modes
   // De-duplicate identical leg-signatures.
   const seen = new Set<string>();
   options = options.filter(o => {
@@ -737,7 +744,7 @@ function rankOptions(options: JOption[]): JOption[] {
   // as good on every axis — total time, walk, cycle, interchanges, arrival — and better
   // on one. This kills the nonsense "cycle 30 min to a station, short hop, cycle again"
   // routes that a straight 23-min ride beats outright. Full walk/cycle are always kept.
-  const axes = (o: JOption) => [o.duration, o.walkMins, o.cycleMins, o.changes, o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000];
+  const axes = (o: JOption) => [o.duration, o.walkMins, o.cycleMins, o.changes, key(o)];
   const hasBus = (o: JOption) => o.legs.some(l => l.kind === "transit" && l.mode === "bus");
   const dominates = (a: JOption, b: JOption) => {
     // A bus route never dominates a rail-only one — rail is preferred even if a bit slower,
@@ -748,13 +755,11 @@ function rankOptions(options: JOption[]): JOption[] {
   };
   options = options.filter(b => b.kind !== "transit" || !options.some(a => a !== b && dominates(a, b)));
 
-  const arrMs = (o: JOption) => o.arr ? Date.parse(o.arr) : Date.now() + o.duration * 60000;
-
   // Collapse routes that are identical (same lines, same boarding/alighting stops) and
   // differ only by when you leave — TfL returns "leave now" and "leave in 5 min" as two
-  // cards taking the exact same trains, differing only in transfer wait. Keep the earliest
-  // arrival; keep a later same-route option only if it arrives >=3 min later (a genuinely
-  // useful "or catch the next one"), not just a slightly longer wait.
+  // cards taking the exact same trains, differing only in transfer wait. Keep the BEST one
+  // (soonest arrival when departing, latest when arriving); keep a second only if it's >=3
+  // min apart (a genuinely useful "or catch the next/previous one").
   {
     const ll = (p?: [number, number] | null) => (p ? `${p[0].toFixed(3)},${p[1].toFixed(3)}` : "?");
     const routeSig = (o: JOption) => o.legs.filter(l => l.kind === "transit")
@@ -766,9 +771,9 @@ function rankOptions(options: JOption[]): JOption[] {
     }
     const drop = new Set<JOption>();
     for (const g of groups.values()) {
-      g.sort((a, b) => arrMs(a) - arrMs(b));
+      g.sort((a, b) => key(a) - key(b));   // best first
       let lastKept = -Infinity;
-      for (const o of g) { const a = arrMs(o); if (a - lastKept >= 3 * 60000) lastKept = a; else drop.add(o); }
+      for (const o of g) { const a = key(o); if (a - lastKept >= 3 * 60000) lastKept = a; else drop.add(o); }
     }
     options = options.filter(o => !drop.has(o));
   }
@@ -781,21 +786,21 @@ function rankOptions(options: JOption[]): JOption[] {
   // preference — NOT full-cycle (its "arrival" is just now+duration and would wrongly
   // greenlight every transfer). If no one-seat ride exists, transfers are all we have.
   const noTransfer = options.filter(o => (o.kind === "transit" && o.changes === 0) || o.kind === "full-walk");
-  const baseArr = noTransfer.length ? Math.min(...noTransfer.map(arrMs)) : Infinity;
-  // ALWAYS keep the single fastest transit route so the quickest option is never hidden even
-  // when it needs a change (e.g. Piccadilly one-seat vs a faster Victoria+District). The
-  // one-seat preference then only drops transfer routes that are BOTH slower than the best
-  // no-transfer AND not the fastest overall.
-  const transitArrs = options.filter(o => o.kind === "transit").map(arrMs);
-  const fastestArr = transitArrs.length ? Math.min(...transitArrs) : Infinity;
-  options = options.filter(o => o.kind !== "transit" || o.changes === 0 || arrMs(o) < baseArr || arrMs(o) <= fastestArr);
+  const baseKey = noTransfer.length ? Math.min(...noTransfer.map(key)) : Infinity;
+  // ALWAYS keep the single best transit route so the top option is never hidden even when it
+  // needs a change (e.g. Piccadilly one-seat vs a faster Victoria+District). The one-seat
+  // preference then only drops transfer routes that are BOTH worse than the best no-transfer
+  // AND not the best overall. "Best" = soonest arrival departing / latest arrival arriving.
+  const transitKeys = options.filter(o => o.kind === "transit").map(key);
+  const bestKey = transitKeys.length ? Math.min(...transitKeys) : Infinity;
+  options = options.filter(o => o.kind !== "transit" || o.changes === 0 || key(o) < baseKey || key(o) <= bestKey);
 
-  options.sort((a, b) => arrMs(a) - arrMs(b));   // soonest arrival first
+  options.sort((a, b) => key(a) - key(b));   // best first
   // Always keep the full walk/cycle option(s) — they're a mode the user explicitly wants
-  // to see — then fill the rest with the soonest transit routes, capped at 6 total.
+  // to see — then fill the rest with the best transit routes, capped at 6 total.
   const fulls = options.filter(o => o.kind !== "transit").slice(0, 2);
   const transit = options.filter(o => o.kind === "transit").slice(0, Math.max(0, 6 - fulls.length));
-  return fulls.concat(transit).sort((a, b) => arrMs(a) - arrMs(b));
+  return fulls.concat(transit).sort((a, b) => key(a) - key(b));
 }
 
 // ---------- homeward planner (mobile "get me home with my bike") ----------
@@ -914,7 +919,7 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
     let options = (rawsArr.flat() as any[]).map(parseJourney);
     options = await Promise.all(options.map(o => o.kind === "transit" ? walkAccurate(cbike, from, to, toName, o) : o));
     options = options.filter(o => o.kind !== "full-walk").concat(fullWalk ? [fullWalk] : []);
-    options = rankOptions(options);
+    options = rankOptions(options, !!when?.arriving);
     await enrichWithTflGeometry(env, options);
     return { options, ...meta };
   }
@@ -936,7 +941,7 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
   const sweep = async (stns: { lat: number; lon: number }[], toQuery: string, fromQuery: string, tag: string) =>
     (await Promise.all(stns.slice(0, 8).map(async (S, si) => {
       const journeys = await jp(env, toQuery.replace("$", `${S.lat},${S.lon}`), { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, fromQuery.replace("$", `${S.lat},${S.lon}`));
-      const j = (journeys as any[])[0];
+      const j = pickJourneys(journeys as any[], when?.arriving, 1)[0];
       return j ? assembleCycleRoute(cbike, from, to, toName, j, `${tag}${si}-0`) : [];
     }))).flat();
   const [originSweep, destSweep, directJ] = await Promise.all([
@@ -944,12 +949,12 @@ export async function planRoute(env: Env, fromLat: number, fromLon: number, toLa
     sweep(destStns, "$", `${fromLat},${fromLon}`, "d"),      // rail from origin, alight near dest, cycle in
     jp(env, `${toLat},${toLon}`, { mode: `walking,${RAIL_MODES}`, ...(when ? whenParams(when, Date.now(), 0) : {}) }, `${fromLat},${fromLon}`),
   ]);
-  const direct = (await Promise.all((directJ as any[]).slice(0, 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
+  const direct = (await Promise.all(pickJourneys(directJ as any[], when?.arriving, 2).map((j, k) => assembleCycleRoute(cbike, from, to, toName, j, `x-${k}`)))).flat();
   const stadias = stadiaArr.filter(Boolean) as JOption[];
   dedupStadia(stadias);
   let options = [...originSweep, ...destSweep, ...direct, ...stadias];
   if (isHome(fromLat, fromLon)) options = options.filter(curatedBoardingOk);   // from home: board our lines at our stations
-  options = rankOptions(options);
+  options = rankOptions(options, !!when?.arriving);
   await enrichWithTflGeometry(env, options);
   return { options, ...meta };
 }

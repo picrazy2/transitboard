@@ -318,7 +318,15 @@ async function loadRoutes(keep) {
   }
 }
 
-function updateTitle() { const t = document.querySelector(".drawertitle"); if (t) t.textContent = PLAN ? "Plan a journey" : (H.to && H.to.home ? "Ways home" : "Routes"); }
+function updateTitle() {
+  const t = document.querySelector(".drawertitle"); if (!t) return;
+  if (H.when) {
+    const when = new Date(H.when.at).toLocaleString("en-GB", { weekday: "short", hour: "numeric", minute: "2-digit", hour12: true });
+    t.textContent = `${H.when.arriving ? "Arrive by" : "Depart"} ${when}`;
+    return;
+  }
+  t.textContent = PLAN ? "Plan a journey" : (H.to && H.to.home ? "Ways home" : "Routes");
+}
 function setPlace(field, place, refit) {
   if (field === "dest") { H.to = place; document.getElementById("hDest").value = place.name || ""; updateTitle(); }
   else { H.from = place; document.getElementById("hOrigin").value = place.name || "Current location"; }
@@ -518,7 +526,7 @@ function init() {
   const localValue = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   function applyWhen() {
     const m = whenMode.value;
-    if (m === "now") { H.when = null; whenAt.hidden = true; return; }
+    if (m === "now") { H.when = null; whenAt.hidden = true; updateTitle(); return; }
     if (!whenAt.value) {                                   // seed a sensible default the first time
       const d = new Date(Date.now() + (m === "depart" ? 15 : 45) * 60000);
       d.setMinutes(Math.round(d.getMinutes() / 5) * 5, 0, 0);
@@ -526,8 +534,13 @@ function init() {
     }
     whenAt.min = localValue(new Date());
     whenAt.hidden = false;
-    const ms = new Date(whenAt.value).getTime();
-    H.when = Number.isFinite(ms) ? { at: ms, arriving: m === "arrive" } : null;
+    let ms = new Date(whenAt.value).getTime();
+    if (Number.isFinite(ms)) {
+      // A time that's already gone by (e.g. 9:00 picked in the evening) means the next one.
+      while (ms <= Date.now() - 60000) { ms += 86400000; whenAt.value = localValue(new Date(ms)); }
+      H.when = { at: ms, arriving: m === "arrive" };
+    } else H.when = null;
+    updateTitle();   // the drawer title echoes the exact constraint so it's never ambiguous
   }
   whenMode.addEventListener("change", () => { applyWhen(); if (H.from && H.to) loadRoutes(false); });
   whenAt.addEventListener("change", () => { applyWhen(); if (H.from && H.to) loadRoutes(false); });

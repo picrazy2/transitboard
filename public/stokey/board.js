@@ -106,15 +106,14 @@ const wmoLabel = code => (WMO[code] ?? ["","","—"])[2];
 function renderWeather(w){
   if(w === undefined){ wx.innerHTML = ""; return; }          // not loaded yet
   if(!w){ wx.innerHTML = `<div class="meta" style="color:var(--bad)">⚠ weather unavailable</div>`; return; }
-  // The day's HIGH is the number that matters at a glance in the morning, so it's the big
-  // one; the low sits beside it and the current temp is the small line below.
+  // Current temperature is the big glance number; the day's high/low sit beside it, labelled
+  // H (orange) and L (blue) and sized so they're readable at a distance.
   const r = Math.round;
   wx.innerHTML = `
     <div class="now"><span class="icon">${wmoIcon(w.code, w.isDay)}</span>
-      ${w.maxC != null
-        ? `<span class="temp hi">${r(w.maxC)}°</span><span class="templo lo">${r(w.minC)}°</span>`
-        : `<span class="temp">${r(w.tempC)}°</span>`}</div>
-    <div class="meta">${esc(wmoLabel(w.code))}<br>now ${r(w.tempC)}°</div>`;
+      <span class="temp">${r(w.tempC)}°</span>
+      ${w.maxC != null ? `<span class="hilo"><span class="hi">H ${r(w.maxC)}°</span><span class="lo">L ${r(w.minC)}°</span></span>` : ""}</div>
+    <div class="meta">${esc(wmoLabel(w.code))}</div>`;
 }
 
 // ---------- weather modal ----------
