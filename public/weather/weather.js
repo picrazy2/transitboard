@@ -266,6 +266,13 @@ function renderNowcast() {
   const wet = slots.some(s => s.mm >= 0.05);
   const changed = $("rainBlock").hidden === wet;
   $("rainBlock").hidden = !wet;
+  // After dark the map only earns its space if rain is coming: the radar is empty
+  // otherwise and satellite cloud can't see low cloud at night.
+  const hideMap = !WX.current.is_day && !wet;
+  if (document.body.classList.contains("nomap") !== hideMap) {
+    document.body.classList.toggle("nomap", hideMap);
+    requestAnimationFrame(() => { renderHourly(); if (!hideMap) radar?.map.invalidateSize(); });   // the grid just changed shape
+  }
   if (changed) requestAnimationFrame(renderHourly);   // the chart just gained or lost height
   $("dryNote").textContent = wet ? "" : rainStory().text;
   if (!wet) { $("nowcast").innerHTML = ""; return; }
