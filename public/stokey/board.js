@@ -539,8 +539,14 @@ function focusPin(v){
 
 // ---------- map (shared shell, mode-branched layers) ----------
 const map = L.map("map", {zoomControl:false, attributionControl:false, zoomSnap:0.25});
-const tiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  subdomains:"abcd", maxZoom:19,
+// CARTO's free basemaps now serve "API key required" tiles; Esri's dark canvas
+// is keyless. Its labels are a separate layer, laid over the base.
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
+const tiles = L.tileLayer(`${ESRI}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
+  maxNativeZoom:16, maxZoom:19,
+}).addTo(map);
+L.tileLayer(`${ESRI}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+  maxNativeZoom:16, maxZoom:19,
 }).addTo(map);
 let showPassed = false;   // toggled by the map FAB; passed/Due vehicles are grey
 map.setView(HOME, C.openZoom);
@@ -907,18 +913,26 @@ function fitFocus(){
 }
 
 // ---------- fleet (walk only) ----------
-let fleetToken = 0;
-async function syncFleet(){
+// renderAll() runs on every tap and every poll, so this is throttled: the same
+// line set is re-fetched at most every FLEET_MS. One request per line keeps each
+// function call cheap (a 10-line /Line/Arrivals is ~2 MB of JSON to parse) and
+// lets each line's answer be edge-cached on its own.
+const FLEET_MS = 30000;
+let fleetToken = 0, fleetSig = "", fleetAt = 0;
+async function syncFleet(force = false){
   if(!C.hasFleet) return;
   const lines = [...activeLines()].filter(l => l !== "Weaver");
+  const sig = lines.sort().join(",");
+  if(!lines.length){ fleetSig = ""; if(fleet.length){ fleet = []; renderPins(); } return; }
+  if(!force && sig === fleetSig && Date.now() - fleetAt < FLEET_MS) return;
+  if(document.hidden) return;
+  fleetSig = sig; fleetAt = Date.now();
   const token = ++fleetToken;
-  if(!lines.length){ if(fleet.length){ fleet = []; renderPins(); } return; }
-  try{
-    const res = await fetch(`${C.fleet}?lines=${lines.join(",")}`, {cache:"no-store"});
-    const data = res.ok ? await res.json() : {vehicles:[]};
-    if(token !== fleetToken) return;
-    fleet = data.vehicles ?? [];
-  }catch{ if(token !== fleetToken) return; fleet = []; }
+  const one = l => fetch(`${C.fleet}?lines=${encodeURIComponent(l)}`)
+    .then(r => r.ok ? r.json() : {vehicles:[]}).then(d => d.vehicles ?? []).catch(() => []);
+  const got = (await Promise.all(lines.map(one))).flat();
+  if(token !== fleetToken) return;
+  fleet = got;
   renderPins(); applyMapFilter();
 }
 
@@ -1006,9 +1020,11 @@ async function refresh(){
     await fetchBoard(MODE);
     lastOk = Date.now();
     applyActive();
-    // warm the other mode in the background so the toggle is instant
+    // Warm the other mode once so the toggle is instant; switchMode refetches it
+    // anyway, so re-warming it every poll was a wasted function call a minute.
     const other = MODE === "walk" ? "cycle" : "walk";
-    fetchBoard(other).catch(() => {}); loadGeo(other).catch(() => {});
+    if(!raw[other]) fetchBoard(other).catch(() => {});
+    loadGeo(other).catch(() => {});
     return true;
   }catch(e){
     const age = lastOk ? Math.round((Date.now() - lastOk) / 1000) : null;
@@ -1021,13 +1037,17 @@ async function refresh(){
 // failed fetch or a throttled timer on the kiosk). Any tick reschedules the next.
 let refreshTimer = null;
 function scheduleRefresh(ms){ clearTimeout(refreshTimer); refreshTimer = setTimeout(runRefresh, ms); }
-async function runRefresh(){ const ok = await refresh(); scheduleRefresh(ok ? REFRESH_MS : 15000); }
+async function runRefresh(){
+  // Backgrounded tab / locked iPad: don't poll; visibilitychange refreshes on return.
+  if(document.hidden){ scheduleRefresh(REFRESH_MS); return; }
+  const ok = await refresh(); scheduleRefresh(ok ? REFRESH_MS : 15000);
+}
 function forceRefresh(){ stamp.textContent = "Refreshing…"; runRefresh(); }
 
 // ---------- mode toggle (in place, no reload) ----------
 function reconfigure(mode){
   MODE = mode; C = CFG[mode]; SERVICES = C.lines; DEFAULT_LINES = C.defaultLines;
-  selected = new Set(SERVICES); tableAll = false; focus = null; layoutClass = ""; fleet = []; everLive = new Set();
+  selected = new Set(SERVICES); tableAll = false; focus = null; layoutClass = ""; fleet = []; fleetSig = ""; everLive = new Set();
   map.setZoom(C.openZoom, {animate:false});
   for(const a of document.querySelectorAll(".modetog a"))
     a.classList.toggle("on", a.dataset.mode === mode);
@@ -1042,6 +1062,7 @@ async function switchMode(mode){
   await loadGeo(mode).catch(() => {});
   buildMap();
   applyActive();
+  runRefresh();   // the warmed copy may be minutes old; replace it and reset the poll
 }
 for(const a of document.querySelectorAll(".modetog a")){
   a.classList.toggle("on", a.dataset.mode === MODE);

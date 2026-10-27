@@ -27,3 +27,11 @@
   Cache-Control: no-cache
 /stokey/cycle/geo.json
   Cache-Control: no-cache
+/weather/
+  Cache-Control: no-cache
+/weather/index.html
+  Cache-Control: no-cache
+/weather/weather.js
+  Cache-Control: no-cache
+/weather/weather.css
+  Cache-Control: no-cache

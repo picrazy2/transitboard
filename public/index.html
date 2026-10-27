@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Transit Boards</title>
-<meta name="description" content="Live London departure boards — pick Stoke Newington or Stratford.">
+<meta name="description" content="Live London departure boards and a weather board — pick Stoke Newington, Stratford or Weather.">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,14 +15,14 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Transit Boards">
 <meta property="og:title" content="Transit Boards">
-<meta property="og:description" content="Live London departure boards — pick Stoke Newington or Stratford.">
+<meta property="og:description" content="Live London departure boards and a weather board — pick Stoke Newington, Stratford or Weather.">
 <meta property="og:url" content="https://board.akguo.com/">
 <meta property="og:image" content="https://board.akguo.com/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Transit Boards">
-<meta name="twitter:description" content="Live London departure boards — pick Stoke Newington or Stratford.">
+<meta name="twitter:description" content="Live London departure boards and a weather board — pick Stoke Newington, Stratford or Weather.">
 <meta name="twitter:image" content="https://board.akguo.com/og.png">
 <style>
   :root{
@@ -155,12 +155,28 @@
       </div>
     </a>
 
+    <a class="card" href="/weather/" style="--a:#4aa3ff;--b:#ffd166">
+      <div class="head">
+        <span class="kicker">Weather board</span>
+        <span class="modes" aria-label="weather">🌦️</span>
+      </div>
+      <div class="name">Weather</div>
+      <div class="desc">Full-screen weather for exactly where you are — rain in 15-minute steps, live radar, 10-day forecast, sun, air and pollen, plus the next train.</div>
+      <div class="spacer"></div>
+      <div class="lines">
+        <span class="mchip">🌧️ <b>Radar</b></span>
+        <span class="mchip">🌅 <b>Sun</b> &amp; moon</span>
+        <span class="mchip">🚆 <b>Next train</b></span>
+      </div>
+    </a>
+
   </main>
 
   <footer>
     Data from <a href="https://api.tfl.gov.uk" target="_blank" rel="noopener">TfL</a>,
     <a href="https://raildata.org.uk" target="_blank" rel="noopener">Rail Data Marketplace</a> and
-    <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a>.
+    <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> and
+    <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a>.
   </footer>
  </div>
 </body>

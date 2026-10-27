@@ -81,9 +81,10 @@ const toPt = () => H.to ? [H.to.lat, H.to.lon] : null;
 // ---------- map ----------
 const map = L.map("map", { zoomControl: false, attributionControl: false, zoomSnap: 0.25 });
 map.setView(HOME, 12);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-  subdomains: "abcd", maxZoom: 20, detectRetina: true,
-}).addTo(map);
+// CARTO's free basemaps now need an API key; Esri's dark canvas (base + labels) doesn't.
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
+for (const layer of ["World_Dark_Gray_Base", "World_Dark_Gray_Reference"])
+  L.tileLayer(`${ESRI}/${layer}/MapServer/tile/{z}/{y}/{x}`, { maxNativeZoom: 16, maxZoom: 20 }).addTo(map);
 const hLayer = L.layerGroup().addTo(map);
 
 // Destination search is restricted to ~40 km around home (strictbounds in journey.ts).
