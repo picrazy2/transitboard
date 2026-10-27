@@ -637,20 +637,21 @@ async function loadFrames() {
     radar?.refreshClouds(); bigRadar?.refreshClouds();
   } catch {}
 }
-// Clouds from EUMETSAT's public WMS (keyless, CORS-open).
-//   Day:   MTG's 0.6 µm visible channel every 10 min, ~1 km over the UK (cloud
-//          streets show). Brightness becomes opacity; from histograms over London,
-//          ground sits ~50-65 and cloud 95-145.
-//   Night: Meteosat's cloud mask every 15 min, ~4 km. Infrared alone can't do it:
-//          low cloud is as warm as the ground, so its brightness histogram under
-//          cloud and under clear sky came out identical. The mask is a
-//          classification (white cloud, green/blue clear) built from many channels.
+// Clouds from EUMETSAT's public WMS (keyless, CORS-open), MTG satellite, every 10 min.
+//   Day:   0.6 µm visible, ~1 km over the UK (cloud streets show). Brightness
+//          becomes opacity; from histograms over London, ground sits ~50-65 and
+//          cloud 95-145.
+//   Night: 10.5 µm infrared, ~2 km, thresholded so only cold (mid/high) cloud
+//          shows. Low cloud is about as warm as the ground at night and can't be
+//          separated, so it is honestly missing — the status pill says so.
+// Tried and dropped for night: Meteosat's cloud mask (msg_fes:clm). On a clear
+// 27 Oct 2026 evening it flagged 77% of the London view as cloud while every
+// London airport METAR reported no cloud: cooling land reads as low cloud.
 // Clear ground stays transparent; cloud is a theme-coloured wash.
 const EUMETSAT = "https://view.eumetsat.int/geoserver/wms";
 const CLOUD_SRC = {
   vis: { layer: "mtg_fd:vis06_hrfi", mPerPx: 1000, step: 600, alpha: p => Math.sqrt(Math.max(0, Math.min(1, (p[0] - 72) / 78))) },
-  mask: { layer: "msg_fes:clm", mPerPx: 4500, step: 900, transparent: true,
-    alpha: p => p[3] > 0 && p[0] > 200 && p[1] > 200 && p[2] > 200 ? .85 : 0 },
+  ir: { layer: "mtg_fd:ir105_hrfi", mPerPx: 2000, step: 600, alpha: p => Math.sqrt(Math.max(0, Math.min(1, (p[0] - 66) / 64))) },
 };
 const CloudLayer = L.GridLayer.extend({
   options: { tileSize: 256, opacity: 1, zIndex: 4, time: null, src: "vis", attribution: "EUMETSAT" },
@@ -698,12 +699,12 @@ const CloudLayer = L.GridLayer.extend({
 // radar frame for the slot at or before it.
 const cloudTime = (sec, latest, src) => latest ? null
   : new Date(Math.floor(sec / CLOUD_SRC[src].step) * CLOUD_SRC[src].step * 1000).toISOString().replace(".000", "");
-// Visible only works with the sun well up; otherwise the mask.
+// Visible only works with the sun well up; otherwise infrared.
 function cloudSrc(sec) {
-  if (!WX) return "mask";
+  if (!WX) return "ir";
   const i = WX.daily.time.findIndex(t => dayKey(t + 43200) === dayKey(sec));
   const rise = D("sunrise", i), set = D("sunset", i);
-  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "mask";
+  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "ir";
 }
 let cloudOn = store.get("wx.clouds", true);
 
@@ -788,7 +789,10 @@ function makeRadar(el, zoom, timeEl, slider, cloudBtn, statusEl) {
       const rain = cur ? rainInView(cur) : null, cov = cloudOn ? cloudInView() : null;
       const parts = [];
       if (rain != null) parts.push(rain ? `${ms("rainy", "ic-rain")}Rain in view` : "No rain in view");
-      if (cov != null) parts.push(cov < .03 ? "clear sky" : `cloud ${Math.round(cov * 100)}%${clouds.options.src === "mask" ? " (night, ~4 km)" : ""}`);
+      const night = clouds.options.src === "ir";
+      if (cov != null) parts.push(night
+        ? (cov < .03 ? "no mid/high cloud (night: low cloud not visible)" : `mid/high cloud ${Math.round(cov * 100)}% (night)`)
+        : (cov < .03 ? "clear sky" : `cloud ${Math.round(cov * 100)}%`));
       statusEl.innerHTML = parts.join(" · ");
       statusEl.hidden = !parts.length;
     }, 120);
