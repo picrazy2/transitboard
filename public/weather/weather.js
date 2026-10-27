@@ -514,49 +514,50 @@ async function loadFrames() {
     radar?.setFrames(); bigRadar?.setFrames();
   } catch {}
 }
-function makeRadar(el, zoom, timeEl, playBtn) {
+// Opens on the latest frame (now); the slider scrubs back through the last ~2 h.
+// Left alone for 2 minutes it springs back to now, so the kiosk never shows old rain.
+function makeRadar(el, zoom, timeEl, slider) {
   const map = L.map(el, { zoomControl: false, attributionControl: true, minZoom: 5, maxZoom: 11 }).setView([LOC.lat, LOC.lon], zoom);
   map.attributionControl.setPrefix("");
   map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
   const base = L.tileLayer(esriUrl(isDark(), "Base"), { maxNativeZoom: 16, attribution: "Esri · RainViewer" }).addTo(map);
   const ref = L.tileLayer(esriUrl(isDark(), "Reference"), { maxNativeZoom: 16, pane: "labels" }).addTo(map);
   const you = L.marker([LOC.lat, LOC.lon], { icon: L.divIcon({ className: "", html: '<div class="youdot"></div>', iconSize: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
-  let layers = [], k = 0, playing = true, timer = null;
+  let layers = [], k = 0, back = null;
   const show = i => {
+    k = i;
     layers.forEach((l, j) => l.setOpacity(j === i ? .8 : 0));
+    slider.value = i;
+    slider.style.setProperty("--p", `${layers.length > 1 ? (i / (layers.length - 1)) * 100 : 100}%`);
     const f = FRAMES.list[i]; if (!f) return;
     const ago = Math.round((Date.now() / 1000 - f.time) / 60);
-    timeEl.textContent = `Radar ${hm(f.time)}${ago > 2 ? ` · ${ago} min ago` : " · now"}`;
+    timeEl.innerHTML = i === layers.length - 1 ? `<b>Now</b> · ${hm(f.time)}` : `${hm(f.time)} · <b>${ago} min ago</b>`;
   };
-  const loop = () => {
-    if (!layers.length) return;
-    k = (k + 1) % layers.length; show(k);
-    timer = setTimeout(loop, k === layers.length - 1 ? 2500 : 450);   // linger on the latest frame
-  };
-  const setBtn = () => { playBtn.innerHTML = ms(playing ? "pause" : "play_arrow"); };
-  setBtn();
+  const latest = () => layers.length && show(layers.length - 1);
+  slider.addEventListener("input", () => {
+    show(+slider.value);
+    clearTimeout(back); back = setTimeout(latest, 2 * 60e3);
+  });
   return {
     map,
     setFrames() {
       if (!FRAMES) return;
-      clearTimeout(timer); layers.forEach(l => map.removeLayer(l));
+      const atNow = k >= layers.length - 1, keep = !atNow && FRAMES.list.findIndex(f => f.time === FRAMES.list[k]?.time);
+      layers.forEach(l => map.removeLayer(l));
       layers = FRAMES.list.map(f => L.tileLayer(`${FRAMES.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
         { opacity: 0, maxNativeZoom: 7, maxZoom: 11, zIndex: 5 }).addTo(map));
-      k = layers.length - 1; show(k);
-      if (playing) timer = setTimeout(loop, 2500);
+      slider.max = Math.max(0, layers.length - 1);
+      show(atNow || keep == null || keep < 0 ? layers.length - 1 : keep);
     },
     setTheme(dark) { base.setUrl(esriUrl(dark, "Base")); ref.setUrl(esriUrl(dark, "Reference")); },
-    toggle() { playing = !playing; setBtn(); clearTimeout(timer); if (playing) loop(); else { k = layers.length - 1; show(k); } },
     recentre() { you.setLatLng([LOC.lat, LOC.lon]); map.setView([LOC.lat, LOC.lon], map.getZoom()); },
-    destroy() { clearTimeout(timer); map.remove(); },
+    destroy() { clearTimeout(back); map.remove(); },
   };
 }
-$("radarPlay").addEventListener("click", () => radar?.toggle());
 $("radarBig").addEventListener("click", () => {
-  openModal(`<div id="bigmap"></div><div class="radarbar"><button id="bPlay"></button><span id="bTime">Radar</span><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
-  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bPlay"));
+  openModal(`<div id="bigmap"></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
+  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"));
   bigRadar.setFrames();
-  $("bPlay").onclick = () => bigRadar.toggle();
   $("bZoom").onclick = () => bigRadar.map.setView([54.5, -3], 6);
   modalCleanup = () => { bigRadar.destroy(); bigRadar = null; };
 });
@@ -733,7 +734,7 @@ document.fonts?.ready.then(() => { if (WX) renderHourly(); });
 (function init() {
   applyTheme();
   setPlace(PLACE);
-  radar = makeRadar($("map"), 8, $("radarTime"), $("radarPlay"));
+  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"));
   const cached = store.get("wx.cache", null);
   if (cached) { WX = cached; TZ = WX.timezone; renderWeather(); $("stamp").textContent = "Refreshing…"; }
   loadWeather(); loadAir(); loadFrames(); loadStations();

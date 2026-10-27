@@ -206,7 +206,17 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   border: 1px solid var(--glass-rim);
   box-shadow: inset 0 1px 1px var(--glass-highlight), inset 0 -1px 1px var(--glass-shadow-edge), var(--shadow-2);
 }
-.radarbar span { flex: 1; text-align: center; font-variant-numeric: tabular-nums; font-weight: 500 }
+.radarbar .rtime { flex: none; min-width: 128px; padding-left: 10px; font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap }
+.radarbar .rtime b { color: var(--ink); font-weight: 600 }
+/* iOS-style slider: filled track up to the thumb, white knob with a soft shadow. */
+.rslider { flex: 1; min-width: 0; height: 30px; margin: 0 4px; background: none; -webkit-appearance: none; appearance: none; touch-action: none }
+.rslider::-webkit-slider-runnable-track { height: 4px; border-radius: var(--r-full);
+  background: linear-gradient(90deg, var(--accent) var(--p, 100%), var(--border-strong) var(--p, 100%)) }
+.rslider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 0.5px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.18) }
+.rslider::-moz-range-track { height: 4px; border-radius: 9999px; background: var(--border-strong) }
+.rslider::-moz-range-progress { height: 4px; border-radius: 9999px; background: var(--accent) }
+.rslider::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.18) }
 .radarbar button { width: 34px; height: 34px; border-radius: var(--r-full); display: grid; place-items: center; color: var(--accent) }
 .radarbar button:active { background: var(--accent-soft) }
 .radarbar .ms { font-size: 22px }
