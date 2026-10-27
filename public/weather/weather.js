@@ -69,11 +69,46 @@ const WMO = {
   85:["weather_snowy","weather_snowy","Snow showers"], 86:["weather_snowy","weather_snowy","Snow showers"],
   95:["thunderstorm","thunderstorm","Thunderstorm"], 96:["thunderstorm","thunderstorm","Thunder, hail"], 99:["thunderstorm","thunderstorm","Thunder, hail"],
 };
-const sym = (c, day = true) => (WMO[c] ?? ["thermostat","thermostat"])[day ? 0 : 1];
-const tone = s => s === "sunny" || s.endsWith("_day") ? "sun" : s.endsWith("night") ? "night"
-  : s.startsWith("rainy") || s === "weather_mix" ? "rain" : s === "weather_snowy" ? "snow" : s === "thunderstorm" ? "storm" : "cloud";
-const TONE_VAR = { sun: "--sun", night: "--night", rain: "--rain", snow: "--cat-6", storm: "--cat-5", cloud: "--ink-muted" };
-const icon = (c, day = true) => { const s = sym(c, day); return ms(s, `ic-${tone(s)}`); };
+// Condition icons: a small multi-colour set in Material's rounded, filled style, so a
+// rain icon is a grey cloud with blue drops and partly-cloudy is a yellow sun behind
+// a grey cloud — which a one-colour icon font can't do. Drawn on a 24-unit grid;
+// colours come from tokens via style= (SVG presentation attributes can't take var()).
+const F = v => `style="fill:var(${v})"`, S = (v, w = 1.8) => `style="stroke:var(${v});stroke-width:${w};stroke-linecap:round;fill:none"`;
+const CLOUD = "M6.5 19a4.5 4.5 0 0 1-.4-8.98A6 6 0 0 1 17.6 9.1a5 5 0 0 1-.1 9.9z";
+const cloudP = (tx, ty, k, tone = "--cloud") => `<path transform="translate(${tx} ${ty}) scale(${k})" d="${CLOUD}" ${F(tone)}/>`;
+const sunP = (cx, cy, r) => {
+  let s = `<circle cx="${cx}" cy="${cy}" r="${r}" ${F("--sun")}/>`;
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4, c = Math.cos(a), n = Math.sin(a);
+    s += `<line x1="${(cx + c * (r + 1.6)).toFixed(2)}" y1="${(cy + n * (r + 1.6)).toFixed(2)}" x2="${(cx + c * (r + 3.2)).toFixed(2)}" y2="${(cy + n * (r + 3.2)).toFixed(2)}" ${S("--sun", 1.7)}/>`;
+  }
+  return s;
+};
+const moonP = (cx, cy, r) => `<path d="M${cx + r * .35} ${cy - r}A${r} ${r} 0 1 0 ${cx + r} ${cy + r * .35}A${r * .78} ${r * .78} 0 0 1 ${cx + r * .35} ${cy - r}z" ${F("--moon")}/>`;
+const drops = (n, tone = "--rain") => [[7, 17], [11, 18.5], [15, 17], [9, 21], [13, 21.5]].slice(0, n)
+  .map(([x, y]) => `<line x1="${x}" y1="${y}" x2="${x - 1}" y2="${y + 2.4}" ${S(tone, 1.9)}/>`).join("");
+const flakes = n => [[7.5, 17.5], [12, 19], [16.5, 17.5], [9.5, 22], [14.5, 22]].slice(0, n)
+  .map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.25" ${F("--flake")}/>`).join("");
+const bolt = `<path d="M12.6 14.5 9.6 19.3h2.6l-1.3 3.7 4.3-5.6h-2.6l1.5-2.9z" ${F("--bolt")}/>`;
+const fog = `<line x1="4" y1="17.5" x2="20" y2="17.5" ${S("--cloud", 1.9)}/><line x1="6" y1="21" x2="18" y2="21" ${S("--cloud", 1.9)}/>`;
+function wxG(c, day = true) {
+  const peek = day ? sunP(16.8, 6.4, 2.9) : moonP(17, 6.5, 4);   // sun/moon behind a shower cloud
+  const hi = (tone = "--cloud") => cloudP(0, -4.5, 1, tone);      // cloud raised to leave room below
+  if (c <= 1) return day ? sunP(12, 12, c === 0 ? 4.6 : 4.2) : moonP(11.5, 12, 7.5);
+  if (c === 2) return (day ? sunP(8.4, 8.4, 3.4) : moonP(8.6, 8.4, 5.4)) + cloudP(3.4, 3.2, .85);
+  if (c === 3) return cloudP(5, -1.5, .72, "--cloud-dark") + cloudP(0, 2, .9);
+  if (c === 45 || c === 48) return cloudP(1.5, -5, .88) + fog;
+  if (c >= 51 && c <= 55) return hi() + drops(c === 55 ? 3 : 2);
+  if (c === 56 || c === 57 || c === 66 || c === 67) return hi() + drops(2) + `<circle cx="15.5" cy="20" r="1.25" ${F("--flake")}/>`;
+  if (c === 61 || c === 63) return hi() + drops(c === 61 ? 3 : 4);
+  if (c === 65) return hi("--cloud-dark") + drops(5);
+  if (c >= 71 && c <= 77) return hi() + flakes(c === 71 ? 3 : 5);
+  if (c >= 80 && c <= 82) return peek + cloudP(0, -3.5, .95, c === 82 ? "--cloud-dark" : "--cloud") + drops(c === 80 ? 2 : 4);
+  if (c === 85 || c === 86) return peek + cloudP(0, -3.5, .95) + flakes(4);
+  if (c >= 95) return hi("--cloud-dark") + bolt + drops(1);
+  return cloudP(0, 1, 1);
+}
+const icon = (c, day = true) => `<svg class="wxi" viewBox="0 0 24 24" aria-hidden="true">${wxG(c, day)}</svg>`;
 const label = c => (WMO[c] ?? [, , "—"])[2];
 
 const level = (v, steps) => steps.find(s => v < s[0]) ?? steps[steps.length - 1];
@@ -286,8 +321,8 @@ function svgChart(el, o) {
       s += `<text class="tl" x="${x(i)}" y="${y(v) - 8}" text-anchor="middle">${l.fmt(v)}</text>`;
     });
   }
-  if (o.icons) o.icons.forEach((ic, i) => {
-    if (i % every(28) === 0) s += `<text class="ms" x="${x(i)}" y="22" text-anchor="middle" fill="${V(TONE_VAR[tone(ic)])}">${ic}</text>`;
+  if (o.icons) o.icons.forEach(([c, d], i) => {
+    if (i % every(28) === 0) s += `<g transform="translate(${(x(i) - 11).toFixed(1)} 2) scale(.92)">${wxG(c, d)}</g>`;
   });
   if (o.arrows) { const col = V("--ink-muted"); o.arrows.forEach((a, i) => {
     if (a == null || i % every(26) !== 0) return;
@@ -312,7 +347,7 @@ function hourlyChart(from, n, mode, sel, onPick, nowFirst = false) {
   const sl = k => WX.hourly[k].slice(from, from + n);
   const t = sl("time"), day = sl("is_day");
   const base = { t, sel, onPick, night: day, nowFirst };
-  const icons = sl("weather_code").map((c, i) => sym(c, day[i]));
+  const icons = sl("weather_code").map((c, i) => [c, day[i]]);
   if (mode === "rain") return { ...base, icons,
     bars: { v: sl("precipitation"), max: 1, color: "--rain", opacity: .8, full: true, labels: true, fmt: v => v.toFixed(1) },
     lines: [{ v: sl("precipitation_probability"), min: 0, max: 100, color: "--lo", w: 2, dash: "4 4", labels: true, fmt: v => `${r0(v)}%` }] };
@@ -349,17 +384,27 @@ for (const b of $("hourSeg").querySelectorAll("button")) b.addEventListener("cli
 // The iPad grid has room for 7 comfortable rows; the "10 days" button opens the rest.
 // Phone layouts scroll, so they list all 10.
 const fewDays = () => matchMedia("(min-height: 641px) and (min-width: 701px)").matches;
+let dayMode = "temp";
 function daysHTML(n) {
   const ti = todayIdx(), idx = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, n);
   const lo = Math.min(...idx.map(i => D("temperature_2m_min", i))), hi = Math.max(...idx.map(i => D("temperature_2m_max", i)));
   const pct = v => ((v - lo) / (hi - lo || 1)) * 100;
+  const mmMax = Math.max(2, ...idx.map(i => D("precipitation_sum", i) ?? 0));
   return idx.map(i => {
-    const mn = D("temperature_2m_min", i), mx = D("temperature_2m_max", i), p = D("precipitation_probability_max", i) ?? 0;
-    const now = i === ti ? `<b style="left:${pct(WX.current.temperature_2m)}%"></b>` : "";
-    return `<button class="day${i === ti ? " today" : ""}" data-i="${i}">
-      <span class="dn">${i === ti ? "Today" : wd(D("time", i) + 43200)}</span>
+    const p = D("precipitation_probability_max", i) ?? 0;
+    const head = `<span class="dn">${i === ti ? "Today" : wd(D("time", i) + 43200)}</span>
       <span class="de">${icon(D("weather_code", i))}</span>
-      <span class="dp${p < 10 ? " z" : ""}">${p}%</span>
+      <span class="dp${p < 10 && dayMode === "temp" ? " z" : ""}">${p}%</span>`;
+    if (dayMode === "rain") {
+      // Bar length is the day's total against the wettest day shown; shade is the chance.
+      const mm = D("precipitation_sum", i) ?? 0, h = D("precipitation_hours", i) ?? 0;
+      return `<button class="day rain${i === ti ? " today" : ""}" data-i="${i}">${head}
+        <span class="bar wet"><i style="left:0;right:${100 - Math.min(100, (mm / mmMax) * 100)}%;opacity:${(.35 + .65 * p / 100).toFixed(2)}"></i></span>
+        <span class="lo">${mm >= 0.05 ? `${mm < 10 ? mm.toFixed(1) : r0(mm)}<small>mm</small>` : "–"}</span><span class="hi">${h ? `${r0(h)}<small>h</small>` : ""}</span></button>`;
+    }
+    const mn = D("temperature_2m_min", i), mx = D("temperature_2m_max", i);
+    const now = i === ti ? `<b style="left:${pct(WX.current.temperature_2m)}%"></b>` : "";
+    return `<button class="day${i === ti ? " today" : ""}" data-i="${i}">${head}
       <span class="bar"><i style="left:${pct(mn)}%;right:${100 - pct(mx)}%"></i>${now}</span>
       <span class="lo">${deg(mn)}</span><span class="hi">${deg(mx)}</span></button>`;
   }).join("");
@@ -371,6 +416,11 @@ function renderDays() {
   $("days").innerHTML = daysHTML(n);
 }
 $("days").addEventListener("click", e => { const b = e.target.closest(".day"); if (b) dayModal(+b.dataset.i); });
+for (const b of $("daySeg").querySelectorAll("button")) b.addEventListener("click", () => {
+  dayMode = b.dataset.k;
+  for (const x of $("daySeg").querySelectorAll("button")) x.classList.toggle("on", x === b);
+  renderDays();
+});
 $("daysMore").addEventListener("click", () => {
   if (!WX) return;
   openModal(`<h3>${ms("calendar_month")}Next 10 days</h3><p class="lede">Tap a day for hour by hour.</p><div class="daylist sheetdays" id="allDays">${daysHTML(10)}</div>`);
@@ -587,16 +637,20 @@ async function loadFrames() {
     radar?.refreshClouds(); bigRadar?.refreshClouds();
   } catch {}
 }
-// Clouds from EUMETSAT's public WMS (keyless, CORS-open), the new MTG satellite's
-// high-resolution channels, every 10 min: by day the 0.6 µm visible channel (~1 km
-// over the UK — individual cloud streets show), at night 10.5 µm infrared (~2 km).
-// Each tile is greyscale; brightness becomes opacity of a theme-coloured wash so
-// clear ground is transparent. Thresholds come from histograms over London:
-// visible ground sits ~50-65, cloud 95-145; infrared night ground ~45-65.
+// Clouds from EUMETSAT's public WMS (keyless, CORS-open).
+//   Day:   MTG's 0.6 µm visible channel every 10 min, ~1 km over the UK (cloud
+//          streets show). Brightness becomes opacity; from histograms over London,
+//          ground sits ~50-65 and cloud 95-145.
+//   Night: Meteosat's cloud mask every 15 min, ~4 km. Infrared alone can't do it:
+//          low cloud is as warm as the ground, so its brightness histogram under
+//          cloud and under clear sky came out identical. The mask is a
+//          classification (white cloud, green/blue clear) built from many channels.
+// Clear ground stays transparent; cloud is a theme-coloured wash.
 const EUMETSAT = "https://view.eumetsat.int/geoserver/wms";
 const CLOUD_SRC = {
-  vis: { layer: "mtg_fd:vis06_hrfi", mPerPx: 1000, lo: 72, hi: 150 },
-  ir: { layer: "mtg_fd:ir105_hrfi", mPerPx: 2000, lo: 66, hi: 130 },
+  vis: { layer: "mtg_fd:vis06_hrfi", mPerPx: 1000, step: 600, alpha: p => Math.sqrt(Math.max(0, Math.min(1, (p[0] - 72) / 78))) },
+  mask: { layer: "msg_fes:clm", mPerPx: 4500, step: 900, transparent: true,
+    alpha: p => p[3] > 0 && p[0] > 200 && p[1] > 200 && p[2] > 200 ? .85 : 0 },
 };
 const CloudLayer = L.GridLayer.extend({
   options: { tileSize: 256, opacity: 1, zIndex: 4, time: null, src: "vis", attribution: "EUMETSAT" },
@@ -611,6 +665,7 @@ const CloudLayer = L.GridLayer.extend({
     const px = Math.max(16, Math.min(size.x, Math.round((b.x - a.x) / src.mPerPx)));
     const q = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetMap", layers: src.layer, styles: "",
       format: "image/png", crs: "EPSG:3857", bbox: `${a.x},${b.y},${b.x},${a.y}`, width: px, height: px });
+    if (src.transparent) q.set("transparent", "true");
     if (this.options.time) q.set("time", this.options.time);
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -619,11 +674,14 @@ const CloudLayer = L.GridLayer.extend({
         const c = document.createElement("canvas"); c.width = c.height = px;
         const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
         const d = cx.getImageData(0, 0, px, px), p = d.data;
-        const [r, g, bl] = this.options.rgb, span = src.hi - src.lo;
+        const [r, g, bl] = this.options.rgb;
+        let cloudy = 0;
         for (let i = 0; i < p.length; i += 4) {
-          const v = p[i], k = Math.max(0, Math.min(1, (v - src.lo) / span));
-          p[i] = r; p[i + 1] = g; p[i + 2] = bl; p[i + 3] = Math.round(255 * Math.sqrt(k));
+          const k = src.alpha(p.subarray(i, i + 4));
+          if (k > .3) cloudy++;
+          p[i] = r; p[i + 1] = g; p[i + 2] = bl; p[i + 3] = Math.round(255 * k);
         }
+        tile._cover = cloudy / (px * px);   // for the "cloud n%" status
         cx.putImageData(d, 0, 0);
         const tx = tile.getContext("2d");
         tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = "high";
@@ -636,21 +694,22 @@ const CloudLayer = L.GridLayer.extend({
     return tile;
   },
 });
-// MTG images land ~20-30 min after their slot; "now" asks for the latest, an older
-// radar frame for the 10-min slot at or before it.
-const cloudTime = (sec, latest) => latest ? null : new Date(Math.floor(sec / 600) * 600e3).toISOString().replace(".000", "");
-// Visible only works with the sun well up; otherwise infrared.
+// Images land ~20-30 min after their slot; "now" asks for the latest, an older
+// radar frame for the slot at or before it.
+const cloudTime = (sec, latest, src) => latest ? null
+  : new Date(Math.floor(sec / CLOUD_SRC[src].step) * CLOUD_SRC[src].step * 1000).toISOString().replace(".000", "");
+// Visible only works with the sun well up; otherwise the mask.
 function cloudSrc(sec) {
-  if (!WX) return "ir";
+  if (!WX) return "mask";
   const i = WX.daily.time.findIndex(t => dayKey(t + 43200) === dayKey(sec));
   const rise = D("sunrise", i), set = D("sunset", i);
-  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "ir";
+  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "mask";
 }
 let cloudOn = store.get("wx.clouds", true);
 
 // Opens on the latest frame (now); the slider scrubs back through the last ~2 h.
 // Left alone for 2 minutes it springs back to now, so the kiosk never shows old rain.
-function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
+function makeRadar(el, zoom, timeEl, slider, cloudBtn, statusEl) {
   const map = L.map(el, { zoomControl: false, attributionControl: true, minZoom: 5, maxZoom: 11 }).setView([LOC.lat, LOC.lon], zoom);
   map.attributionControl.setPrefix("");
   map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
@@ -659,11 +718,10 @@ function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
   const you = L.marker([LOC.lat, LOC.lon], { icon: L.divIcon({ className: "", html: '<div class="youdot"></div>', iconSize: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
   const cloudStyle = () => isDark() ? { rgb: [255, 255, 255], opacity: .5 } : { rgb: [70, 82, 104], opacity: .42 };
   const clouds = new CloudLayer({ ...cloudStyle(), src: cloudSrc(nowSec()) });
-  if (cloudOn) clouds.addTo(map);
   let layers = [], k = 0, back = null, cloudT;
   const syncCloud = () => {
     if (!cloudOn || !FRAMES) return;
-    const at = FRAMES.list[k]?.time ?? nowSec(), t = cloudTime(at, k >= layers.length - 1), src = cloudSrc(at);
+    const at = FRAMES.list[k]?.time ?? nowSec(), src = cloudSrc(at), t = cloudTime(at, k >= layers.length - 1, src);
     if (t === clouds.options.time && src === clouds.options.src) return;
     clouds.options.time = t; clouds.options.src = src;
     clearTimeout(cloudT); cloudT = setTimeout(() => clouds.redraw(), 250);   // don't refetch on every slider tick
@@ -672,13 +730,73 @@ function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
   setCloudBtn();
   if (cloudBtn) cloudBtn.addEventListener("click", () => {
     cloudOn = !cloudOn; store.set("wx.clouds", cloudOn); setCloudBtn();
-    if (cloudOn) { clouds.options.time = cloudTime(FRAMES?.list[k]?.time ?? nowSec(), k >= layers.length - 1); clouds.addTo(map); }
+    if (cloudOn) { const at = FRAMES?.list[k]?.time ?? nowSec(); clouds.options.src = cloudSrc(at); clouds.options.time = cloudTime(at, k >= layers.length - 1, clouds.options.src); clouds.addTo(map); }
     else map.removeLayer(clouds);
+    status();
   });
+
+  // Status pill: a spinner while the visible rain frame or the clouds are still
+  // fetching, then what actually came back, so an empty map reads as "nothing
+  // there" rather than "not loaded". Rain is measured from the loaded tiles'
+  // pixels (RainViewer serves CORS), cloud from the coverage each tile recorded.
+  const busy = new Set();
+  let statusT;   // declared up here: adding a layer fires "loading" synchronously
+  const track = (layer, name) => layer.on("loading", () => { busy.add(name); status(); }).on("load", () => { busy.delete(name); status(); });
+  track(clouds, "clouds");
+  if (cloudOn) clouds.addTo(map);   // after tracking, so the first load shows the spinner
+  const probe = document.createElement("canvas"); probe.width = probe.height = 32;
+  const pctx = probe.getContext("2d", { willReadFrequently: true });
+  // Only the part of each tile that is actually on screen counts: tiles reach well
+  // past the edges (more so as the z7 radar is upscaled), and rain off-screen
+  // shouldn't make the pill say "in view".
+  const rainInView = layer => {
+    const view = map.getPixelBounds();
+    let any = false, seen = 0;
+    for (const t of Object.values(layer._tiles || {})) {
+      if (!t.current || !t.loaded || !t.el.complete || !t.el.naturalWidth) continue;
+      const tb = layer._tileCoordsToBounds(t.coords);
+      const tl = map.project(tb.getNorthWest()), br = map.project(tb.getSouthEast());
+      const x0 = Math.max(tl.x, view.min.x), x1 = Math.min(br.x, view.max.x);
+      const y0 = Math.max(tl.y, view.min.y), y1 = Math.min(br.y, view.max.y);
+      if (x1 <= x0 || y1 <= y0) continue;
+      const W = t.el.naturalWidth, fx = W / (br.x - tl.x), fy = W / (br.y - tl.y);
+      seen++;
+      try {
+        pctx.clearRect(0, 0, 32, 32);
+        pctx.drawImage(t.el, (x0 - tl.x) * fx, (y0 - tl.y) * fy, (x1 - x0) * fx, (y1 - y0) * fy, 0, 0, 32, 32);
+        const d = pctx.getImageData(0, 0, 32, 32).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 40) { any = true; break; }
+      } catch { return null; }
+      if (any) break;
+    }
+    return seen ? any : null;
+  };
+  map.on("moveend zoomend", () => status());
+  const cloudInView = () => {
+    const tiles = Object.values(clouds._tiles || {}).filter(t => t.current && t.loaded && t.el._cover != null);
+    return tiles.length ? tiles.reduce((s, t) => s + t.el._cover, 0) / tiles.length : null;
+  };
+  function status() {
+    if (!statusEl) return;
+    clearTimeout(statusT);
+    statusT = setTimeout(() => {
+      const cur = layers[k], loadingRain = cur && busy.has(cur._leaflet_id), loadingCloud = cloudOn && busy.has("clouds");
+      if (loadingRain || loadingCloud) {
+        statusEl.innerHTML = `<span class="spin"></span>Loading ${loadingRain && loadingCloud ? "radar & clouds" : loadingRain ? "radar" : "clouds"}…`;
+        statusEl.hidden = false; return;
+      }
+      const rain = cur ? rainInView(cur) : null, cov = cloudOn ? cloudInView() : null;
+      const parts = [];
+      if (rain != null) parts.push(rain ? `${ms("rainy", "ic-rain")}Rain in view` : "No rain in view");
+      if (cov != null) parts.push(cov < .03 ? "clear sky" : `cloud ${Math.round(cov * 100)}%${clouds.options.src === "mask" ? " (night, ~4 km)" : ""}`);
+      statusEl.innerHTML = parts.join(" · ");
+      statusEl.hidden = !parts.length;
+    }, 120);
+  }
   const show = i => {
     k = i;
     layers.forEach((l, j) => l.setOpacity(j === i ? .8 : 0));
-    syncCloud();
+    syncCloud(); status();
     slider.value = i;
     slider.style.setProperty("--p", `${layers.length > 1 ? (i / (layers.length - 1)) * 100 : 100}%`);
     const f = FRAMES.list[i]; if (!f) return;
@@ -696,8 +814,11 @@ function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
       if (!FRAMES) return;
       const atNow = k >= layers.length - 1, keep = !atNow && FRAMES.list.findIndex(f => f.time === FRAMES.list[k]?.time);
       layers.forEach(l => map.removeLayer(l));
-      layers = FRAMES.list.map(f => L.tileLayer(`${FRAMES.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
-        { opacity: 0, maxNativeZoom: 7, maxZoom: 11, zIndex: 5 }).addTo(map));
+      layers = FRAMES.list.map(f => {
+        const l = L.tileLayer(`${FRAMES.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
+          { opacity: 0, maxNativeZoom: 7, maxZoom: 11, zIndex: 5, crossOrigin: "anonymous" }).addTo(map);
+        return track(l, l._leaflet_id);
+      });
       slider.max = Math.max(0, layers.length - 1);
       show(atNow || keep == null || keep < 0 ? layers.length - 1 : keep);
     },
@@ -708,12 +829,12 @@ function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
     // New radar frames every 10 min: also pull the newest cloud image when showing now.
     refreshClouds() { if (cloudOn && k >= layers.length - 1) clouds.redraw(); },
     recentre() { you.setLatLng([LOC.lat, LOC.lon]); map.setView([LOC.lat, LOC.lon], map.getZoom()); },
-    destroy() { clearTimeout(back); clearTimeout(cloudT); map.remove(); },
+    destroy() { clearTimeout(back); clearTimeout(cloudT); clearTimeout(statusT); map.remove(); },
   };
 }
 $("radarBig").addEventListener("click", () => {
-  openModal(`<div id="bigmap"></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bCloud" class="cloudtog" title="Cloud cover">${ms("cloud")}</button><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
-  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"), $("bCloud"));
+  openModal(`<div id="bigmap"></div><div class="mapstatus" id="bStatus" hidden></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bCloud" class="cloudtog" title="Cloud cover">${ms("cloud")}</button><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
+  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"), $("bCloud"), $("bStatus"));
   bigRadar.setFrames();
   $("bZoom").onclick = () => bigRadar.map.setView([54.5, -3], 6);
   modalCleanup = () => { bigRadar.destroy(); bigRadar = null; };
@@ -896,7 +1017,7 @@ document.fonts?.ready.then(() => { if (WX) renderHourly(); });
 (function init() {
   applyTheme();
   setPlace(PLACE);
-  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"), $("radarCloud"));
+  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"), $("radarCloud"), $("radarStatus"));
   const cached = store.get("wx.cache", null);
   if (cached) { WX = cached; TZ = WX.timezone; renderWeather(); $("stamp").textContent = "Refreshing…"; }
   loadWeather(); loadAir(); loadFrames(); loadStations();

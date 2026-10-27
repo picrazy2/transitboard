@@ -64,6 +64,7 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
 
   <section class="card radar" id="radarCard">
     <div id="map"></div>
+    <div class="mapstatus" id="radarStatus" hidden></div>
     <div class="radarbar">
       <span class="rtime" id="radarTime">Radar</span>
       <input type="range" class="rslider" id="radarSlider" min="0" max="0" step="1" aria-label="Radar time">
@@ -73,7 +74,9 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
   </section>
 
   <section class="card days">
-    <div class="cardhead"><h2 id="daysTitle">Next 10 days</h2><button class="more" id="daysMore">10 days<span class="ms">chevron_right</span></button></div>
+    <div class="cardhead"><h2 id="daysTitle">Next 10 days</h2>
+      <div class="seg" id="daySeg"><button data-k="temp" class="on">Temp</button><button data-k="rain">Rain</button></div>
+      <button class="more" id="daysMore">10 days<span class="ms">chevron_right</span></button></div>
     <div class="daylist" id="days"></div>
   </section>
 

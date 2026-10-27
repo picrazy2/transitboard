@@ -44,7 +44,12 @@
   --hi: var(--secondary);
   --lo: var(--accent);
   --rain: var(--accent);
-  --sun: var(--secondary);
+  --sun: #f5b800;          /* iOS-ish yellow, deepened to read on white */
+  --moon: #e9c95a;         /* clear-night moon: warm moonlight, not indigo */
+  --cloud: #a3a9b4;
+  --cloud-dark: #7c8391;
+  --flake: var(--cat-6);
+  --bolt: #ffcc00;
   --night: var(--trip);
   --night-band: rgba(94, 92, 230, 0.06);
   --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
@@ -82,6 +87,11 @@
   --lo: #409cff;
   --rain: #409cff;
   --night-band: rgba(125, 122, 255, 0.08);
+  --sun: #ffd60a;
+  --moon: #f6e7a6;
+  --cloud: #c7cbd3;
+  --cloud-dark: #8b929e;
+  --bolt: #ffd60a;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-2: 0 4px 16px -4px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-3: 0 12px 40px -8px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -191,7 +201,6 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .chart svg, .bigchart svg { display: block; width: 100%; height: 100% }
 .chart text, .bigchart text { fill: var(--ink-muted); font-size: 12px; font-family: var(--rounded); font-variant-numeric: tabular-nums }
 .chart .tl, .bigchart .tl { fill: var(--ink); font-size: 13px; font-weight: 700 }
-.chart .ms, .bigchart .ms { font-family: "Material Symbols Rounded"; font-size: 20px; font-variation-settings: "FILL" 1 }
 .hourdetail { font-size: 14px; color: var(--ink-muted); min-height: 20px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .hourdetail b { color: var(--ink); font-weight: 600 }
 .hourdetail .ms { font-size: 17px }
@@ -225,6 +234,17 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .radarbar .cloudtog { color: var(--ink-faint) }
 .radarbar .cloudtog.on { color: var(--accent); background: var(--accent-soft) }
 .leaflet-container { font: inherit; background: var(--surface-2) }
+/* Status pill over the map: spinner while loading, then what's actually in view. */
+.mapstatus {
+  position: absolute; top: 10px; left: 10px; z-index: 500; display: flex; align-items: center; gap: 7px;
+  padding: 5px 12px; border-radius: var(--r-full); font-size: 13px; font-weight: 500; color: var(--ink);
+  background: var(--glass-thick); backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
+  border: 1px solid var(--glass-rim); box-shadow: inset 0 1px 1px var(--glass-highlight), var(--shadow-1);
+}
+.mapstatus[hidden] { display: none }
+.mapstatus .ms { font-size: 16px; margin-right: 3px }
+.spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
 .leaflet-control-attribution { font-size: 9px; background: transparent !important; color: var(--ink-faint) }
 .leaflet-control-attribution a { color: var(--ink-faint) }
 .leaflet-bottom.leaflet-right { bottom: 54px }
@@ -241,6 +261,16 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .day .dn { font-weight: 600 }
 .day.today .dn { color: var(--accent) }
 .day .de { font-size: 26px; text-align: center; line-height: 1 }
+.wxi { width: 1.15em; height: 1.15em; display: inline-block; vertical-align: -0.22em; overflow: visible }
+.nowicon .wxi { width: 1em; height: 1em; vertical-align: middle }
+.day .de .wxi { width: 30px; height: 30px; vertical-align: middle }
+.bar.wet { background: var(--surface-2) }
+.bar.wet i { background: var(--rain) }
+.day.rain .lo { color: var(--ink); font-weight: 600 }
+.day.rain .hi { color: var(--ink-muted); font-weight: 500 }
+.day small { font-size: 11px; color: var(--ink-muted); font-weight: 500; margin-left: 1px }
+.days .cardhead { gap: 8px }
+.days .cardhead h2 { flex: 1 }
 .more { display: inline-flex; align-items: center; gap: 0; font-size: 15px; color: var(--accent); font-weight: 500 }
 .more .ms { font-size: 20px; vertical-align: 0 }
 .more[hidden] { display: none }
