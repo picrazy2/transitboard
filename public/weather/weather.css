@@ -142,7 +142,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px }
 h2 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 600; color: var(--ink) }
 h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
-.stamp { font-size: 13px; color: var(--ink-faint) }
+.stamp { font-size: 13px; color: var(--ink-faint); margin-left: auto; white-space: nowrap }
+#rainBlock[hidden] { display: none }
 .empty { color: var(--ink-muted); font-size: 15px; padding: 12px 2px }
 
 /* ---------- header ---------- */
@@ -236,7 +237,13 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .day:last-child { border-bottom: 0 }
 .day .dn { font-weight: 600 }
 .day.today .dn { color: var(--accent) }
-.day .de { font-size: 24px; text-align: center }
+.day .de { font-size: 26px; text-align: center; line-height: 1 }
+.more { display: inline-flex; align-items: center; gap: 0; font-size: 15px; color: var(--accent); font-weight: 500 }
+.more .ms { font-size: 20px; vertical-align: 0 }
+.more[hidden] { display: none }
+.sheetdays { margin: 0; background: var(--surface-1); border-radius: var(--r-sm); padding: 0 6px }
+.sheetdays .day { flex: none; height: 52px; font-size: 17px; grid-template-columns: 70px 34px 46px 1fr 40px 40px }
+.sheetdays .day .de { font-size: 30px }
 .day .dp { font-size: 13px; color: var(--rain); text-align: right; font-family: var(--rounded); font-variant-numeric: tabular-nums; font-weight: 600 }
 .day .dp.z { color: transparent }
 .day .lo, .day .hi { font-family: var(--rounded); font-variant-numeric: tabular-nums; text-align: right }
@@ -268,9 +275,13 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .dirtog button { flex: 1; min-width: 0; padding: 6px 10px; border-radius: var(--r-full); font-size: 13px; font-weight: 500; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all .2s var(--ease-out) }
 .dirtog button.on { background: var(--surface-1); color: var(--ink); box-shadow: var(--shadow-1) }
 [data-theme="dark"] .dirtog button.on { background: var(--surface-3) }
-.deplist { flex: 1; min-height: 0; display: flex; flex-direction: column }
+.deplist { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; touch-action: pan-y; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent) }
+.deplist::-webkit-scrollbar { display: none }
+.dep { flex: none }
 .dep { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 0.5px solid var(--separator) }
-.dep:last-child { border-bottom: 0 }
+.dep:last-child { border-bottom: 0; margin-bottom: 14px }
 .dep .to { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .dep .meta { font-size: 13px; color: var(--ink-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden }
 .pill { font-size: 11px; font-weight: 600; color: #fff; padding: 1px 8px; border-radius: var(--r-full); background: var(--c) }
@@ -361,3 +372,24 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   .clock { font-size: 72px }
   .hourly { height: 380px } .radar { height: 340px } .days { height: 460px } .tiles { height: 330px } .deps { min-height: 320px }
 }
+
+/* ---------- sun & moon sheet ---------- */
+.sunarc { height: 190px; background: var(--surface-1); border-radius: var(--r-sm); margin-bottom: 12px }
+.sunarc svg { display: block; width: 100%; height: 100% }
+.sunarc text { font-size: 13px; font-family: var(--rounded); font-variant-numeric: tabular-nums }
+.daylight { background: var(--surface-1); border-radius: var(--r-sm); padding: 4px 14px }
+.dlrow { display: grid; grid-template-columns: 56px 66px 1fr 66px 84px; align-items: center; gap: 10px; height: 38px; border-bottom: 0.5px solid var(--separator); font-size: 15px }
+.dlrow:last-child { border-bottom: 0 }
+.dlrow .dn { font-weight: 600 }
+.dlrow.today .dn { color: var(--accent) }
+.dlrow .rt, .dlrow .st, .dlrow .len { font-family: var(--rounded); font-variant-numeric: tabular-nums; color: var(--ink-muted); white-space: nowrap }
+.dlrow .rt { text-align: right }
+.dlrow .len { color: var(--ink); font-weight: 600; text-align: right }
+.dlrow .len small { color: var(--ink-muted); font-weight: 500; font-size: 12px; margin-left: 5px }
+.track { position: relative; height: 10px; border-radius: var(--r-full); background: color-mix(in srgb, var(--night) 22%, var(--surface-2)) }
+.track i { position: absolute; top: 0; bottom: 0; border-radius: var(--r-full); background: linear-gradient(90deg, color-mix(in srgb, var(--sun) 55%, var(--surface-1)), var(--sun) 50%, color-mix(in srgb, var(--sun) 55%, var(--surface-1))) }
+.track .nowmark { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink) }
+.moonrow { display: flex; align-items: center; gap: 16px; margin-top: 12px; background: var(--surface-1); border-radius: var(--r-sm); padding: 12px 16px }
+.moonrow div { display: flex; flex-direction: column; gap: 2px }
+.moonrow b { font-size: 19px; font-weight: 600 }
+.moonrow span { font-size: 14px; color: var(--ink-muted) }

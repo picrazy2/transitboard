@@ -226,6 +226,14 @@ function renderSummary() {
 function renderNowcast() {
   const m = WX.minutely_15, n = nowSec();
   const slots = m.time.map((t, i) => ({ t, mm: m.precipitation[i] ?? 0 })).filter(s => s.t + 900 > n).slice(0, 12);
+  // Only worth the space when rain is actually due in the next 3 hours; otherwise
+  // the rain outlook rides along as a note on the 24-hour heading.
+  const wet = slots.some(s => s.mm >= 0.05);
+  const changed = $("rainBlock").hidden === wet;
+  $("rainBlock").hidden = !wet;
+  if (changed) requestAnimationFrame(renderHourly);   // the chart just gained or lost height
+  $("dryNote").textContent = wet ? "" : rainStory().text;
+  if (!wet) { $("nowcast").innerHTML = ""; return; }
   const max = Math.max(0.5, ...slots.map(s => s.mm));
   $("nowcast").innerHTML = slots.map((s, i) =>
     `<div class="nc" title="${hm(s.t)} · ${s.mm.toFixed(1)} mm"><i class="${s.mm < 0.05 ? "dry" : ""}" style="height:${Math.max(4, (s.mm / max) * 46)}px"></i>` +
@@ -335,11 +343,14 @@ for (const b of $("hourSeg").querySelectorAll("button")) b.addEventListener("cli
 });
 
 // ---------- days ----------
-function renderDays() {
-  const ti = todayIdx(), idx = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, 10);
+// The iPad grid has room for 7 comfortable rows; the "10 days" button opens the rest.
+// Phone layouts scroll, so they list all 10.
+const fewDays = () => matchMedia("(min-height: 641px) and (min-width: 701px)").matches;
+function daysHTML(n) {
+  const ti = todayIdx(), idx = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, n);
   const lo = Math.min(...idx.map(i => D("temperature_2m_min", i))), hi = Math.max(...idx.map(i => D("temperature_2m_max", i)));
   const pct = v => ((v - lo) / (hi - lo || 1)) * 100;
-  $("days").innerHTML = idx.map(i => {
+  return idx.map(i => {
     const mn = D("temperature_2m_min", i), mx = D("temperature_2m_max", i), p = D("precipitation_probability_max", i) ?? 0;
     const now = i === ti ? `<b style="left:${pct(WX.current.temperature_2m)}%"></b>` : "";
     return `<button class="day${i === ti ? " today" : ""}" data-i="${i}">
@@ -350,7 +361,18 @@ function renderDays() {
       <span class="lo">${deg(mn)}</span><span class="hi">${deg(mx)}</span></button>`;
   }).join("");
 }
+function renderDays() {
+  const n = fewDays() ? 7 : 10;
+  $("daysTitle").textContent = `Next ${n} days`;
+  $("daysMore").hidden = n === 10;
+  $("days").innerHTML = daysHTML(n);
+}
 $("days").addEventListener("click", e => { const b = e.target.closest(".day"); if (b) dayModal(+b.dataset.i); });
+$("daysMore").addEventListener("click", () => {
+  if (!WX) return;
+  openModal(`<h3>${ms("calendar_month")}Next 10 days</h3><p class="lede">Tap a day for hour by hour.</p><div class="daylist sheetdays" id="allDays">${daysHTML(10)}</div>`);
+  $("allDays").addEventListener("click", e => { const b = e.target.closest(".day"); if (b) dayModal(+b.dataset.i); });
+});
 
 // ---------- detail tiles ----------
 function moon(date = new Date()) {
@@ -358,7 +380,8 @@ function moon(date = new Date()) {
   const age = (((date / 864e5 - ref) % synodic) + synodic) % synodic, f = age / synodic;
   const names = ["New moon","Waxing crescent","First quarter","Waxing gibbous","Full moon","Waning gibbous","Last quarter","Waning crescent"];
   const toFull = ((synodic / 2 - age) + synodic) % synodic;
-  return { f, name: names[Math.round(f * 8) % 8],
+  const toNew = synodic - age;
+  return { f, name: names[Math.round(f * 8) % 8], next: new Date(+date + toNew * 864e5),
     lit: Math.round((1 - Math.cos(2 * Math.PI * f)) / 2 * 100), full: new Date(+date + toFull * 864e5) };
 }
 // The lit part of the disc: an outer half-circle on the sunward side closed by
@@ -448,6 +471,48 @@ function dayModal(i) {
   draw();
 }
 
+// ---------- sun ----------
+function sunLede(ti) {
+  const n = nowSec(), rise = D("sunrise", ti), set = D("sunset", ti);
+  const dl = D("daylight_duration", ti), d = Math.round((dl - (D("daylight_duration", ti - 1) ?? dl)) / 60);
+  const left = n < rise ? `Sunrise in ${dur(rise - n)}` : n < set ? `${dur(set - n)} of daylight left` : `Sunrise tomorrow ${hm(D("sunrise", ti + 1))}`;
+  return `${left} · ${dur(dl)} of daylight today, ${d >= 0 ? d + " min longer" : -d + " min shorter"} than yesterday`;
+}
+// Today's sun path: a cosine over the 24 h, shifted so it crosses the horizon at
+// sunrise and sunset; filled above the horizon, the sun dot at the current time.
+function drawSunArc(el, ti) {
+  const W = el.clientWidth, Hh = el.clientHeight; if (!W || !Hh) return;
+  const t0 = D("time", ti), day = 86400, rise = D("sunrise", ti), set = D("sunset", ti), noon = (rise + set) / 2;
+  const base = Math.cos(Math.PI * (set - noon) / (day / 2));
+  const elev = t => Math.cos(Math.PI * (t - noon) / (day / 2)) - base;
+  const top = 34, h = Hh - top - 30;   // room for the noon label above, rise/set labels below
+  const peak = 1 - base, trough = -1 - base, hz = top + h * peak / (peak - trough);
+  const X = t => 10 + ((t - t0) / day) * (W - 20), Y = t => hz - elev(t) / (peak - trough) * h;
+  const pts = []; for (let t = t0; t <= t0 + day; t += 600) pts.push(`${X(t).toFixed(1)},${Y(t).toFixed(1)}`);
+  const lit = []; for (let t = rise; t <= set; t += 300) lit.push(`${X(t).toFixed(1)},${Y(t).toFixed(1)}`);
+  const sun = V("--sun"), ink = V("--ink-muted"), faint = V("--ink-faint"), sep = V("--separator"), n = nowSec();
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
+  s += `<polygon points="${X(rise)},${hz} ${lit.join(" ")} ${X(set)},${hz}" fill="${sun}" opacity=".18"/>`;
+  s += `<polyline points="${pts.join(" ")}" fill="none" stroke="${faint}" stroke-width="2" stroke-dasharray="3 4"/>`;
+  s += `<polyline points="${lit.join(" ")}" fill="none" stroke="${sun}" stroke-width="3" stroke-linecap="round"/>`;
+  s += `<line x1="10" x2="${W - 10}" y1="${hz}" y2="${hz}" stroke="${sep}" stroke-width="1.5"/>`;
+  for (const [t, lab, anchor] of [[rise, `Sunrise ${hm(rise)}`, "middle"], [noon, `Solar noon ${hm(noon)}`, "middle"], [set, `Sunset ${hm(set)}`, "middle"]])
+    s += `<text x="${X(t)}" y="${t === noon ? Y(t) - 12 : hz + 20}" text-anchor="${anchor}" fill="${ink}">${lab}</text>`;
+  if (n >= t0 && n <= t0 + day) s += `<circle cx="${X(n)}" cy="${Y(n)}" r="9" fill="${n > rise && n < set ? sun : V("--night")}" stroke="${V("--surface-1")}" stroke-width="3"/>`;
+  el.innerHTML = s + "</svg>";
+}
+// One row per day: a 24-hour track with the daylight span drawn on it.
+function daylightRow(i, ti) {
+  const t0 = D("time", i), rise = D("sunrise", i), set = D("sunset", i), pc = t => ((t - t0) / 86400 * 100).toFixed(2);
+  const dl = D("daylight_duration", i), d = Math.round((dl - (D("daylight_duration", i - 1) ?? dl)) / 60);
+  const now = i === ti ? `<b class="nowmark" style="left:${pc(nowSec())}%"></b>` : "";
+  return `<div class="dlrow${i === ti ? " today" : ""}"><span class="dn">${i === ti ? "Today" : wd(t0 + 43200)}</span>
+    <span class="rt">${hm(rise)}</span>
+    <span class="track"><i style="left:${pc(rise)}%;right:${100 - pc(set)}%"></i>${now}</span>
+    <span class="st">${hm(set)}</span>
+    <span class="len">${dur(dl)}<small>${d >= 0 ? "+" : "−"}${Math.abs(d)}m</small></span></div>`;
+}
+
 // One sheet per tile/chip: a 48-hour chart of that variable plus a sentence.
 function metricModal(k) {
   const from = hourIdx(), n = 48, sl = key => WX.hourly[key].slice(from, from + n), t = sl("time");
@@ -480,10 +545,14 @@ function metricModal(k) {
     [{ v: sl("wind_gusts_10m"), color: "--ink-faint", w: 2, dash: "4 4", fill: true }, L("wind_speed_10m", "--positive", v => r0(v), { fill: false })],
     { arrows: sl("wind_direction_10m") });
   if (k === "sun" || k === "moon") {
-    const days = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, 12), m = moon();
+    const days = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, 10), m = moon();
     openModal(`<h3>${ms("wb_twilight", "ic-sun")}Sun & moon</h3>
-      <p class="lede" style="display:flex;align-items:center;gap:8px">${moonSvg(m.f, 22)} ${m.name}, ${m.lit}% lit · next full moon ${m.full.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</p>
-      <div class="kv">${days.map(i => `<div><span>${i === ti ? "Today" : wd(D("time", i) + 43200)}</span><b>${hm(D("sunrise", i))}</b> – <b>${hm(D("sunset", i))}</b><span>${dur(D("daylight_duration", i))} daylight · ${dur(D("sunshine_duration", i) ?? 0)} sun</span></div>`).join("")}</div>`);
+      <p class="lede">${sunLede(ti)}</p>
+      <div class="sunarc" id="sunArc"></div>
+      <div class="daylight">${days.map(i => daylightRow(i, ti)).join("")}</div>
+      <div class="moonrow">${moonSvg(m.f, 64)}<div><b>${m.name}</b><span>${m.lit}% lit</span>
+        <span>Full moon ${m.full.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} · new moon ${m.next.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</span></div></div>`);
+    drawSunArc($("sunArc"), ti);
     return;
   }
   if (k === "aqi" || k === "pollen") {
@@ -656,7 +725,8 @@ function renderDeps() {
     return `${dir}${top ? " · " + top : ""}`;
   };
   $("dirTog").innerHTML = keys.length > 1 ? keys.map(k => `<button data-d="${esc(k)}" class="${k === depDir ? "on" : ""}">${esc(name(k))}</button>`).join("") : "";
-  const rows = depDir ? groups.get(depDir).slice(0, 6) : [];
+  const rows = depDir ? groups.get(depDir).slice(0, 20) : [];
+  const keep = $("deps").scrollTop;
   $("deps").innerHTML = rows.length ? rows.map((r, i) => {
     const late = !r.cancelled && r.delayMin >= 1;
     const time = r.cancelled ? `<s>${hm(r.sched / 1000)}</s> <span class="cancel-t">Cancelled</span>`
@@ -667,6 +737,7 @@ function renderDeps() {
         <div class="meta"><span class="pill" style="--c:${LINE_COLOUR[r.lineId] || "var(--ink-muted)"}">${esc(r.line)}</span>${r.plat ? esc(r.plat) + " · " : ""}${time}</div></span>
       ${r.cancelled ? `<span class="eta cx">${ms("block")}</span>` : `<span class="eta" data-exp="${r.exp}"></span>`}</div>`;
   }).join("") : `<div class="empty">${STATION ? "No live departures from TfL for this station right now." : ""}</div>`;
+  $("deps").scrollTop = keep;
   tickDeps();
 }
 function tickDeps() {
@@ -725,7 +796,7 @@ setInterval(() => {
   const d = new Date(), t = new Date(d); t.setHours(3, 30, 0, 0); if (t <= d) t.setDate(t.getDate() + 1);
   setTimeout(() => location.reload(), t - d);
 })();
-let _rs; addEventListener("resize", () => { clearTimeout(_rs); _rs = setTimeout(() => { renderHourly(); radar?.map.invalidateSize(); }, 150); });
+let _rs; addEventListener("resize", () => { clearTimeout(_rs); _rs = setTimeout(() => { if (WX) { renderHourly(); renderDays(); } radar?.map.invalidateSize(); }, 150); });
 // The icon font arriving changes nothing in layout, but chart glyphs drawn before it
 // loads can render as their ligature names in Safari; redraw once it's in.
 document.fonts?.ready.then(() => { if (WX) renderHourly(); });
