@@ -163,14 +163,14 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .hi { color: var(--hi) } .lo { color: var(--lo) }
 .summary {
   min-width: 0; align-self: stretch;
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr));
-  background: var(--surface-1); border-radius: var(--r-md); box-shadow: var(--shadow-2); overflow: hidden;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 10px;
 }
 /* Grouped surface with hairline separators, not boxes in boxes. */
-.chip { display: flex; align-items: center; gap: 10px; padding: 6px 14px; text-align: left; min-width: 0 }
-.chip:nth-child(odd) { border-right: 0.5px solid var(--separator) }
-.chip:nth-child(-n+2) { border-bottom: 0.5px solid var(--separator) }
-.chip:active, .tile:active, .day:active { background: var(--surface-2) }
+/* Each summary item and detail tile is its own card, on the same rhythm as the grid. */
+.chip, .tile { background: var(--surface-1); border-radius: var(--r-sm); box-shadow: var(--shadow-2); transition: background-color .6s var(--ease-out), transform .15s var(--ease-out) }
+.chip:active, .tile:active { transform: scale(.97) }
+.day:active { background: var(--surface-2) }
+.chip { display: flex; align-items: center; gap: 10px; padding: 6px 14px; text-align: left; min-width: 0; min-height: 0; overflow: hidden }
 .chip > .ms { font-size: 26px; flex: none }
 .chip .txt { display: flex; flex-direction: column; min-width: 0 }
 .chip .k { font-size: 13px; color: var(--ink-muted) }
@@ -221,6 +221,9 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .radarbar button { width: 34px; height: 34px; border-radius: var(--r-full); display: grid; place-items: center; color: var(--accent) }
 .radarbar button:active { background: var(--accent-soft) }
 .radarbar .ms { font-size: 22px }
+/* Cloud toggle: tinted fill when on, plain when off. */
+.radarbar .cloudtog { color: var(--ink-faint) }
+.radarbar .cloudtog.on { color: var(--accent); background: var(--accent-soft) }
 .leaflet-container { font: inherit; background: var(--surface-2) }
 .leaflet-control-attribution { font-size: 9px; background: transparent !important; color: var(--ink-faint) }
 .leaflet-control-attribution a { color: var(--ink-faint) }
@@ -253,16 +256,14 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .bar i { position: absolute; top: 0; bottom: 0; border-radius: var(--r-full); background: linear-gradient(90deg, var(--lo), var(--hi)) }
 .bar b { position: absolute; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--ink); border: 2px solid var(--surface-1) }
 
-/* ---------- tiles: one grouped surface, hairline grid ---------- */
-.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); padding: 0; gap: 0 }
-.tile { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 14px; text-align: left; min-height: 0; min-width: 0; overflow: hidden;
-  border-right: 0.5px solid var(--separator); border-bottom: 0.5px solid var(--separator) }
-.tile:nth-child(3n) { border-right: 0 }
-.tile:nth-child(n+7) { border-bottom: 0 }
+/* ---------- tiles: nine small cards ---------- */
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); padding: 0; gap: 10px; background: none; box-shadow: none; border-radius: 0; overflow: visible }
+.tile { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 12px; text-align: left; min-height: 0; min-width: 0; overflow: hidden;
+  }
 .tile .k { font-size: 13px; color: var(--ink-muted); white-space: nowrap; display: flex; align-items: center; gap: 5px }
 .tile .k .ms { font-size: 16px }
-.tile .v { font-family: var(--rounded); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; white-space: nowrap; display: flex; align-items: center; gap: 6px }
-.tile .v small { font-size: 14px; color: var(--ink-muted); font-weight: 600 }
+.tile .v { font-family: var(--rounded); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; white-space: nowrap; display: flex; align-items: center; gap: 6px }
+.tile .v small { font-size: 13px; color: var(--ink-muted); font-weight: 600 }
 .tile .s { font-size: 12px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .moonsvg { width: 24px; height: 24px; flex: none }
 
@@ -295,6 +296,7 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .late-t { color: var(--warning); font-weight: 600 }
 .cancel-t { color: var(--negative); font-weight: 600 }
 .dep.late .eta { color: var(--warning) }
+.dep.ontime .eta { color: var(--positive) }
 .dep.cancelled .to { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--ink-muted) }
 .dep .eta.cx { color: var(--negative) }
 .dep .eta.cx .ms { font-size: 26px }
@@ -340,8 +342,7 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   }
   .top { justify-content: space-between }
   .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto }
-  .chip { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 14px; border-bottom: 0 !important; border-right: 0.5px solid var(--separator) }
-  .chip:last-child { border-right: 0 }
+  .chip { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 14px }
   .clock { font-size: 96px }
   .nowtemp { font-size: 84px }
   .nowicon { font-size: 64px }
@@ -356,7 +357,7 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   .grid { height: auto; grid-template-columns: 1fr 1fr; grid-template-rows: auto;
     grid-template-areas: "top top" "sum sum" "hourly radar" "days deps" "tiles tiles" }
   .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto }
-  .chip { border-bottom: 0 !important; border-right: 0.5px solid var(--separator) } .chip:last-child { border-right: 0 }
+
   .clock { font-size: 72px } .nowtemp { font-size: 64px } .nowicon { font-size: 52px }
   .hourly, .radar { height: 360px } .days { height: 420px } .deps { height: 420px } .tiles { height: 300px }
 }
@@ -367,8 +368,6 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   .top { flex-direction: column; align-items: flex-start; gap: 8px }
   .now { border-left: 0; padding: 0 }
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)) }
-  .chip:nth-child(-n+2) { border-bottom: 0.5px solid var(--separator) !important }
-  .chip:nth-child(even) { border-right: 0 }
   .clock { font-size: 72px }
   .hourly { height: 380px } .radar { height: 340px } .days { height: 460px } .tiles { height: 330px } .deps { min-height: 320px }
 }

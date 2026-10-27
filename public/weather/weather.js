@@ -251,11 +251,14 @@ function svgChart(el, o) {
   const step = (W - padL - padR) / n, x = i => padL + (i + .5) * step;
   const every = px => Math.max(1, Math.ceil(px / step));
   const plotTop = top + 18, plotBot = Hh - bot - 4;
-  const shared = o.lines.filter(l => l.min == null).flatMap(l => l.v).filter(v => v != null);
+  // Lines with no fixed range share one scale; a line that fixes only its floor
+  // (visibility, AQI: min 0) still scales its ceiling to its own data.
+  const shared = o.lines.filter(l => l.min == null && l.max == null).flatMap(l => l.v).filter(v => v != null);
   const sMin = Math.min(...shared), sMax = Math.max(...shared);
   const pad = (sMax - sMin) * .15 || 1;
+  const own = l => { const v = l.v.filter(x => x != null); return Math.max(...v) * 1.12 || 1; };
   const yOf = l => {
-    const lo = l.min ?? sMin - pad, hi = l.max ?? sMax + pad;
+    const lo = l.min ?? sMin - pad, hi = l.max ?? (l.min != null ? own(l) : sMax + pad);
     return v => plotBot - ((v - lo) / (hi - lo || 1)) * (plotBot - plotTop);
   };
   const ink = V("--ink"), surface = V("--surface-1");
@@ -581,21 +584,101 @@ async function loadFrames() {
     const d = await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
     FRAMES = { host: d.host, list: [...(d.radar.past || []), ...(d.radar.nowcast || [])] };
     radar?.setFrames(); bigRadar?.setFrames();
+    radar?.refreshClouds(); bigRadar?.refreshClouds();
   } catch {}
 }
+// Clouds from EUMETSAT's public WMS (keyless, CORS-open), the new MTG satellite's
+// high-resolution channels, every 10 min: by day the 0.6 µm visible channel (~1 km
+// over the UK — individual cloud streets show), at night 10.5 µm infrared (~2 km).
+// Each tile is greyscale; brightness becomes opacity of a theme-coloured wash so
+// clear ground is transparent. Thresholds come from histograms over London:
+// visible ground sits ~50-65, cloud 95-145; infrared night ground ~45-65.
+const EUMETSAT = "https://view.eumetsat.int/geoserver/wms";
+const CLOUD_SRC = {
+  vis: { layer: "mtg_fd:vis06_hrfi", mPerPx: 1000, lo: 72, hi: 150 },
+  ir: { layer: "mtg_fd:ir105_hrfi", mPerPx: 2000, lo: 66, hi: 130 },
+};
+const CloudLayer = L.GridLayer.extend({
+  options: { tileSize: 256, opacity: 1, zIndex: 4, time: null, src: "vis", attribution: "EUMETSAT" },
+  createTile(coords, done) {
+    const tile = document.createElement("canvas"), size = this.getTileSize();
+    tile.width = size.x; tile.height = size.y;
+    const src = CLOUD_SRC[this.options.src];
+    const nw = this._map.unproject(coords.scaleBy(size), coords.z), se = this._map.unproject(coords.scaleBy(size).add(size), coords.z);
+    const a = L.CRS.EPSG3857.project(nw), b = L.CRS.EPSG3857.project(se);
+    // Fetch at about the sensor's resolution (no point asking for more) and let
+    // bilinear upscaling smooth it when zoomed in.
+    const px = Math.max(16, Math.min(size.x, Math.round((b.x - a.x) / src.mPerPx)));
+    const q = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetMap", layers: src.layer, styles: "",
+      format: "image/png", crs: "EPSG:3857", bbox: `${a.x},${b.y},${b.x},${a.y}`, width: px, height: px });
+    if (this.options.time) q.set("time", this.options.time);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const c = document.createElement("canvas"); c.width = c.height = px;
+        const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+        const d = cx.getImageData(0, 0, px, px), p = d.data;
+        const [r, g, bl] = this.options.rgb, span = src.hi - src.lo;
+        for (let i = 0; i < p.length; i += 4) {
+          const v = p[i], k = Math.max(0, Math.min(1, (v - src.lo) / span));
+          p[i] = r; p[i + 1] = g; p[i + 2] = bl; p[i + 3] = Math.round(255 * Math.sqrt(k));
+        }
+        cx.putImageData(d, 0, 0);
+        const tx = tile.getContext("2d");
+        tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = "high";
+        tx.drawImage(c, 0, 0, size.x, size.y);
+      } catch {}
+      done(null, tile);
+    };
+    img.onerror = () => done(null, tile);
+    img.src = `${EUMETSAT}?${q}`;
+    return tile;
+  },
+});
+// MTG images land ~20-30 min after their slot; "now" asks for the latest, an older
+// radar frame for the 10-min slot at or before it.
+const cloudTime = (sec, latest) => latest ? null : new Date(Math.floor(sec / 600) * 600e3).toISOString().replace(".000", "");
+// Visible only works with the sun well up; otherwise infrared.
+function cloudSrc(sec) {
+  if (!WX) return "ir";
+  const i = WX.daily.time.findIndex(t => dayKey(t + 43200) === dayKey(sec));
+  const rise = D("sunrise", i), set = D("sunset", i);
+  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "ir";
+}
+let cloudOn = store.get("wx.clouds", true);
+
 // Opens on the latest frame (now); the slider scrubs back through the last ~2 h.
 // Left alone for 2 minutes it springs back to now, so the kiosk never shows old rain.
-function makeRadar(el, zoom, timeEl, slider) {
+function makeRadar(el, zoom, timeEl, slider, cloudBtn) {
   const map = L.map(el, { zoomControl: false, attributionControl: true, minZoom: 5, maxZoom: 11 }).setView([LOC.lat, LOC.lon], zoom);
   map.attributionControl.setPrefix("");
   map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
-  const base = L.tileLayer(esriUrl(isDark(), "Base"), { maxNativeZoom: 16, attribution: "Esri · RainViewer" }).addTo(map);
+  const base = L.tileLayer(esriUrl(isDark(), "Base"), { maxNativeZoom: 16, attribution: "Esri · RainViewer · EUMETSAT" }).addTo(map);
   const ref = L.tileLayer(esriUrl(isDark(), "Reference"), { maxNativeZoom: 16, pane: "labels" }).addTo(map);
   const you = L.marker([LOC.lat, LOC.lon], { icon: L.divIcon({ className: "", html: '<div class="youdot"></div>', iconSize: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
-  let layers = [], k = 0, back = null;
+  const cloudStyle = () => isDark() ? { rgb: [255, 255, 255], opacity: .5 } : { rgb: [70, 82, 104], opacity: .42 };
+  const clouds = new CloudLayer({ ...cloudStyle(), src: cloudSrc(nowSec()) });
+  if (cloudOn) clouds.addTo(map);
+  let layers = [], k = 0, back = null, cloudT;
+  const syncCloud = () => {
+    if (!cloudOn || !FRAMES) return;
+    const at = FRAMES.list[k]?.time ?? nowSec(), t = cloudTime(at, k >= layers.length - 1), src = cloudSrc(at);
+    if (t === clouds.options.time && src === clouds.options.src) return;
+    clouds.options.time = t; clouds.options.src = src;
+    clearTimeout(cloudT); cloudT = setTimeout(() => clouds.redraw(), 250);   // don't refetch on every slider tick
+  };
+  const setCloudBtn = () => { if (cloudBtn) { cloudBtn.classList.toggle("on", cloudOn); cloudBtn.setAttribute("aria-pressed", cloudOn); } };
+  setCloudBtn();
+  if (cloudBtn) cloudBtn.addEventListener("click", () => {
+    cloudOn = !cloudOn; store.set("wx.clouds", cloudOn); setCloudBtn();
+    if (cloudOn) { clouds.options.time = cloudTime(FRAMES?.list[k]?.time ?? nowSec(), k >= layers.length - 1); clouds.addTo(map); }
+    else map.removeLayer(clouds);
+  });
   const show = i => {
     k = i;
     layers.forEach((l, j) => l.setOpacity(j === i ? .8 : 0));
+    syncCloud();
     slider.value = i;
     slider.style.setProperty("--p", `${layers.length > 1 ? (i / (layers.length - 1)) * 100 : 100}%`);
     const f = FRAMES.list[i]; if (!f) return;
@@ -618,14 +701,19 @@ function makeRadar(el, zoom, timeEl, slider) {
       slider.max = Math.max(0, layers.length - 1);
       show(atNow || keep == null || keep < 0 ? layers.length - 1 : keep);
     },
-    setTheme(dark) { base.setUrl(esriUrl(dark, "Base")); ref.setUrl(esriUrl(dark, "Reference")); },
+    setTheme(dark) {
+      base.setUrl(esriUrl(dark, "Base")); ref.setUrl(esriUrl(dark, "Reference"));
+      L.Util.setOptions(clouds, cloudStyle()); clouds.setOpacity(clouds.options.opacity); clouds.redraw();
+    },
+    // New radar frames every 10 min: also pull the newest cloud image when showing now.
+    refreshClouds() { if (cloudOn && k >= layers.length - 1) clouds.redraw(); },
     recentre() { you.setLatLng([LOC.lat, LOC.lon]); map.setView([LOC.lat, LOC.lon], map.getZoom()); },
-    destroy() { clearTimeout(back); map.remove(); },
+    destroy() { clearTimeout(back); clearTimeout(cloudT); map.remove(); },
   };
 }
 $("radarBig").addEventListener("click", () => {
-  openModal(`<div id="bigmap"></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
-  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"));
+  openModal(`<div id="bigmap"></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bCloud" class="cloudtog" title="Cloud cover">${ms("cloud")}</button><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
+  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"), $("bCloud"));
   bigRadar.setFrames();
   $("bZoom").onclick = () => bigRadar.map.setView([54.5, -3], 6);
   modalCleanup = () => { bigRadar.destroy(); bigRadar = null; };
@@ -732,7 +820,10 @@ function renderDeps() {
     const time = r.cancelled ? `<s>${hm(r.sched / 1000)}</s> <span class="cancel-t">Cancelled</span>`
       : late ? `<s>${hm(r.sched / 1000)}</s> <span class="late-t">${hm(r.exp / 1000)} · ${r.delayMin} min late</span>`
       : `${hm(r.exp / 1000)}${r.sched ? " · on time" : ""}`;
-    return `<div class="dep${i === 0 ? " first" : ""}${late ? " late" : ""}${r.cancelled ? " cancelled" : ""}">
+    // Minutes colour: green on time, orange late, red cancelled. Tube/DLR have no
+    // timetable, so their status is unknown and the number stays plain ink.
+    const ontime = r.sched && !late && !r.cancelled;
+    return `<div class="dep${i === 0 ? " first" : ""}${late ? " late" : ""}${ontime ? " ontime" : ""}${r.cancelled ? " cancelled" : ""}">
       <span><div class="to">${esc(r.dest)}</div>
         <div class="meta"><span class="pill" style="--c:${LINE_COLOUR[r.lineId] || "var(--ink-muted)"}">${esc(r.line)}</span>${r.plat ? esc(r.plat) + " · " : ""}${time}</div></span>
       ${r.cancelled ? `<span class="eta cx">${ms("block")}</span>` : `<span class="eta" data-exp="${r.exp}"></span>`}</div>`;
@@ -805,7 +896,7 @@ document.fonts?.ready.then(() => { if (WX) renderHourly(); });
 (function init() {
   applyTheme();
   setPlace(PLACE);
-  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"));
+  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"), $("radarCloud"));
   const cached = store.get("wx.cache", null);
   if (cached) { WX = cached; TZ = WX.timezone; renderWeather(); $("stamp").textContent = "Refreshing…"; }
   loadWeather(); loadAir(); loadFrames(); loadStations();
