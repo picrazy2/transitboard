@@ -909,12 +909,16 @@ $("station").addEventListener("click", () => {
 // Rebuild it with tools/birthdays-encrypt.mjs.
 const GROUPS = { family: [0, "Family"], groom: [1, "Groom's party"], bride: [2, "Bride's party"], guest: [3, "Guest"] };
 let BDAYS = null, bdLocked = false;
-(function takeKeyFromHash() {
+function takeKeyFromHash() {
   const m = /[#&]bkey=([^&]+)/.exec(location.hash);
-  if (!m) return;
+  if (!m) return false;
   store.set("wx.bkey", decodeURIComponent(m[1]));
   history.replaceState(null, "", location.pathname + location.search);   // don't leave it in the address bar
-})();
+  return true;
+}
+takeKeyFromHash();
+// Opening the setup link on an already-open board only changes the hash.
+addEventListener("hashchange", () => { if (takeKeyFromHash()) loadBirthdays(); });
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 async function loadBirthdays() {
   const pass = store.get("wx.bkey", null);
