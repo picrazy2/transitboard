@@ -229,18 +229,20 @@ function rainStory() {
 function renderSummary() {
   const c = WX.current, ti = todayIdx(), n = nowSec();
   const rise = D("sunrise", ti), set = D("sunset", ti), riseT = D("sunrise", ti + 1);
-  const sun = n < rise ? ["Sunrise", rise] : n < set ? ["Sunset", set] : ["Sunrise", riseT];
-  const dl = D("daylight_duration", ti), dlY = D("daylight_duration", ti - 1);
-  const dlDelta = dlY ? Math.round((dl - dlY) / 60) : null;
+  // The next sun event, and under it the one after (after sunset: sunrise, then
+  // tomorrow's sunset). Day length and its change live in the sun sheet.
+  const setT = D("sunset", ti + 1);
+  const [sun, then] = n < rise ? [["Sunrise", rise], ["Sunset", set]]
+    : n < set ? [["Sunset", set], ["Sunrise", riseT]] : [["Sunrise", riseT], ["Sunset", setT]];
   const aqi = AQ?.current?.european_aqi, aq = aqi != null ? level(aqi, AQI) : null;
   const m = moon();
   const cards = [
-    ["sun", ms("wb_twilight", "ic-sun"), sun[0], hm(sun[1]), `in ${dur(sun[1] - n)} · day ${dur(dl)}${dlDelta != null ? ` ${dlDelta >= 0 ? "+" : "−"}${Math.abs(dlDelta)}m` : ""}`],
-    ["wind", ms("air", "ic-cloud"), "Wind", `${r0(c.wind_speed_10m)} km/h ${compass(c.wind_direction_10m)}`, `Gusts ${r0(c.wind_gusts_10m)} · ${level(c.wind_speed_10m, BEAUFORT)[1].toLowerCase()}`],
+    ["sun", ms("wb_twilight", "ic-sun"), sun[0], hm(sun[1]), `${then[0]} ${hm(then[1])}`],
+    ["wind", ms("air", "ic-cloud"), "Wind", `${r0(c.wind_speed_10m)} km/h ${compass(c.wind_direction_10m)}`, `Gusts ${r0(c.wind_gusts_10m)} km/h`],
     ["aqi", `<span class="ms" style="color:${aq ? aq[2] : "var(--ink-muted)"}">eco</span>`, "Air quality", aq ? `<span style="color:${aq[2]}">${aq[1]}</span>` : "–", aq ? `EAQI ${r0(aqi)} · PM2.5 ${r0(AQ.current.pm2_5)}` : "Loading…"],
     ["humidity", ms("humidity_percentage", "ic-rain"), "Humidity", `${r0(c.relative_humidity_2m)}%`, `Dew point ${deg(c.dew_point_2m)}`],
-    ["cloud", ms("cloud", "ic-cloud"), "Cloud cover", `${r0(c.cloud_cover)}%`, `${dur(D("sunshine_duration", ti) ?? 0)} sunshine today`],
-    ["moon", moonSvg(m.f, 26), "Moon", `${m.lit}% lit`, `${m.name} · in ${zodiac(moonLongitude(new Date())).name}`],
+    ["cloud", ms("cloud", "ic-cloud"), "Cloud cover", `${r0(c.cloud_cover)}%`, `${dur(D("sunshine_duration", ti) ?? 0)} sun today`],
+    ["moon", moonSvg(m.f, 26), "Moon", `${m.lit}% lit`, m.name],
   ];
   $("summary").innerHTML = cards.map(([k, ic, a, v, s]) =>
     `<button class="chip" data-m="${k}"><span class="txt"><span class="k">${ic}${a}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></span></button>`).join("");
@@ -287,6 +289,18 @@ function svgChart(el, o) {
   };
   const ink = V("--ink"), surface = V("--surface-1");
   let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
+  // Threshold bands (e.g. AQI levels) in the first line's scale: a tinted strip per
+  // level, its name at the left, clipped to the plot.
+  if (o.bands && o.lines[0]) {
+    const y = yOf(o.lines[0]), lo = o.lines[0].min ?? 0, hi = o.lines[0].max ?? Infinity;
+    for (const b of o.bands) {
+      if (b.from >= hi) continue;
+      const y1 = y(Math.min(b.to, hi)), y0 = y(Math.max(b.from, lo)), col = b.color;
+      s += `<rect x="${padL}" y="${y1}" width="${W - padL - padR}" height="${Math.max(0, y0 - y1)}" style="fill:${col};opacity:.14"/>`;
+      s += `<line x1="${padL}" x2="${W - padR}" y1="${y1}" y2="${y1}" style="stroke:${col};opacity:.5" stroke-dasharray="3 4"/>`;
+      if (y0 - y1 > 14) s += `<text x="${padL + 6}" y="${y0 - 5}" style="fill:${col}" font-weight="600">${b.label} ${b.from}–${b.to}</text>`;
+    }
+  }
   if (o.night) { const band = V("--night-band"); o.night.forEach((d, i) => { if (!d) s += `<rect x="${x(i) - step / 2}" y="${top}" width="${step + .5}" height="${Math.max(0, plotBot - top)}" fill="${band}"/>`; }); }
   if (o.bars) {
     const col = V(o.bars.color);
@@ -775,7 +789,11 @@ function metricModal(k) {
       <div class="kv">${[["PM2.5", a.pm2_5], ["PM10", a.pm10], ["NO₂", a.nitrogen_dioxide], ["Ozone", a.ozone], ["SO₂", a.sulphur_dioxide]]
         .map(([k2, v]) => `<div><span>${k2} · µg/m³</span><b>${r0(v)}</b></div>`).join("")}
         ${pol.map(([k2, v]) => `<div><span>${k2.replace("_pollen", "")} pollen</span><b style="color:${level(v ?? 0, POLLEN)[2]}">${v == null ? "–" : level(v, POLLEN)[1]}</b></div>`).join("")}</div>`);
-    svgChart($("mChart"), { t: at.slice(ai, ai + 48), sel: 0, nowFirst: true, lines: [{ v: AQ.hourly.european_aqi.slice(ai, ai + 48), color: "--positive", labels: true, fill: true, fmt: v => r0(v), min: 0 }] });
+    const aqv = AQ.hourly.european_aqi.slice(ai, ai + 48), top = Math.min(120, Math.max(60, Math.ceil(Math.max(...aqv.filter(v => v != null)) / 20 + 1) * 20));
+    let lo = 0;
+    const bands = AQI.map(([to, label, color]) => { const b = { from: lo, to: Math.min(to, 140), label, color }; lo = to; return b; });
+    svgChart($("mChart"), { t: at.slice(ai, ai + 48), sel: 0, nowFirst: true, bands,
+      lines: [{ v: aqv, color: "--ink", w: 2.5, labels: true, fmt: v => r0(v), min: 0, max: top }] });
   }
 }
 
