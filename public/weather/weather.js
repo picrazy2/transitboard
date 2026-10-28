@@ -694,31 +694,40 @@ function sunSeries(t0, n) {
 }
 function drawSunTimes(el, data, sel, onPick) {
   const W = el.clientWidth, Hh = el.clientHeight; if (W < 60 || Hh < 60) return;
-  const padL = 58, padR = 58, top = 16, bot = 26, n = data.length;
+  const padL = 58, padR = 16, top = 16, bot = 26, gap = 16, n = data.length;
   const X = i => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
-  // Both axes tick every half hour and share the same gridlines: each spans the same
-  // number of 30-min steps, the narrower one padded evenly, so every gridline has a
-  // half-hour label on both sides (at the cost of the two scales differing).
+  // One time-of-day axis, later times higher, with the middle of the day cut out:
+  // sunset's range on top, sunrise's below, both at the same minutes-per-pixel. The
+  // vertical distance between the lines is then daylight (less the cut), and the
+  // day-to-day change is as tall as it can be. Ticks every half hour.
   const STEP = 30;
   const span = k => { const v = data.map(d => d[k]); return [Math.floor(Math.min(...v) / STEP) * STEP, Math.ceil(Math.max(...v) / STEP) * STEP]; };
-  let [rLo, rHi] = span("r"), [sLo, sHi] = span("s");
-  const steps = Math.max(2, (rHi - rLo) / STEP, (sHi - sLo) / STEP);
-  const pad = (lo, hi) => { const extra = steps - (hi - lo) / STEP, before = Math.floor(extra / 2); return [lo - before * STEP, hi + (extra - before) * STEP]; };
-  [rLo, rHi] = pad(rLo, rHi); [sLo, sHi] = pad(sLo, sHi);
-  const Yr = v => top + (v - rLo) / (rHi - rLo) * (Hh - top - bot);          // later sunrise sits lower
-  const Ys = v => Hh - bot - (v - sLo) / (sHi - sLo) * (Hh - top - bot);     // later sunset sits higher
+  const [rLo, rHi] = span("r"), [sLo, sHi] = span("s");
+  const kpx = (Hh - top - bot - gap) / ((rHi - rLo) + (sHi - sLo));   // px per minute
+  const cutTop = top + (sHi - sLo) * kpx, cutBot = cutTop + gap;
+  const Y = v => v >= sLo ? top + (sHi - v) * kpx : cutBot + (rHi - v) * kpx;
   // Sunrise yellow, sunset pink: far apart in hue so the two lines never blur.
   const rise = V("--sun"), set = V("--cat-4"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
   let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
-  // Shared gridlines; a long label list thins to every other tick so it stays legible.
-  const every = steps > 10 ? 2 : 1;
-  for (let k = 0; k <= steps; k++) {
-    const r = rLo + k * STEP, y = Yr(r), sm = sHi - k * STEP;   // sunrise runs down, sunset up
-    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${r % 60 ? "2 4" : ""}"/>`;
-    if (k % every) continue;
-    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(r)}</text>`;
-    s += `<text x="${W - padR + 8}" y="${y + 4}" fill="${set}">${clock(sm)}</text>`;
+  // Daylight: the band from each day's sunrise up through the cut to its sunset.
+  const band = (lo, hi) => data.map((d, i) => `${X(i).toFixed(1)},${lo(d).toFixed(1)}`).join(" ") + " " +
+    data.map((d, i) => `${X(i).toFixed(1)},${hi(d).toFixed(1)}`).reverse().join(" ");
+  s += `<polygon points="${band(d => Y(d.r), () => cutBot)}" fill="${rise}" opacity=".10"/>`;
+  s += `<polygon points="${band(() => cutTop, d => Y(d.s))}" fill="${rise}" opacity=".10"/>`;
+  // Half-hour gridlines and labels on both segments of the one axis.
+  const minGap = 15, labelled = [];
+  for (const [lo, hi] of [[sLo, sHi], [rLo, rHi]]) for (let m = lo; m <= hi; m += STEP) {
+    const y = Y(m);
+    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${m % 60 ? "2 4" : ""}"/>`;
+    if (labelled.some(l => Math.abs(l - y) < minGap)) continue;
+    labelled.push(y);
+    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${m >= sLo ? set : rise}">${clock(m)}</text>`;
   }
+  // The cut: a zigzag break on the axis and a faint band across the plot.
+  const bg = V("--surface-1"), zy = (cutTop + cutBot) / 2;
+  s += `<rect x="${padL}" y="${cutTop + 3}" width="${W - padL - padR}" height="${gap - 6}" fill="${bg}"/>`;
+  s += `<path d="M${padL - 7},${zy + 4} l4,-6 l4,6 l4,-6" fill="none" stroke="${muted}" stroke-width="1.5"/>`;
+  s += `<text x="${W - padR - 4}" y="${zy + 4}" text-anchor="end" fill="${muted}" font-size="10">midday cut</text>`;
   // Month starts (or weeks, on a short range) along the bottom.
   data.forEach((d, i) => {
     const dt = fmt(d.day + 43200, { day: "numeric" }) | 0;
@@ -727,21 +736,18 @@ function drawSunTimes(el, data, sel, onPick) {
     s += `<line x1="${X(i)}" x2="${X(i)}" y1="${top}" y2="${Hh - bot}" stroke="${sep}" stroke-dasharray="2 4"/>`;
     s += `<text x="${X(i)}" y="${Hh - 6}" text-anchor="middle" fill="${muted}">${fmt(d.day + 43200, n > 60 ? { month: "short" } : { day: "numeric", month: "short" })}</text>`;
   });
-  const path = (k, Y) => data.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[k]).toFixed(1)}`).join("");
-  s += `<path d="${path("r", Yr)}" fill="none" stroke="${rise}" stroke-width="3" stroke-linejoin="round"/>`;
-  s += `<path d="${path("s", Ys)}" fill="none" stroke="${set}" stroke-width="3" stroke-linejoin="round"/>`;
-  s += `<text x="${padL + 6}" y="${top + 14}" fill="${rise}" font-weight="600">Sunrise</text><text x="${W - padR - 6}" y="${top + 14}" text-anchor="end" fill="${set}" font-weight="600">Sunset</text>`;
+  const path = k => data.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[k]).toFixed(1)}`).join("");
+  s += `<path d="${path("r")}" fill="none" stroke="${rise}" stroke-width="3" stroke-linejoin="round"/>`;
+  s += `<path d="${path("s")}" fill="none" stroke="${set}" stroke-width="3" stroke-linejoin="round"/>`;
+  s += `<text x="${W - padR - 6}" y="${top + 14}" text-anchor="end" fill="${set}" font-weight="600">Sunset</text><text x="${W - padR - 6}" y="${Hh - bot - 6}" text-anchor="end" fill="${rise}" font-weight="600">Sunrise</text>`;
   const d = data[sel];
   s += `<line x1="${X(sel)}" x2="${X(sel)}" y1="${top}" y2="${Hh - bot}" stroke="${ink}" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
-  s += `<circle cx="${X(sel)}" cy="${Yr(d.r)}" r="5.5" fill="${rise}" stroke="${V("--surface-1")}" stroke-width="2.5"/><circle cx="${X(sel)}" cy="${Ys(d.s)}" r="5.5" fill="${set}" stroke="${V("--surface-1")}" stroke-width="2.5"/>`;
-  // The selected day's times sit beside their dots (flipped left near the right
-  // edge), nudged apart if the two would collide.
-  const flip = X(sel) > W - padR - 90, bg = V("--surface-3");
-  let yr = Yr(d.r), ys = Ys(d.s);
-  if (Math.abs(yr - ys) < 22) { const mid = (yr + ys) / 2, up = yr < ys ? -11 : 11; yr = mid + up; ys = mid - up; }
-  for (const [y, txt, col] of [[yr, hm(d.rise), rise], [ys, hm(d.set), set]]) {
+  s += `<circle cx="${X(sel)}" cy="${Y(d.r)}" r="5.5" fill="${rise}" stroke="${bg}" stroke-width="2.5"/><circle cx="${X(sel)}" cy="${Y(d.s)}" r="5.5" fill="${set}" stroke="${bg}" stroke-width="2.5"/>`;
+  // The selected day's times beside their dots (flipped left near the right edge).
+  const flip = X(sel) > W - padR - 90, pill = V("--surface-3");
+  for (const [y, txt, col] of [[Y(d.r), hm(d.rise), rise], [Y(d.s), hm(d.set), set]]) {
     const w = txt.length * 7 + 12, x0 = flip ? X(sel) - 12 - w : X(sel) + 12;
-    s += `<rect x="${x0}" y="${y - 10}" width="${w}" height="20" rx="10" fill="${bg}" stroke="${col}" stroke-width="1.2"/>`;
+    s += `<rect x="${x0}" y="${y - 10}" width="${w}" height="20" rx="10" fill="${pill}" stroke="${col}" stroke-width="1.2"/>`;
     s += `<text x="${x0 + w / 2}" y="${y + 4}" text-anchor="middle" fill="${col}" font-weight="700">${txt}</text>`;
   }
   el.innerHTML = s + "</svg>";
