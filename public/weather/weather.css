@@ -187,7 +187,9 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .chip > .ms { font-size: 22px; flex: none }
 .chip > .moonsvg { width: 22px; height: 22px }
 .chip .txt { display: flex; flex-direction: column; min-width: 0 }
-.chip .k { font-size: 13px; color: var(--ink-muted) }
+.chip .k { font-size: 13px; color: var(--ink-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap }
+.chip .k .ms { font-size: 18px }
+.chip .k .moonsvg { width: 17px; height: 17px }
 .chip .v { font-family: var(--rounded); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2 }
 .chip .s { font-size: 12px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 

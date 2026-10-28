@@ -33,7 +33,7 @@ const V = name => getComputedStyle(document.documentElement).getPropertyValue(na
 let LOC = store.get("wx.loc", null) || { lat: HOME.lat, lon: HOME.lon, approx: true };
 let PLACE = store.get("wx.place", HOME.name);
 let WX = null, AQ = null, wxAt = 0;
-let hourSel = 0;
+let hourSel = null;   // null = follow the current hour
 
 // ---------- formatting ----------
 let TZ;   // the forecast location's zone, once known; device zone until then
@@ -196,7 +196,7 @@ function renderWeather() {
   $("nowHi").textContent = `H ${deg(D("temperature_2m_max", ti))}`;
   $("nowLo").textContent = `L ${deg(D("temperature_2m_min", ti))}`;
   $("stamp").textContent = `Updated ${hm(wxAt / 1000)}`;
-  hourSel = 0;
+  hourSel = null;
   renderSummary(); renderNowcast(); renderHourly(); renderDays();
 }
 
@@ -243,7 +243,7 @@ function renderSummary() {
     ["moon", moonSvg(m.f, 26), "Moon", `${m.lit}% lit`, `${m.name} · in ${zodiac(moonLongitude(new Date())).name}`],
   ];
   $("summary").innerHTML = cards.map(([k, ic, a, v, s]) =>
-    `<button class="chip" data-m="${k}">${ic}<span class="txt"><span class="k">${a}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></span></button>`).join("");
+    `<button class="chip" data-m="${k}"><span class="txt"><span class="k">${ic}${a}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></span></button>`).join("");
   $("rainSub").textContent = rainStory().text;
 }
 
@@ -329,6 +329,12 @@ function svgChart(el, o) {
     s += `<g transform="translate(${x(i)},14) rotate(${a + 180})"><path d="M0,-8 L5.5,6 L0,3 L-5.5,6Z" fill="${col}"/></g>`;
   }); }
   o.t.forEach((t, i) => { if (i % every(46) === 0) s += `<text x="${x(i)}" y="${Hh - 4}" text-anchor="middle">${i === 0 && o.nowFirst ? "Now" : hr(t)}</text>`; });
+  // A solid line at the current time, placed within the hour, not on a tick.
+  if (o.nowAt && o.nowAt >= o.t[0] && o.nowAt < o.t[0] + n * 3600) {
+    const nx = padL + ((o.nowAt - o.t[0]) / 3600) * step, acc = V("--accent");
+    s += `<line x1="${nx}" x2="${nx}" y1="${top}" y2="${plotBot}" stroke="${acc}" stroke-width="2"/>`;
+    s += `<rect x="${nx - 17}" y="${top + 1}" width="34" height="15" rx="7.5" fill="${acc}"/><text x="${nx}" y="${top + 12}" text-anchor="middle" fill="#fff" font-weight="600" font-size="10">Now</text>`;
+  }
   if (o.sel != null && o.sel >= 0) {
     s += `<line x1="${x(o.sel)}" x2="${x(o.sel)}" y1="${top}" y2="${plotBot}" stroke="${ink}" stroke-opacity=".3" stroke-dasharray="3 3"/>`;
     for (const l of o.lines) { const v = l.v[o.sel]; if (v != null) s += `<circle cx="${x(o.sel)}" cy="${yOf(l)(v)}" r="5" fill="${V(l.color)}" stroke="${surface}" stroke-width="2.5"/>`; }
@@ -374,11 +380,14 @@ function hourText(i) {
     ` · UV ${r0(H("uv_index", i))} · ${ms("humidity_percentage", "ic-rain")} ${r0(H("relative_humidity_2m", i))}%`;
 }
 
+// The main chart is today, midnight to midnight, with a line at the current time:
+// a fixed frame is easier to read at a glance than a window that slides each hour.
+function todayStart() { const k = dayKey(nowSec()); return Math.max(0, WX.hourly.time.findIndex(t => dayKey(t) === k)); }
 function renderHourly() {
   if (!WX) return;
-  const from = hourIdx();
-  svgChart($("hourChart"), hourlyChart(from, 24, "temp", hourSel, i => { hourSel = i; renderHourly(); }, true));
-  $("hourDetail").innerHTML = hourText(from + hourSel);
+  const from = todayStart(), cur = Math.min(23, Math.max(0, hourIdx() - from)), sel = hourSel ?? cur;
+  svgChart($("hourChart"), { ...hourlyChart(from, 24, "temp", sel, i => { hourSel = i === cur ? null : i; renderHourly(); }), nowAt: nowSec() });
+  $("hourDetail").innerHTML = hourText(from + sel);
 }
 $("moreBtn").addEventListener("click", () => WX && detailsModal());
 
@@ -1038,7 +1047,7 @@ setInterval(() => { if (!document.hidden) locate(); }, LOC_MS);
 // Charts and "in 2h 10m" drift; redraw the cheap bits each minute.
 setInterval(() => {
   if (!WX || document.hidden) return;
-  renderSummary(); renderNowcast(); if (hourSel === 0) renderHourly();
+  renderSummary(); renderNowcast(); renderHourly();
 }, 60e3);
 // A wall screen left for days: reload once overnight to pick up deploys.
 (function nightlyReload() {
