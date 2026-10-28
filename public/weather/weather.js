@@ -343,6 +343,19 @@ function svgChart(el, o) {
     s += `<g transform="translate(${x(i)},14) rotate(${a + 180})"><path d="M0,-8 L5.5,6 L0,3 L-5.5,6Z" fill="${col}"/></g>`;
   }); }
   o.t.forEach((t, i) => { if (i % every(46) === 0) s += `<text x="${x(i)}" y="${Hh - 4}" text-anchor="middle">${i === 0 && o.nowFirst ? "Now" : hr(t)}</text>`; });
+  // Day dividers: a rule at each midnight and the day's name at the top-left of its
+  // stretch ("Today", "Tomorrow", then weekdays), so two days never blur together.
+  if (o.days) {
+    const today = dayKey(nowSec()), tmr = dayKey(nowSec() + 86400), sep = V("--ink-muted"), ink = V("--ink");
+    const name = t => dayKey(t) === today ? "Today" : dayKey(t) === tmr ? "Tomorrow" : fmt(t, { weekday: "long" });
+    o.t.forEach((t, i) => {
+      if (i === 0 || dayKey(t) !== dayKey(o.t[i - 1])) {
+        const bx = padL + i * step;
+        if (i > 0) s += `<line x1="${bx}" x2="${bx}" y1="${top}" y2="${plotBot}" stroke="${sep}" stroke-width="1.5" stroke-opacity=".6"/>`;
+        s += `<text x="${bx + 6}" y="${top + (o.icons || o.arrows ? 30 : 14)}" fill="${ink}" font-weight="700" font-size="13">${name(t)}</text>`;
+      }
+    });
+  }
   // A solid line at the current time, placed within the hour, not on a tick.
   if (o.nowAt && o.nowAt >= o.t[0] && o.nowAt < o.t[0] + n * 3600) {
     const nx = padL + ((o.nowAt - o.t[0]) / 3600) * step, acc = V("--accent");
@@ -356,7 +369,7 @@ function svgChart(el, o) {
   el.innerHTML = s + "</svg>";
   if (o.onPick) {
     const pick = e => { const r = el.getBoundingClientRect(); o.onPick(Math.min(n - 1, Math.max(0, Math.floor((e.clientX - r.left - padL) / step)))); };
-    el.onpointerdown = e => { el.setPointerCapture?.(e.pointerId); pick(e); };
+    el.onpointerdown = e => { try { el.setPointerCapture(e.pointerId); } catch {} pick(e); };
     el.onpointermove = e => { if (e.buttons) pick(e); };
   }
 }
@@ -606,8 +619,8 @@ $("modal").addEventListener("click", e => { if (e.target === $("modal")) closeMo
 function dayModal(i) {
   const start = WX.hourly.time.findIndex(t => dayKey(t) === dayKey(D("time", i) + 43200));
   const isToday = i === todayIdx();
-  const from = isToday ? hourIdx() : Math.max(0, start), n = 24;
-  let mode = "temp", sel = 0;
+  const from = isToday ? todayStart() : Math.max(0, start), n = isToday ? 48 : 24;
+  let mode = "temp", sel = isToday ? Math.max(0, hourIdx() - from) : 12;
   const kv = [
     ["High / low", `${deg(D("temperature_2m_max", i))} / ${deg(D("temperature_2m_min", i))}`],
     ["Feels like", `${deg(D("apparent_temperature_max", i))} / ${deg(D("apparent_temperature_min", i))}`],
@@ -622,12 +635,12 @@ function dayModal(i) {
     ["Golden hour", `from ${hm(D("sunset", i) - 3600)}`],
   ];
   openModal(`<h3>${icon(D("weather_code", i))}${isToday ? "Today" : fmt(D("time", i) + 43200, { weekday: "long", day: "numeric", month: "long" })} · ${label(D("weather_code", i))}</h3>
-    <p class="lede">${isToday ? "Next 24 hours" : "Hour by hour"}. Tap the chart for any hour.</p>
+    <p class="lede">${isToday ? "Today and tomorrow" : "Hour by hour"}. Tap the chart for any hour.</p>
     <div class="seg" id="mSeg"><button data-k="temp" class="on">Temp</button><button data-k="rain">Rain</button><button data-k="wind">Wind</button></div>
     <div class="bigchart" id="mChart"></div><div class="hourdetail" id="mDetail"></div>
     <div class="kv">${kv.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("")}</div>`);
   const draw = () => {
-    svgChart($("mChart"), hourlyChart(from, n, mode, sel, j => { sel = j; draw(); }, isToday));
+    svgChart($("mChart"), { ...hourlyChart(from, n, mode, sel, j => { sel = j; draw(); }), days: true, nowAt: isToday ? nowSec() : null });
     $("mDetail").innerHTML = hourText(from + sel);
   };
   for (const b of $("mSeg").querySelectorAll("button")) b.addEventListener("click", () => {
@@ -683,27 +696,29 @@ function drawSunTimes(el, data, sel, onPick) {
   const W = el.clientWidth, Hh = el.clientHeight; if (W < 60 || Hh < 60) return;
   const padL = 58, padR = 58, top = 16, bot = 26, n = data.length;
   const X = i => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
-  // Each axis snaps to whole or half hours: half-hour ticks on a short range,
-  // hourly once the swing passes ~2.5 h (a year, or across a clock change).
-  const range = k => {
-    const v = data.map(d => d[k]), lo = Math.min(...v), hi = Math.max(...v);
-    const step = hi - lo > 150 ? 60 : 30;
-    let a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step;
-    if (b - a < 2 * step) b = a + 2 * step;
-    return [a, b, step];
-  };
-  const [rLo, rHi, rStep] = range("r"), [sLo, sHi, sStep] = range("s");
+  // Both axes tick every half hour and share the same gridlines: each spans the same
+  // number of 30-min steps, the narrower one padded evenly, so every gridline has a
+  // half-hour label on both sides (at the cost of the two scales differing).
+  const STEP = 30;
+  const span = k => { const v = data.map(d => d[k]); return [Math.floor(Math.min(...v) / STEP) * STEP, Math.ceil(Math.max(...v) / STEP) * STEP]; };
+  let [rLo, rHi] = span("r"), [sLo, sHi] = span("s");
+  const steps = Math.max(2, (rHi - rLo) / STEP, (sHi - sLo) / STEP);
+  const pad = (lo, hi) => { const extra = steps - (hi - lo) / STEP, before = Math.floor(extra / 2); return [lo - before * STEP, hi + (extra - before) * STEP]; };
+  [rLo, rHi] = pad(rLo, rHi); [sLo, sHi] = pad(sLo, sHi);
   const Yr = v => top + (v - rLo) / (rHi - rLo) * (Hh - top - bot);          // later sunrise sits lower
   const Ys = v => Hh - bot - (v - sLo) / (sHi - sLo) * (Hh - top - bot);     // later sunset sits higher
   // Sunrise yellow, sunset pink: far apart in hue so the two lines never blur.
   const rise = V("--sun"), set = V("--cat-4"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
   let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
-  for (let m = rLo; m <= rHi; m += rStep) {
-    const y = Yr(m);
-    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${m % 60 ? "2 4" : ""}"/>`;
-    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(m)}</text>`;
+  // Shared gridlines; a long label list thins to every other tick so it stays legible.
+  const every = steps > 10 ? 2 : 1;
+  for (let k = 0; k <= steps; k++) {
+    const r = rLo + k * STEP, y = Yr(r), sm = sHi - k * STEP;   // sunrise runs down, sunset up
+    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${r % 60 ? "2 4" : ""}"/>`;
+    if (k % every) continue;
+    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(r)}</text>`;
+    s += `<text x="${W - padR + 8}" y="${y + 4}" fill="${set}">${clock(sm)}</text>`;
   }
-  for (let m = sLo; m <= sHi; m += sStep) s += `<text x="${W - padR + 8}" y="${Ys(m) + 4}" fill="${set}">${clock(m)}</text>`;
   // Month starts (or weeks, on a short range) along the bottom.
   data.forEach((d, i) => {
     const dt = fmt(d.day + 43200, { day: "numeric" }) | 0;
@@ -719,9 +734,19 @@ function drawSunTimes(el, data, sel, onPick) {
   const d = data[sel];
   s += `<line x1="${X(sel)}" x2="${X(sel)}" y1="${top}" y2="${Hh - bot}" stroke="${ink}" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
   s += `<circle cx="${X(sel)}" cy="${Yr(d.r)}" r="5.5" fill="${rise}" stroke="${V("--surface-1")}" stroke-width="2.5"/><circle cx="${X(sel)}" cy="${Ys(d.s)}" r="5.5" fill="${set}" stroke="${V("--surface-1")}" stroke-width="2.5"/>`;
+  // The selected day's times sit beside their dots (flipped left near the right
+  // edge), nudged apart if the two would collide.
+  const flip = X(sel) > W - padR - 90, bg = V("--surface-3");
+  let yr = Yr(d.r), ys = Ys(d.s);
+  if (Math.abs(yr - ys) < 22) { const mid = (yr + ys) / 2, up = yr < ys ? -11 : 11; yr = mid + up; ys = mid - up; }
+  for (const [y, txt, col] of [[yr, hm(d.rise), rise], [ys, hm(d.set), set]]) {
+    const w = txt.length * 7 + 12, x0 = flip ? X(sel) - 12 - w : X(sel) + 12;
+    s += `<rect x="${x0}" y="${y - 10}" width="${w}" height="20" rx="10" fill="${bg}" stroke="${col}" stroke-width="1.2"/>`;
+    s += `<text x="${x0 + w / 2}" y="${y + 4}" text-anchor="middle" fill="${col}" font-weight="700">${txt}</text>`;
+  }
   el.innerHTML = s + "</svg>";
   const pick = e => { const r = el.getBoundingClientRect(); onPick(Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left - padL) / (W - padL - padR) * (n - 1))))); };
-  el.onpointerdown = e => { el.setPointerCapture?.(e.pointerId); pick(e); };
+  el.onpointerdown = e => { try { el.setPointerCapture(e.pointerId); } catch {} pick(e); };
   el.onpointermove = e => { if (e.buttons) pick(e); };
 }
 function sunModal() {
@@ -750,13 +775,14 @@ function sunModal() {
 
 // One sheet per tile/chip: a 48-hour chart of that variable plus a sentence.
 function metricModal(k) {
-  const from = hourIdx(), n = 48, sl = key => WX.hourly[key].slice(from, from + n), t = sl("time");
-  const ti = todayIdx();
+  // Fixed frame: today and tomorrow, midnight to midnight, like the main chart.
+  const from = todayStart(), n = 48, sl = key => WX.hourly[key].slice(from, from + n), t = sl("time");
+  const ti = todayIdx(), cur = Math.max(0, hourIdx() - from);
   const simple = (title, ic, lede, lines, more = {}) => {
     openModal(`<h3>${ms(ic)}${title}</h3><p class="lede">${lede}</p><div class="bigchart" id="mChart"></div><div class="hourdetail" id="mDetail"></div>`);
-    let sel = 0;
+    let sel = cur;
     const draw = () => {
-      svgChart($("mChart"), { t, lines, sel, night: sl("is_day"), nowFirst: true, onPick: j => { sel = j; draw(); }, ...more });
+      svgChart($("mChart"), { t, lines, sel, night: sl("is_day"), days: true, nowAt: nowSec(), onPick: j => { sel = j; draw(); }, ...more });
       $("mDetail").innerHTML = hourText(from + sel);
     };
     draw();
@@ -782,7 +808,7 @@ function metricModal(k) {
   if (k === "sun") return sunModal();
   if (k === "aqi" || k === "pollen") {
     if (!AQ) return;
-    const a = AQ.current, at = AQ.hourly.time, ai = Math.max(0, at.findIndex(x => x > nowSec()) - 1);
+    const a = AQ.current, at = AQ.hourly.time, ai = Math.max(0, at.findIndex(x => dayKey(x) === dayKey(nowSec())));
     const pol = Object.entries(a).filter(([x]) => x.endsWith("_pollen"));
     openModal(`<h3>${ms("eco")}Air quality & pollen</h3><p class="lede">European AQI ${r0(a.european_aqi)}, ${level(a.european_aqi ?? 0, AQI)[1].toLowerCase()}. Source: CAMS via Open-Meteo.</p>
       <div class="bigchart" id="mChart"></div>
@@ -792,7 +818,7 @@ function metricModal(k) {
     const aqv = AQ.hourly.european_aqi.slice(ai, ai + 48), top = Math.min(120, Math.max(60, Math.ceil(Math.max(...aqv.filter(v => v != null)) / 20 + 1) * 20));
     let lo = 0;
     const bands = AQI.map(([to, label, color]) => { const b = { from: lo, to: Math.min(to, 140), label, color }; lo = to; return b; });
-    svgChart($("mChart"), { t: at.slice(ai, ai + 48), sel: 0, nowFirst: true, bands,
+    svgChart($("mChart"), { t: at.slice(ai, ai + 48), sel: Math.max(0, at.findIndex(x => x > nowSec()) - 1 - ai), days: true, nowAt: nowSec(), bands,
       lines: [{ v: aqv, color: "--ink", w: 2.5, labels: true, fmt: v => r0(v), min: 0, max: top }] });
   }
 }

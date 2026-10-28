@@ -315,9 +315,9 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .close .ms { font-size: 22px }
 .sheet h3 { margin: 0 0 2px; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; padding-right: 44px }
 .sheet .lede { color: var(--ink-muted); margin: 0 0 14px; font-size: 15px }
-.kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px; background: var(--surface-1); border-radius: var(--r-sm); overflow: hidden }
-.kv div { padding: 10px 14px; border-right: 0.5px solid var(--separator); border-bottom: 0.5px solid var(--separator) }
-.kv div:nth-child(4n) { border-right: 0 }
+/* Stats in sheets are cards, like the board's own cards. */
+.kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px }
+.kv > div { padding: 10px 14px; background: var(--surface-1); border-radius: var(--r-sm); box-shadow: var(--shadow-1); min-width: 0 }
 .kv span { display: block; font-size: 13px; color: var(--ink-muted) }
 .kv b { font-family: var(--rounded); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums }
 .bigchart { height: 270px; position: relative; background: var(--surface-1); border-radius: var(--r-sm); padding: 6px 4px 0; touch-action: none }
