@@ -657,18 +657,27 @@ function drawSunTimes(el, data, sel, onPick) {
   const W = el.clientWidth, Hh = el.clientHeight; if (W < 60 || Hh < 60) return;
   const padL = 58, padR = 58, top = 16, bot = 26, n = data.length;
   const X = i => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
-  const range = k => { const v = data.map(d => d[k]); const lo = Math.min(...v), hi = Math.max(...v), p = Math.max(6, (hi - lo) * .12); return [lo - p, hi + p]; };
-  const [rLo, rHi] = range("r"), [sLo, sHi] = range("s");
+  // Each axis snaps to whole or half hours: half-hour ticks on a short range,
+  // hourly once the swing passes ~2.5 h (a year, or across a clock change).
+  const range = k => {
+    const v = data.map(d => d[k]), lo = Math.min(...v), hi = Math.max(...v);
+    const step = hi - lo > 150 ? 60 : 30;
+    let a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step;
+    if (b - a < 2 * step) b = a + 2 * step;
+    return [a, b, step];
+  };
+  const [rLo, rHi, rStep] = range("r"), [sLo, sHi, sStep] = range("s");
   const Yr = v => top + (v - rLo) / (rHi - rLo) * (Hh - top - bot);          // later sunrise sits lower
   const Ys = v => Hh - bot - (v - sLo) / (sHi - sLo) * (Hh - top - bot);     // later sunset sits higher
-  const rise = V("--sun"), set = V("--secondary"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
+  // Sunrise yellow, sunset pink: far apart in hue so the two lines never blur.
+  const rise = V("--sun"), set = V("--cat-4"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
   let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
-  for (let k = 0; k <= 4; k++) {
-    const y = top + k / 4 * (Hh - top - bot);
-    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${k % 4 ? "2 4" : ""}"/>`;
-    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(rLo + k / 4 * (rHi - rLo))}</text>`;
-    s += `<text x="${W - padR + 8}" y="${y + 4}" fill="${set}">${clock(sHi - k / 4 * (sHi - sLo))}</text>`;
+  for (let m = rLo; m <= rHi; m += rStep) {
+    const y = Yr(m);
+    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${m % 60 ? "2 4" : ""}"/>`;
+    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(m)}</text>`;
   }
+  for (let m = sLo; m <= sHi; m += sStep) s += `<text x="${W - padR + 8}" y="${Ys(m) + 4}" fill="${set}">${clock(m)}</text>`;
   // Month starts (or weeks, on a short range) along the bottom.
   data.forEach((d, i) => {
     const dt = fmt(d.day + 43200, { day: "numeric" }) | 0;
