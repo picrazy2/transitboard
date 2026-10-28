@@ -966,7 +966,7 @@ function bdRow(p, n, big = false) {
 function renderBirthdays() {
   const el = $("bdBody"); if (!el) return;
   if (bdLocked || !BDAYS) {
-    el.innerHTML = `<div class="empty">${bdLocked ? "Locked on this device. Open the setup link once to unlock." : "Loading…"}</div>`;
+    el.innerHTML = `<div class="empty">${bdLocked ? "Locked on this device. Tap to enter the key." : "Loading…"}</div>`;
     return;
   }
   const up = BDAYS.map(p => ({ p, n: daysUntil(p) })).sort((a, b) => a.n - b.n || prio(a.p) - prio(b.p));
@@ -986,6 +986,13 @@ function renderBirthdays() {
   el.innerHTML = html;
 }
 $("bdCard").addEventListener("click", () => {
+  // A Home Screen web app on iPad has its own storage and no address bar, so the
+  // setup link can't reach it: let the locked card take the key directly.
+  if (bdLocked) {
+    const k = prompt("Birthday key");
+    if (k && k.trim()) { store.set("wx.bkey", k.trim()); loadBirthdays(); }
+    return;
+  }
   if (!BDAYS) return;
   const up = BDAYS.map(p => ({ p, n: daysUntil(p) })).sort((a, b) => a.n - b.n || prio(a.p) - prio(b.p));
   const months = new Map();
