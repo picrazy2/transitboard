@@ -696,27 +696,27 @@ function drawSunTimes(el, data, sel, onPick) {
   const W = el.clientWidth, Hh = el.clientHeight; if (W < 60 || Hh < 60) return;
   const padL = 58, padR = 16, top = 16, bot = 26, gap = 16, n = data.length;
   const X = i => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
-  // One time-of-day axis, later times higher, with the middle of the day cut out:
-  // sunset's range on top, sunrise's below, both at the same minutes-per-pixel. The
+  // One time-of-day axis running down the chart (earlier at the top), with the middle
+  // of the day cut out: sunrise's range on top, sunset's below, at the same minutes-per-pixel. The
   // vertical distance between the lines is then daylight (less the cut), and the
   // day-to-day change is as tall as it can be. Ticks every half hour.
   const STEP = 30;
   const span = k => { const v = data.map(d => d[k]); return [Math.floor(Math.min(...v) / STEP) * STEP, Math.ceil(Math.max(...v) / STEP) * STEP]; };
   const [rLo, rHi] = span("r"), [sLo, sHi] = span("s");
   const kpx = (Hh - top - bot - gap) / ((rHi - rLo) + (sHi - sLo));   // px per minute
-  const cutTop = top + (sHi - sLo) * kpx, cutBot = cutTop + gap;
-  const Y = v => v >= sLo ? top + (sHi - v) * kpx : cutBot + (rHi - v) * kpx;
+  const cutTop = top + (rHi - rLo) * kpx, cutBot = cutTop + gap;
+  const Y = v => v >= sLo ? cutBot + (v - sLo) * kpx : top + (v - rLo) * kpx;
   // Sunrise yellow, sunset pink: far apart in hue so the two lines never blur.
   const rise = V("--sun"), set = V("--cat-4"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
   let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
-  // Daylight: the band from each day's sunrise up through the cut to its sunset.
+  // Daylight: the band from each day's sunrise down through the cut to its sunset.
   const band = (lo, hi) => data.map((d, i) => `${X(i).toFixed(1)},${lo(d).toFixed(1)}`).join(" ") + " " +
     data.map((d, i) => `${X(i).toFixed(1)},${hi(d).toFixed(1)}`).reverse().join(" ");
-  s += `<polygon points="${band(d => Y(d.r), () => cutBot)}" fill="${rise}" opacity=".10"/>`;
-  s += `<polygon points="${band(() => cutTop, d => Y(d.s))}" fill="${rise}" opacity=".10"/>`;
+  s += `<polygon points="${band(d => Y(d.r), () => cutTop)}" fill="${rise}" opacity=".10"/>`;
+  s += `<polygon points="${band(() => cutBot, d => Y(d.s))}" fill="${rise}" opacity=".10"/>`;
   // Half-hour gridlines and labels on both segments of the one axis.
   const minGap = 15, labelled = [];
-  for (const [lo, hi] of [[sLo, sHi], [rLo, rHi]]) for (let m = lo; m <= hi; m += STEP) {
+  for (const [lo, hi] of [[rLo, rHi], [sLo, sHi]]) for (let m = lo; m <= hi; m += STEP) {
     const y = Y(m);
     s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${m % 60 ? "2 4" : ""}"/>`;
     if (labelled.some(l => Math.abs(l - y) < minGap)) continue;
@@ -739,7 +739,7 @@ function drawSunTimes(el, data, sel, onPick) {
   const path = k => data.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[k]).toFixed(1)}`).join("");
   s += `<path d="${path("r")}" fill="none" stroke="${rise}" stroke-width="3" stroke-linejoin="round"/>`;
   s += `<path d="${path("s")}" fill="none" stroke="${set}" stroke-width="3" stroke-linejoin="round"/>`;
-  s += `<text x="${W - padR - 6}" y="${top + 14}" text-anchor="end" fill="${set}" font-weight="600">Sunset</text><text x="${W - padR - 6}" y="${Hh - bot - 6}" text-anchor="end" fill="${rise}" font-weight="600">Sunrise</text>`;
+  s += `<text x="${W - padR - 6}" y="${top + 14}" text-anchor="end" fill="${rise}" font-weight="600">Sunrise</text><text x="${W - padR - 6}" y="${Hh - bot - 6}" text-anchor="end" fill="${set}" font-weight="600">Sunset</text>`;
   const d = data[sel];
   s += `<line x1="${X(sel)}" x2="${X(sel)}" y1="${top}" y2="${Hh - bot}" stroke="${ink}" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
   s += `<circle cx="${X(sel)}" cy="${Y(d.r)}" r="5.5" fill="${rise}" stroke="${bg}" stroke-width="2.5"/><circle cx="${X(sel)}" cy="${Y(d.s)}" r="5.5" fill="${set}" stroke="${bg}" stroke-width="2.5"/>`;
