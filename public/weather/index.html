@@ -1,29 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Weather Board</title>
-<meta name="description" content="Full-screen weather for exactly where you are: now, next hours, rain radar, the week ahead, and the next train.">
+<meta name="description" content="Full-screen weather for exactly where you are: now, the next hours, the week ahead, sun and moon, birthdays, and the next train.">
 <link rel="manifest" href="/weather/manifest.webmanifest">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#0a0a0d">
+<meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Weather">
 <link rel="icon" href="/weather/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/weather/icon-512.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,1,0&icon_names=air,bedtime,block,calendar_month,chevron_right,clear_night,close,cloud,compress,eco,foggy,humidity_percentage,light_mode,local_florist,open_in_full,partly_cloudy_day,partly_cloudy_night,rainy,rainy_heavy,rainy_light,sunny,thermostat,thunderstorm,train,umbrella,visibility,wb_twilight,weather_mix,weather_snowy,zoom_out_map&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,1,0&icon_names=air,bedtime,block,cake,calendar_month,chevron_right,close,cloud,compress,eco,humidity_percentage,landscape,light_mode,local_florist,location_city,thermostat,train,umbrella,visibility,wb_twilight&display=block">
 <link rel="stylesheet" href="/weather/weather.css">
-<script>
-// Pick the theme before first paint (weather.js refines it from the sun once data lands).
-(function(){try{var q=new URLSearchParams(location.search).get("theme"),h=new Date().getHours();
-document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e){}})();
-</script>
 </head>
 <body>
 <main class="grid">
@@ -33,16 +27,15 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
       <div class="date"><span id="date"></span> · <button class="place" id="place" title="Update location">Locating…</button></div>
     </div>
   </header>
-  <button class="now" id="nowBtn" title="Details for now">
-      <span class="nowicon" id="nowIcon"></span>
-      <span class="nowtemp" id="nowTemp">--°</span>
-      <span class="nowtext">
-        <b id="nowCond">—</b>
-        <span id="nowFeels"></span>
-        <span class="hilo"><span class="hi" id="nowHi"></span><span class="lo" id="nowLo"></span></span>
-      </span>
+  <button class="now" id="nowBtn" title="Today hour by hour">
+    <span class="nowicon" id="nowIcon"></span>
+    <span class="nowtemp" id="nowTemp">--°</span>
+    <span class="nowtext">
+      <b id="nowCond">—</b>
+      <span id="nowFeels"></span>
+      <span class="hilo"><span class="hi" id="nowHi"></span><span class="lo" id="nowLo"></span></span>
+    </span>
   </button>
-  <section class="summary" id="summary"></section>
 
   <section class="card hourly">
     <div id="rainBlock" hidden>
@@ -54,23 +47,18 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
     <div class="cardhead">
       <h2>Next 24 hours<span class="sub" id="dryNote"></span></h2>
       <span class="stamp" id="stamp"></span>
-      <div class="seg" id="hourSeg">
-        <button data-k="temp" class="on">Temp</button><button data-k="rain">Rain</button><button data-k="wind">Wind</button>
-      </div>
+      <button class="more" id="moreBtn">More<span class="ms">chevron_right</span></button>
     </div>
     <div class="chart" id="hourChart"></div>
     <div class="hourdetail" id="hourDetail"></div>
   </section>
 
-  <section class="card radar" id="radarCard">
-    <div id="map"></div>
-    <div class="mapstatus" id="radarStatus" hidden></div>
-    <div class="radarbar">
-      <span class="rtime" id="radarTime">Radar</span>
-      <input type="range" class="rslider" id="radarSlider" min="0" max="0" step="1" aria-label="Radar time">
-      <button id="radarCloud" class="cloudtog" title="Cloud cover"><span class="ms">cloud</span></button>
-      <button id="radarBig" title="Expand map"><span class="ms">open_in_full</span></button>
+  <section class="card bdays" id="bdCard" role="button" tabindex="0" title="All birthdays">
+    <div class="cardhead">
+      <h2><span class="ms ic-sun">cake</span><span id="bdTitle">Birthdays</span></h2>
+      <span class="more">All<span class="ms">chevron_right</span></span>
     </div>
+    <div class="bdbody" id="bdBody"><div class="empty">Loading…</div></div>
   </section>
 
   <section class="card days">
@@ -80,14 +68,14 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
     <div class="daylist" id="days"></div>
   </section>
 
-  <section class="card tiles" id="tiles"></section>
+  <section class="summary" id="summary"></section>
 
   <section class="card deps">
     <div class="cardhead">
       <button class="station" id="station" title="Change station">—</button>
-      <span class="stamp" id="depStamp"></span>
+      <div class="dirtog" id="dirTog"></div>
     </div>
-    <div class="dirtog" id="dirTog"></div>
+    <div class="dirname"><span id="dirName"></span><span class="stamp" id="depStamp"></span></div>
     <div class="deplist" id="deps"><div class="empty">Loading…</div></div>
   </section>
 </main>
@@ -99,8 +87,8 @@ document.documentElement.dataset.theme=q||((h<7||h>=19)?"dark":"light");}catch(e
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"
+        integrity="sha512-F6rjAEKNMtM0aODcc/MdnAvhGxn7FCbAkKJ5FKba/fnD3gnN+LBEok326WAMdOhKQKYNr+j/tJEuV1PKwIfhCA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="/weather/weather.js"></script>
 </body>
 </html>

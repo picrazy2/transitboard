@@ -6,20 +6,20 @@
 //                         "best match" is the Met Office UKV 2 km model for the
 //                         first ~2 days, then ECMWF/ICON.
 //   Open-Meteo air        European AQI, pollutants, pollen (CAMS).
-//   RainViewer            last ~2 h of radar, 10-min frames (zoom ≤7 natively).
 //   TfL Unified API       nearby stations, live arrivals, and for Overground /
 //                         Elizabeth stations the timetable (so delays are real).
 //   Nominatim             neighbourhood name for the header.
 //
-// Styling follows the budget app's design system (see weather.css): Material
-// Symbols for every icon, colours read from the CSS tokens so charts follow the
-// light/dark theme, which itself follows the sun.
+// Styling follows the budget app's design system (see weather.css), dark only:
+// Material Symbols for UI icons, a small multi-colour SVG set for conditions,
+// colours read from the CSS tokens. SunCalc (cdnjs) gives sun and moon times
+// beyond the 10-day forecast. Birthdays come from an encrypted file (see
+// tools/birthdays-encrypt.mjs) unlocked by a key kept on the device.
 
 const HOME = { lat: 51.5611161, lon: -0.0739865, name: "Stoke Newington" };
 const HOME_STATION = "910GSTKNWNG";   // pinned when we're within HOME_RADIUS of it
 const HOME_RADIUS = 2000;
 const WX_MS = 10 * 60e3, AQ_MS = 30 * 60e3, DEP_MS = 30e3, LOC_MS = 30 * 60e3;
-const THEME = new URLSearchParams(location.search).get("theme");   // ?theme=light|dark pins it
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -33,7 +33,7 @@ const V = name => getComputedStyle(document.documentElement).getPropertyValue(na
 let LOC = store.get("wx.loc", null) || { lat: HOME.lat, lon: HOME.lon, approx: true };
 let PLACE = store.get("wx.place", HOME.name);
 let WX = null, AQ = null, wxAt = 0;
-let hourMode = "temp", hourSel = 0;
+let hourSel = 0;
 
 // ---------- formatting ----------
 let TZ;   // the forecast location's zone, once known; device zone until then
@@ -44,7 +44,7 @@ const wd = sec => fmt(sec, { weekday: "short" });
 const dayKey = sec => fmt(sec, { year: "numeric", month: "2-digit", day: "2-digit" });
 const r0 = v => v == null ? "–" : Math.round(v);
 const deg = v => `${r0(v)}°`;
-const dur = s => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; };
+const dur = s => { const t = Math.round(s / 60), h = Math.floor(t / 60), m = t % 60; return h ? `${h}h ${m}m` : `${m}m`; };
 const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
 const compass = d => COMPASS[Math.round(((d % 360) / 22.5)) % 16];
 const metres = (a, b) => {
@@ -118,18 +118,6 @@ const POLLEN = [[1,"None","var(--ink-muted)"],[20,"Low","var(--positive)"],[50,"
 const BEAUFORT = [[2,"Calm"],[6,"Light air"],[12,"Light breeze"],[20,"Gentle breeze"],[29,"Moderate breeze"],[39,"Fresh breeze"],
   [50,"Strong breeze"],[62,"Near gale"],[75,"Gale"],[89,"Strong gale"],[103,"Storm"],[1e9,"Violent storm"]];
 
-// ---------- theme: light by day, dark after sunset ----------
-function applyTheme() {
-  const h = new Date().getHours();
-  const dark = THEME ? THEME === "dark" : WX ? !WX.current.is_day : (h < 7 || h >= 19);
-  const t = dark ? "dark" : "light";
-  if (document.documentElement.dataset.theme === t) return false;
-  document.documentElement.dataset.theme = t;
-  document.querySelector('meta[name="theme-color"]').content = dark ? "#0a0a0d" : "#eef0f4";
-  radar?.setTheme(dark); bigRadar?.setTheme(dark);
-  return true;
-}
-
 // ---------- clock ----------
 function tickClock() {
   const d = new Date();
@@ -154,7 +142,7 @@ function locate(force = false) {
     const next = { lat: +p.coords.latitude.toFixed(5), lon: +p.coords.longitude.toFixed(5), acc: Math.round(p.coords.accuracy) };
     const moved = LOC.approx || metres(LOC, next) > 300;
     LOC = next; store.set("wx.loc", LOC);
-    if (moved || force) { lookupPlace(); loadWeather(); loadAir(); loadStations(); radar?.recentre(); }
+    if (moved || force) { lookupPlace(); loadWeather(); loadAir(); loadStations(); }
   }, () => { setPlace(PLACE); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: force ? 0 : 10 * 60e3 });
 }
 $("place").addEventListener("click", () => { $("place").textContent = "Locating…"; locate(true); });
@@ -187,7 +175,7 @@ async function loadAir() {
   });
   try {
     const r = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?${q}`);
-    if (r.ok) { AQ = await r.json(); if (WX) { renderSummary(); renderTiles(); } }
+    if (r.ok) { AQ = await r.json(); if (WX) renderSummary(); }
   } catch {}
 }
 
@@ -200,7 +188,6 @@ const D = (k, i) => WX.daily[k]?.[i];
 
 function renderWeather() {
   if (!WX) return;
-  applyTheme();
   const c = WX.current, ti = todayIdx();
   $("nowIcon").innerHTML = icon(c.weather_code, c.is_day);
   $("nowTemp").textContent = deg(c.temperature_2m);
@@ -210,7 +197,7 @@ function renderWeather() {
   $("nowLo").textContent = `L ${deg(D("temperature_2m_min", ti))}`;
   $("stamp").textContent = `Updated ${hm(wxAt / 1000)}`;
   hourSel = 0;
-  renderSummary(); renderNowcast(); renderHourly(); renderDays(); renderTiles();
+  renderSummary(); renderNowcast(); renderHourly(); renderDays();
 }
 
 // "Dry until 9 pm", "Rain from 3:15 pm", "Rain easing around 4 pm" — from the
@@ -236,26 +223,28 @@ function rainStory() {
   return { text: "Dry for the next 24 hours", short: "Dry all day", wet: false };
 }
 
+// Six cards, three rows of two, where the 3x3 tiles used to be. The other
+// readings (feels like, pressure, UV, visibility, gusts, pollen) sit behind the
+// "More" button on the 24-hour card.
 function renderSummary() {
   const c = WX.current, ti = todayIdx(), n = nowSec();
   const rise = D("sunrise", ti), set = D("sunset", ti), riseT = D("sunrise", ti + 1);
-  const sun = n < rise ? ["Sunrise", rise, "wb_twilight"] : n < set ? ["Sunset", set, "wb_twilight"] : ["Sunrise", riseT, "wb_twilight"];
-  const left = sun[1] - n;
+  const sun = n < rise ? ["Sunrise", rise] : n < set ? ["Sunset", set] : ["Sunrise", riseT];
   const dl = D("daylight_duration", ti), dlY = D("daylight_duration", ti - 1);
   const dlDelta = dlY ? Math.round((dl - dlY) / 60) : null;
-  const story = rainStory();
-  const aqi = AQ?.current?.european_aqi;
-  const aq = aqi != null ? level(aqi, AQI) : null;
-  const chips = [
-    ["sun", ms(sun[2], "ic-sun"), sun[0], hm(sun[1]), `in ${dur(left)} · day ${dur(dl)}${dlDelta != null ? ` ${dlDelta >= 0 ? "+" : "−"}${Math.abs(dlDelta)}m` : ""}`],
-    ["rain", ms("umbrella", "ic-rain"), "Rain", story.short, `${(D("precipitation_sum", ti) ?? 0).toFixed(1)} mm today · ${r0(D("precipitation_probability_max", ti))}% chance`],
+  const aqi = AQ?.current?.european_aqi, aq = aqi != null ? level(aqi, AQI) : null;
+  const m = moon();
+  const cards = [
+    ["sun", ms("wb_twilight", "ic-sun"), sun[0], hm(sun[1]), `in ${dur(sun[1] - n)} · day ${dur(dl)}${dlDelta != null ? ` ${dlDelta >= 0 ? "+" : "−"}${Math.abs(dlDelta)}m` : ""}`],
     ["wind", ms("air", "ic-cloud"), "Wind", `${r0(c.wind_speed_10m)} km/h ${compass(c.wind_direction_10m)}`, `Gusts ${r0(c.wind_gusts_10m)} · ${level(c.wind_speed_10m, BEAUFORT)[1].toLowerCase()}`],
-    ["aqi", ms("eco", "") , "Air quality", aq ? `<span style="color:${aq[2]}">${aq[1]}</span>` : "–", aq ? `EAQI ${r0(aqi)} · PM2.5 ${r0(AQ.current.pm2_5)}` : "Loading…"],
+    ["aqi", `<span class="ms" style="color:${aq ? aq[2] : "var(--ink-muted)"}">eco</span>`, "Air quality", aq ? `<span style="color:${aq[2]}">${aq[1]}</span>` : "–", aq ? `EAQI ${r0(aqi)} · PM2.5 ${r0(AQ.current.pm2_5)}` : "Loading…"],
+    ["humidity", ms("humidity_percentage", "ic-rain"), "Humidity", `${r0(c.relative_humidity_2m)}%`, `Dew point ${deg(c.dew_point_2m)}`],
+    ["cloud", ms("cloud", "ic-cloud"), "Cloud cover", `${r0(c.cloud_cover)}%`, `${dur(D("sunshine_duration", ti) ?? 0)} sunshine today`],
+    ["moon", moonSvg(m.f, 26), "Moon", `${m.lit}% lit`, `${m.name} · in ${zodiac(moonLongitude(new Date())).name}`],
   ];
-  $("summary").innerHTML = chips.map(([k, ic, a, v, s]) =>
-    `<button class="chip" data-m="${k}">${k === "aqi" && aq ? ic.replace('class="ms "', `class="ms" style="color:${aq[2]}"`) : ic}` +
-    `<span class="txt"><span class="k">${a}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></span></button>`).join("");
-  $("rainSub").textContent = story.text;
+  $("summary").innerHTML = cards.map(([k, ic, a, v, s]) =>
+    `<button class="chip" data-m="${k}">${ic}<span class="txt"><span class="k">${a}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></span></button>`).join("");
+  $("rainSub").textContent = rainStory().text;
 }
 
 function renderNowcast() {
@@ -266,13 +255,6 @@ function renderNowcast() {
   const wet = slots.some(s => s.mm >= 0.05);
   const changed = $("rainBlock").hidden === wet;
   $("rainBlock").hidden = !wet;
-  // After dark the map only earns its space if rain is coming: the radar is empty
-  // otherwise and satellite cloud can't see low cloud at night.
-  const hideMap = !WX.current.is_day && !wet;
-  if (document.body.classList.contains("nomap") !== hideMap) {
-    document.body.classList.toggle("nomap", hideMap);
-    requestAnimationFrame(() => { renderHourly(); if (!hideMap) radar?.map.invalidateSize(); });   // the grid just changed shape
-  }
   if (changed) requestAnimationFrame(renderHourly);   // the chart just gained or lost height
   $("dryNote").textContent = wet ? "" : rainStory().text;
   if (!wet) { $("nowcast").innerHTML = ""; return; }
@@ -289,7 +271,7 @@ function renderNowcast() {
 function svgChart(el, o) {
   const W = el.clientWidth, Hh = el.clientHeight;
   if (W < 60 || Hh < 50) return;   // mid-layout; the resize handler redraws
-  const n = o.t.length, padL = 4, padR = 4, top = o.icons || o.arrows ? 28 : 8, bot = 18;
+  const n = o.t.length, padL = 4, padR = o.bars?.axis ? 34 : 4, top = o.icons || o.arrows ? 28 : 8, bot = 18;
   const step = (W - padL - padR) / n, x = i => padL + (i + .5) * step;
   const every = px => Math.max(1, Math.ceil(px / step));
   const plotTop = top + 18, plotBot = Hh - bot - 4;
@@ -309,10 +291,20 @@ function svgChart(el, o) {
   if (o.bars) {
     const col = V(o.bars.color);
     const bh = (plotBot - plotTop) * (o.bars.full ? 1 : .4), bm = Math.max(o.bars.max ?? 0, ...o.bars.v.map(v => v ?? 0)) || 1;
+    // A second y-axis on the right for the bars (rain mm), so the temperature
+    // line keeps its own scale on the left.
+    if (o.bars.axis) {
+      const ax = W - 2, sep = V("--separator"), muted = V("--ink-muted");
+      for (const f of [0, .5, 1]) {
+        const y = plotBot - f * bh;
+        s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${f ? "2 4" : ""}"/>`;
+        s += `<text x="${ax}" y="${y + 4}" text-anchor="end" fill="${f ? col : muted}">${f ? (bm * f).toFixed(bm * f < 1 ? 1 : 0) : 0}${f === 1 ? o.bars.axis : ""}</text>`;
+      }
+    }
     o.bars.v.forEach((v, i) => {
       if (!v) return;
       const h = Math.max(2, (v / bm) * bh);
-      s += `<rect x="${x(i) - step * .3}" y="${plotBot - h}" width="${step * .6}" height="${h}" rx="3" fill="${col}" opacity="${o.bars.opacity ?? .45}"/>`;
+      s += `<rect x="${x(i) - step * .3}" y="${plotBot - h}" width="${step * .6}" height="${h}" rx="3" fill="${col}" opacity="${o.bars.alpha?.[i] ?? o.bars.opacity ?? .45}"/>`;
       if (o.bars.labels && v >= 0.1 && i % every(30) === 0) s += `<text x="${x(i)}" y="${plotBot - h - 4}" text-anchor="middle" fill="${col}">${o.bars.fmt(v)}</text>`;
     });
   }
@@ -361,8 +353,12 @@ function hourlyChart(from, n, mode, sel, onPick, nowFirst = false) {
   if (mode === "wind") return { ...base, arrows: sl("wind_direction_10m"),
     lines: [{ v: sl("wind_gusts_10m"), color: "--ink-faint", w: 2, dash: "4 4", fill: true },
             { v: sl("wind_speed_10m"), color: "--positive", labels: true, fmt: v => r0(v) }] };
+  // Default: temperature on the left axis, rain (mm per hour) as bars on a right
+  // axis, each bar's strength the chance of rain. Wind lives in the wind card.
+  const mm = sl("precipitation"), nice = [1, 2, 5, 10, 20].find(v => v >= Math.max(...mm.map(x => x ?? 0))) ?? 50;
   return { ...base, icons,
-    bars: { v: sl("precipitation"), max: 2, color: "--rain" },
+    bars: { v: mm, max: nice, color: "--rain", axis: "mm", full: false,
+      alpha: sl("precipitation_probability").map(p => (.3 + .6 * (p ?? 0) / 100).toFixed(2)) },
     lines: [{ v: sl("apparent_temperature"), color: "--ink-faint", w: 2, dash: "4 4" },
             { v: sl("temperature_2m"), color: "--hi", labels: true, fmt: v => `${r0(v)}°`, fill: true }] };
 }
@@ -378,14 +374,10 @@ function hourText(i) {
 function renderHourly() {
   if (!WX) return;
   const from = hourIdx();
-  svgChart($("hourChart"), hourlyChart(from, 24, hourMode, hourSel, i => { hourSel = i; renderHourly(); }, true));
+  svgChart($("hourChart"), hourlyChart(from, 24, "temp", hourSel, i => { hourSel = i; renderHourly(); }, true));
   $("hourDetail").innerHTML = hourText(from + hourSel);
 }
-for (const b of $("hourSeg").querySelectorAll("button")) b.addEventListener("click", () => {
-  hourMode = b.dataset.k;
-  for (const x of $("hourSeg").querySelectorAll("button")) x.classList.toggle("on", x === b);
-  renderHourly();
-});
+$("moreBtn").addEventListener("click", () => WX && detailsModal());
 
 // ---------- days ----------
 // The iPad grid has room for 7 comfortable rows; the "10 days" button opens the rest.
@@ -459,8 +451,9 @@ function pressureTrend() {
   const d = a - b;
   return Math.abs(d) < 1 ? "Steady" : d > 0 ? `Rising ${d.toFixed(1)} in 3h` : `Falling ${(-d).toFixed(1)} in 3h`;
 }
-function renderTiles() {
-  const c = WX.current, ti = todayIdx(), hi = hourIdx(), m = moon();
+// The readings that didn't make the six summary cards, one tap away.
+function detailsModal() {
+  const c = WX.current, ti = todayIdx(), hi = hourIdx();
   const uvNow = c.uv_index ?? H("uv_index", hi) ?? 0, uv = level(uvNow, UV), uvMax = D("uv_index_max", ti) ?? 0;
   const pol = AQ?.current ? Object.entries(AQ.current).filter(([k]) => k.endsWith("_pollen")) : [];
   const worst = pol.filter(([, v]) => v != null).sort((a, b) => b[1] - a[1])[0];
@@ -468,19 +461,105 @@ function renderTiles() {
   const vis = c.visibility ?? H("visibility", hi);
   const tiles = [
     ["feels", "thermostat", "Feels like", deg(c.apparent_temperature), c.apparent_temperature < c.temperature_2m - 1.5 ? "Wind chill" : c.apparent_temperature > c.temperature_2m + 1.5 ? "Humid" : "Similar to actual"],
-    ["humidity", "humidity_percentage", "Humidity", `${r0(c.relative_humidity_2m)}<small>%</small>`, `Dew point ${deg(c.dew_point_2m)}`],
     ["pressure", "compress", "Pressure", `${r0(c.pressure_msl)}<small>hPa</small>`, pressureTrend()],
     ["uv", "light_mode", "UV index", `<span style="color:${uv[2]}">${r0(uvNow)}</span><small>${uv[1]}</small>`, `Max today ${uvMax.toFixed(0)} · ${level(uvMax, UV)[1]}`],
-    ["cloud", "cloud", "Cloud cover", `${r0(c.cloud_cover)}<small>%</small>`, `${dur(D("sunshine_duration", ti) ?? 0)} sunshine today`],
     ["visibility", "visibility", "Visibility", vis == null ? "–" : vis >= 10000 ? `${r0(vis / 1000)}<small>km</small>` : `${(vis / 1000).toFixed(1)}<small>km</small>`, vis == null ? "" : vis < 1000 ? "Fog" : vis < 5000 ? "Hazy" : "Clear"],
     ["gusts", "air", "Gusts", `${r0(c.wind_gusts_10m)}<small>km/h</small>`, `Max today ${r0(D("wind_gusts_10m_max", ti))} km/h`],
     ["pollen", "local_florist", "Pollen", pl ? `<span style="color:${pl[2]}">${pl[1]}</span>` : "–", worst && worst[1] >= 1 ? `${worst[0].replace("_pollen", "")} ${r0(worst[1])}/m³` : "Out of season"],
-    ["moon", "bedtime", "Moon", `${moonSvg(m.f)}${m.lit}<small>%</small>`, m.name],
   ];
-  $("tiles").innerHTML = tiles.map(([k, ic, t, v, s]) =>
-    `<button class="tile" data-m="${k}"><span class="k">${ms(ic)}${t}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></button>`).join("");
+  openModal(`<h3>${ms("thermostat")}More details</h3><p class="lede">Tap any reading for its next 48 hours.</p>
+    <div class="tiles">${tiles.map(([k, ic, t, v, s]) =>
+      `<button class="tile" data-m="${k}"><span class="k">${ms(ic)}${t}</span><span class="v">${v}</span><span class="s">${esc(s)}</span></button>`).join("")}</div>`);
 }
-document.addEventListener("click", e => { const b = e.target.closest("[data-m]"); if (b && WX) metricModal(b.dataset.m); });
+
+// ---------- moon (astronomy, then the astrology people read into it) ----------
+// Low-precision lunar longitude (Meeus ch. 47, main terms): good to ~1°, plenty
+// to say which sign the moon is in.
+function moonLongitude(date) {
+  const d = date / 864e5 - 10957.5, r = Math.PI / 180;   // days since J2000.0
+  const L = 218.316 + 13.176396 * d, M = (134.963 + 13.064993 * d) * r, Ms = (357.529 + 0.98560028 * d) * r;
+  const D2 = (297.850 + 12.190749 * d) * r * 2, F2 = (93.272 + 13.229350 * d) * r * 2;
+  const lon = L + 6.289 * Math.sin(M) + 1.274 * Math.sin(D2 - M) + 0.658 * Math.sin(D2) + 0.214 * Math.sin(2 * M)
+    - 0.186 * Math.sin(Ms) - 0.114 * Math.sin(F2);
+  return ((lon % 360) + 360) % 360;
+}
+const SIGNS = [
+  ["Aries", "♈", "fire", "Impulsive, brave energy. Good for starting things, short on patience."],
+  ["Taurus", "♉", "earth", "Slow, sensual, steady. Comfort food, nature, finishing what you began."],
+  ["Gemini", "♊", "air", "Chatty and curious. Messages, quick trips, too many tabs open."],
+  ["Cancer", "♋", "water", "Home and feelings run high. Nesting, family, a soft day."],
+  ["Leo", "♌", "fire", "Warm and showy. Celebrate, create, be seen."],
+  ["Virgo", "♍", "earth", "Tidy, practical, detail-minded. Lists, health, putting things in order."],
+  ["Libra", "♎", "air", "Social and balancing. Partnerships, beauty, fairness."],
+  ["Scorpio", "♏", "water", "Intense and private. Depth over small talk; let go of something."],
+  ["Sagittarius", "♐", "fire", "Restless optimism. Plans, travel, big ideas."],
+  ["Capricorn", "♑", "earth", "Ambitious and grounded. Work, structure, long-term goals."],
+  ["Aquarius", "♒", "air", "Independent and inventive. Friends, causes, doing it differently."],
+  ["Pisces", "♓", "water", "Dreamy and intuitive. Rest, art, music, let things drift."],
+];
+const zodiac = lon => { const s = SIGNS[Math.floor(lon / 30) % 12]; return { name: s[0], glyph: s[1], element: s[2], meaning: s[3] }; };
+const PHASE_MEANING = [
+  "New moon: a reset. Traditionally the time to set intentions and begin quietly.",
+  "Waxing crescent: momentum building. Take the first small steps on what you started.",
+  "First quarter: a push. Decisions and obstacles; act rather than wait.",
+  "Waxing gibbous: refine and adjust. Nearly there, keep tuning.",
+  "Full moon: peak and release. Things come to light; emotions run high, sleep runs light.",
+  "Waning gibbous: gratitude and sharing. Pass on what you learned.",
+  "Last quarter: let go. Clear out, forgive, finish loose ends.",
+  "Waning crescent: rest. Wind down and recharge before the next cycle.",
+];
+// Traditional (Old Farmer's Almanac) names for the full moon of each month.
+const FULL_NAMES = ["Wolf", "Snow", "Worm", "Pink", "Flower", "Strawberry", "Buck", "Sturgeon", "Harvest", "Hunter's", "Beaver", "Cold"];
+// Next times the phase crosses new / first quarter / full / last quarter, from SunCalc.
+function nextPhases(from = new Date(), days = 32) {
+  const out = [], names = ["New moon", "First quarter", "Full moon", "Last quarter"];
+  let prev = SunCalc.getMoonIllumination(from).phase;
+  for (let h = 1; h <= days * 24; h++) {
+    const t = new Date(+from + h * 3600e3), p = SunCalc.getMoonIllumination(t).phase;
+    for (let q = 0; q < 4; q++) {
+      const target = q / 4;
+      const crossed = q === 0 ? p < prev - .5 : prev < target && p >= target;
+      // The phase jitters across 0/1 near new moon; one event per phase per cycle.
+      if (crossed && !out.some(o => o.q === q && t - o.t < 2 * 864e5)) out.push({ t, q, name: names[q] });
+    }
+    prev = p;
+  }
+  return out;
+}
+function moonModal() {
+  const now = new Date(), ill = SunCalc.getMoonIllumination(now), f = ill.phase;
+  const m = moon(now), z = zodiac(moonLongitude(now)), k = Math.round(f * 8) % 8;
+  const times = SunCalc.getMoonTimes(now, LOC.lat, LOC.lon), tmr = SunCalc.getMoonTimes(new Date(+now + 864e5), LOC.lat, LOC.lon);
+  const rise = times.rise && times.rise > now ? times.rise : tmr.rise, set = times.set && times.set > now ? times.set : tmr.set;
+  const phases = nextPhases(now);
+  const full = phases.find(p => p.q === 2);
+  const age = f * 29.53;
+  const sunSign = zodiac(((280.46 + 0.9856474 * (now / 864e5 - 10957.5)) % 360 + 360) % 360);
+  const ds = d => d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  // Eight phases of the cycle, the current one ringed; then the next 30 nights.
+  const strip = [0, 1, 2, 3, 4, 5, 6, 7].map(i => `<div class="ph${i === k ? " on" : ""}">${moonSvg(i / 8 + .0001, 40)}<span>${["New", "Wax. cres.", "1st qtr", "Wax. gib.", "Full", "Wan. gib.", "Last qtr", "Wan. cres."][i]}</span></div>`).join("");
+  const cal = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(+now + i * 864e5), p = SunCalc.getMoonIllumination(d).phase;
+    return `<div class="mc${i === 0 ? " on" : ""}">${moonSvg(p + .0001, 26)}<span>${i === 0 ? "Today" : d.getDate()}</span></div>`;
+  }).join("");
+  openModal(`<h3>${moonSvg(f, 30)} ${m.name} in ${z.name} ${z.glyph}</h3>
+    <p class="lede">${Math.round(ill.fraction * 100)}% lit · ${age.toFixed(1)} days old · rises ${rise ? hm(rise / 1000) : "–"}, sets ${set ? hm(set / 1000) : "–"}</p>
+    <div class="phases">${strip}</div>
+    <div class="moonmeaning">
+      <div><span>This phase</span><p>${PHASE_MEANING[k]}</p></div>
+      <div><span>Moon in ${z.name} · ${z.element}</span><p>${z.meaning}</p></div>
+      <div><span>Sun in ${sunSign.name} ${sunSign.glyph}</span><p>The season's backdrop: ${sunSign.meaning.charAt(0).toLowerCase() + sunSign.meaning.slice(1)}</p></div>
+    </div>
+    <div class="kv">${phases.slice(0, 4).map(p => `<div><span>${p.name}${p.q === 2 ? ` · ${FULL_NAMES[p.t.getMonth()]} Moon` : ""}</span><b>${ds(p.t)}</b> ${hm(p.t / 1000)}</div>`).join("")}</div>
+    <h4>Next 30 nights</h4><div class="mooncal">${cal}</div>
+    <p class="fine">Phases and times are astronomy (SunCalc). The meanings are traditional astrology, for fun.${full ? ` Next full moon: the ${FULL_NAMES[full.t.getMonth()]} Moon.` : ""}</p>`);
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-m]"); if (!b || !WX) return;
+  if (b.dataset.m === "moon") return moonModal();
+  metricModal(b.dataset.m);
+});
 $("nowBtn").addEventListener("click", () => WX && dayModal(todayIdx()));
 
 // ---------- sheets ----------
@@ -561,16 +640,77 @@ function drawSunArc(el, ti) {
   if (n >= t0 && n <= t0 + day) s += `<circle cx="${X(n)}" cy="${Y(n)}" r="9" fill="${n > rise && n < set ? sun : V("--night")}" stroke="${V("--surface-1")}" stroke-width="3"/>`;
   el.innerHTML = s + "</svg>";
 }
-// One row per day: a 24-hour track with the daylight span drawn on it.
-function daylightRow(i, ti) {
-  const t0 = D("time", i), rise = D("sunrise", i), set = D("sunset", i), pc = t => ((t - t0) / 86400 * 100).toFixed(2);
-  const dl = D("daylight_duration", i), d = Math.round((dl - (D("daylight_duration", i - 1) ?? dl)) / 60);
-  const now = i === ti ? `<b class="nowmark" style="left:${pc(nowSec())}%"></b>` : "";
-  return `<div class="dlrow${i === ti ? " today" : ""}"><span class="dn">${i === ti ? "Today" : wd(t0 + 43200)}</span>
-    <span class="rt">${hm(rise)}</span>
-    <span class="track"><i style="left:${pc(rise)}%;right:${100 - pc(set)}%"></i>${now}</span>
-    <span class="st">${hm(set)}</span>
-    <span class="len">${dur(dl)}<small>${d >= 0 ? "+" : "−"}${Math.abs(d)}m</small></span></div>`;
+// Sunrise and sunset over weeks to a year: day-to-day they move by minutes, so the
+// shape only shows on a long axis. Two y-axes (each time keeps its own range) —
+// sunrise on the left, sunset on the right. SunCalc, not the forecast, so it can
+// run past the 10 forecast days; clock changes show as steps.
+const locMin = sec => { const [h, m] = fmt(sec, { hour: "2-digit", minute: "2-digit", hour12: false }).split(":").map(Number); return (h % 24) * 60 + m; };
+const clock = min => { const h = Math.floor(min / 60), m = Math.round(min % 60); return `${h % 12 || 12}:${String(m).padStart(2, "0")}${h < 12 ? "am" : "pm"}`; };
+function sunSeries(t0, n) {
+  return Array.from({ length: n }, (_, i) => {
+    const day = t0 + i * 86400, x = SunCalc.getTimes(new Date((day + 43200) * 1000), LOC.lat, LOC.lon);
+    const rise = x.sunrise / 1000, set = x.sunset / 1000;
+    return { day, rise, set, r: locMin(rise), s: locMin(set), len: set - rise };
+  });
+}
+function drawSunTimes(el, data, sel, onPick) {
+  const W = el.clientWidth, Hh = el.clientHeight; if (W < 60 || Hh < 60) return;
+  const padL = 58, padR = 58, top = 16, bot = 26, n = data.length;
+  const X = i => padL + (i / Math.max(1, n - 1)) * (W - padL - padR);
+  const range = k => { const v = data.map(d => d[k]); const lo = Math.min(...v), hi = Math.max(...v), p = Math.max(6, (hi - lo) * .12); return [lo - p, hi + p]; };
+  const [rLo, rHi] = range("r"), [sLo, sHi] = range("s");
+  const Yr = v => top + (v - rLo) / (rHi - rLo) * (Hh - top - bot);          // later sunrise sits lower
+  const Ys = v => Hh - bot - (v - sLo) / (sHi - sLo) * (Hh - top - bot);     // later sunset sits higher
+  const rise = V("--sun"), set = V("--secondary"), sep = V("--separator"), muted = V("--ink-muted"), ink = V("--ink");
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" xmlns="http://www.w3.org/2000/svg">`;
+  for (let k = 0; k <= 4; k++) {
+    const y = top + k / 4 * (Hh - top - bot);
+    s += `<line x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" stroke="${sep}" stroke-dasharray="${k % 4 ? "2 4" : ""}"/>`;
+    s += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" fill="${rise}">${clock(rLo + k / 4 * (rHi - rLo))}</text>`;
+    s += `<text x="${W - padR + 8}" y="${y + 4}" fill="${set}">${clock(sHi - k / 4 * (sHi - sLo))}</text>`;
+  }
+  // Month starts (or weeks, on a short range) along the bottom.
+  data.forEach((d, i) => {
+    const dt = fmt(d.day + 43200, { day: "numeric" }) | 0;
+    const tick = n > 60 ? dt === 1 : i % 7 === 0;
+    if (!tick) return;
+    s += `<line x1="${X(i)}" x2="${X(i)}" y1="${top}" y2="${Hh - bot}" stroke="${sep}" stroke-dasharray="2 4"/>`;
+    s += `<text x="${X(i)}" y="${Hh - 6}" text-anchor="middle" fill="${muted}">${fmt(d.day + 43200, n > 60 ? { month: "short" } : { day: "numeric", month: "short" })}</text>`;
+  });
+  const path = (k, Y) => data.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d[k]).toFixed(1)}`).join("");
+  s += `<path d="${path("r", Yr)}" fill="none" stroke="${rise}" stroke-width="3" stroke-linejoin="round"/>`;
+  s += `<path d="${path("s", Ys)}" fill="none" stroke="${set}" stroke-width="3" stroke-linejoin="round"/>`;
+  s += `<text x="${padL + 6}" y="${top + 14}" fill="${rise}" font-weight="600">Sunrise</text><text x="${W - padR - 6}" y="${top + 14}" text-anchor="end" fill="${set}" font-weight="600">Sunset</text>`;
+  const d = data[sel];
+  s += `<line x1="${X(sel)}" x2="${X(sel)}" y1="${top}" y2="${Hh - bot}" stroke="${ink}" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
+  s += `<circle cx="${X(sel)}" cy="${Yr(d.r)}" r="5.5" fill="${rise}" stroke="${V("--surface-1")}" stroke-width="2.5"/><circle cx="${X(sel)}" cy="${Ys(d.s)}" r="5.5" fill="${set}" stroke="${V("--surface-1")}" stroke-width="2.5"/>`;
+  el.innerHTML = s + "</svg>";
+  const pick = e => { const r = el.getBoundingClientRect(); onPick(Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left - padL) / (W - padL - padR) * (n - 1))))); };
+  el.onpointerdown = e => { el.setPointerCapture?.(e.pointerId); pick(e); };
+  el.onpointermove = e => { if (e.buttons) pick(e); };
+}
+function sunModal() {
+  const ti = todayIdx(), t0 = D("time", ti);
+  let n = 90, sel = 0, data = sunSeries(t0, n);
+  openModal(`<h3>${ms("wb_twilight", "ic-sun")}Sunrise & sunset</h3>
+    <p class="lede">${sunLede(ti)}</p>
+    <div class="sunarc" id="sunArc"></div>
+    <div class="cardhead"><h4 id="stDetail"></h4>
+      <div class="seg" id="stSeg"><button data-n="30">30 days</button><button data-n="90" class="on">90 days</button><button data-n="365">Year</button></div></div>
+    <div class="sunchart" id="sunTimes"></div>`);
+  drawSunArc($("sunArc"), ti);
+  const draw = () => {
+    const d = data[sel], prev = data[sel - 1];
+    const delta = prev ? Math.round((d.len - prev.len) / 60) : null;
+    $("stDetail").innerHTML = `<b>${sel === 0 ? "Today" : fmt(d.day + 43200, { weekday: "short", day: "numeric", month: "short" })}</b> · sunrise ${hm(d.rise)} · sunset ${hm(d.set)} · ${dur(d.len)} daylight${delta != null ? ` (${delta >= 0 ? "+" : "−"}${Math.abs(delta)}m)` : ""}`;
+    drawSunTimes($("sunTimes"), data, sel, i => { sel = i; draw(); });
+  };
+  for (const b of $("stSeg").querySelectorAll("button")) b.onclick = () => {
+    n = +b.dataset.n; data = sunSeries(t0, n); sel = Math.min(sel, n - 1);
+    for (const x of $("stSeg").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    draw();
+  };
+  draw();
 }
 
 // One sheet per tile/chip: a 48-hour chart of that variable plus a sentence.
@@ -604,17 +744,7 @@ function metricModal(k) {
   if (k === "gusts" || k === "wind") return simple("Wind", "air", `${r0(c.wind_speed_10m)} km/h from the ${compass(c.wind_direction_10m)}, gusting ${r0(c.wind_gusts_10m)}. Arrows point where it's blowing.`,
     [{ v: sl("wind_gusts_10m"), color: "--ink-faint", w: 2, dash: "4 4", fill: true }, L("wind_speed_10m", "--positive", v => r0(v), { fill: false })],
     { arrows: sl("wind_direction_10m") });
-  if (k === "sun" || k === "moon") {
-    const days = WX.daily.time.map((_, i) => i).filter(i => i >= ti).slice(0, 10), m = moon();
-    openModal(`<h3>${ms("wb_twilight", "ic-sun")}Sun & moon</h3>
-      <p class="lede">${sunLede(ti)}</p>
-      <div class="sunarc" id="sunArc"></div>
-      <div class="daylight">${days.map(i => daylightRow(i, ti)).join("")}</div>
-      <div class="moonrow">${moonSvg(m.f, 64)}<div><b>${m.name}</b><span>${m.lit}% lit</span>
-        <span>Full moon ${m.full.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} · new moon ${m.next.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</span></div></div>`);
-    drawSunArc($("sunArc"), ti);
-    return;
-  }
+  if (k === "sun") return sunModal();
   if (k === "aqi" || k === "pollen") {
     if (!AQ) return;
     const a = AQ.current, at = AQ.hourly.time, ai = Math.max(0, at.findIndex(x => x > nowSec()) - 1);
@@ -627,229 +757,6 @@ function metricModal(k) {
     svgChart($("mChart"), { t: at.slice(ai, ai + 48), sel: 0, nowFirst: true, lines: [{ v: AQ.hourly.european_aqi.slice(ai, ai + 48), color: "--positive", labels: true, fill: true, fmt: v => r0(v), min: 0 }] });
   }
 }
-
-// ---------- radar ----------
-// RainViewer's free tier serves the last ~2 h at 10-min steps, natively up to
-// zoom 7; Leaflet upscales past that. Labels sit above the rain. CARTO's free
-// basemaps now need a key; Esri's light/dark canvases don't, and follow the theme.
-let radar = null, bigRadar = null, FRAMES = null;
-const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
-const esriUrl = (dark, kind) => `${ESRI}/World_${dark ? "Dark" : "Light"}_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`;
-const isDark = () => document.documentElement.dataset.theme === "dark";
-async function loadFrames() {
-  try {
-    const d = await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
-    FRAMES = { host: d.host, list: [...(d.radar.past || []), ...(d.radar.nowcast || [])] };
-    radar?.setFrames(); bigRadar?.setFrames();
-    radar?.refreshClouds(); bigRadar?.refreshClouds();
-  } catch {}
-}
-// Clouds from EUMETSAT's public WMS (keyless, CORS-open), MTG satellite, every 10 min.
-//   Day:   0.6 µm visible, ~1 km over the UK (cloud streets show). Brightness
-//          becomes opacity; from histograms over London, ground sits ~50-65 and
-//          cloud 95-145.
-//   Night: 10.5 µm infrared, ~2 km, thresholded so only cold (mid/high) cloud
-//          shows. Low cloud is about as warm as the ground at night and can't be
-//          separated, so it is honestly missing — the status pill says so.
-// Tried and dropped for night: Meteosat's cloud mask (msg_fes:clm). On a clear
-// 27 Oct 2026 evening it flagged 77% of the London view as cloud while every
-// London airport METAR reported no cloud: cooling land reads as low cloud.
-// Clear ground stays transparent; cloud is a theme-coloured wash.
-const EUMETSAT = "https://view.eumetsat.int/geoserver/wms";
-const CLOUD_SRC = {
-  vis: { layer: "mtg_fd:vis06_hrfi", mPerPx: 1000, step: 600, alpha: p => Math.sqrt(Math.max(0, Math.min(1, (p[0] - 72) / 78))) },
-  ir: { layer: "mtg_fd:ir105_hrfi", mPerPx: 2000, step: 600, alpha: p => Math.sqrt(Math.max(0, Math.min(1, (p[0] - 66) / 64))) },
-};
-const CloudLayer = L.GridLayer.extend({
-  options: { tileSize: 256, opacity: 1, zIndex: 4, time: null, src: "vis", attribution: "EUMETSAT" },
-  createTile(coords, done) {
-    const tile = document.createElement("canvas"), size = this.getTileSize();
-    tile.width = size.x; tile.height = size.y;
-    const src = CLOUD_SRC[this.options.src];
-    const nw = this._map.unproject(coords.scaleBy(size), coords.z), se = this._map.unproject(coords.scaleBy(size).add(size), coords.z);
-    const a = L.CRS.EPSG3857.project(nw), b = L.CRS.EPSG3857.project(se);
-    // Fetch at about the sensor's resolution (no point asking for more) and let
-    // bilinear upscaling smooth it when zoomed in.
-    const px = Math.max(16, Math.min(size.x, Math.round((b.x - a.x) / src.mPerPx)));
-    const q = new URLSearchParams({ service: "WMS", version: "1.3.0", request: "GetMap", layers: src.layer, styles: "",
-      format: "image/png", crs: "EPSG:3857", bbox: `${a.x},${b.y},${b.x},${a.y}`, width: px, height: px });
-    if (src.transparent) q.set("transparent", "true");
-    if (this.options.time) q.set("time", this.options.time);
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const c = document.createElement("canvas"); c.width = c.height = px;
-        const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
-        const d = cx.getImageData(0, 0, px, px), p = d.data;
-        const [r, g, bl] = this.options.rgb;
-        let cloudy = 0;
-        for (let i = 0; i < p.length; i += 4) {
-          const k = src.alpha(p.subarray(i, i + 4));
-          if (k > .3) cloudy++;
-          p[i] = r; p[i + 1] = g; p[i + 2] = bl; p[i + 3] = Math.round(255 * k);
-        }
-        tile._cover = cloudy / (px * px);   // for the "cloud n%" status
-        cx.putImageData(d, 0, 0);
-        const tx = tile.getContext("2d");
-        tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = "high";
-        tx.drawImage(c, 0, 0, size.x, size.y);
-      } catch {}
-      done(null, tile);
-    };
-    img.onerror = () => done(null, tile);
-    img.src = `${EUMETSAT}?${q}`;
-    return tile;
-  },
-});
-// Images land ~20-30 min after their slot; "now" asks for the latest, an older
-// radar frame for the slot at or before it.
-const cloudTime = (sec, latest, src) => latest ? null
-  : new Date(Math.floor(sec / CLOUD_SRC[src].step) * CLOUD_SRC[src].step * 1000).toISOString().replace(".000", "");
-// Visible only works with the sun well up; otherwise infrared.
-function cloudSrc(sec) {
-  if (!WX) return "ir";
-  const i = WX.daily.time.findIndex(t => dayKey(t + 43200) === dayKey(sec));
-  const rise = D("sunrise", i), set = D("sunset", i);
-  return rise && sec > rise + 3600 && sec < set - 3600 ? "vis" : "ir";
-}
-let cloudOn = store.get("wx.clouds", true);
-
-// Opens on the latest frame (now); the slider scrubs back through the last ~2 h.
-// Left alone for 2 minutes it springs back to now, so the kiosk never shows old rain.
-function makeRadar(el, zoom, timeEl, slider, cloudBtn, statusEl) {
-  const map = L.map(el, { zoomControl: false, attributionControl: true, minZoom: 5, maxZoom: 11 }).setView([LOC.lat, LOC.lon], zoom);
-  map.attributionControl.setPrefix("");
-  map.createPane("labels"); map.getPane("labels").style.zIndex = 450; map.getPane("labels").style.pointerEvents = "none";
-  const base = L.tileLayer(esriUrl(isDark(), "Base"), { maxNativeZoom: 16, attribution: "Esri · RainViewer · EUMETSAT" }).addTo(map);
-  const ref = L.tileLayer(esriUrl(isDark(), "Reference"), { maxNativeZoom: 16, pane: "labels" }).addTo(map);
-  const you = L.marker([LOC.lat, LOC.lon], { icon: L.divIcon({ className: "", html: '<div class="youdot"></div>', iconSize: [16, 16] }), zIndexOffset: 1000 }).addTo(map);
-  const cloudStyle = () => isDark() ? { rgb: [255, 255, 255], opacity: .5 } : { rgb: [70, 82, 104], opacity: .42 };
-  const clouds = new CloudLayer({ ...cloudStyle(), src: cloudSrc(nowSec()) });
-  let layers = [], k = 0, back = null, cloudT;
-  const syncCloud = () => {
-    if (!cloudOn || !FRAMES) return;
-    const at = FRAMES.list[k]?.time ?? nowSec(), src = cloudSrc(at), t = cloudTime(at, k >= layers.length - 1, src);
-    if (t === clouds.options.time && src === clouds.options.src) return;
-    clouds.options.time = t; clouds.options.src = src;
-    clearTimeout(cloudT); cloudT = setTimeout(() => clouds.redraw(), 250);   // don't refetch on every slider tick
-  };
-  const setCloudBtn = () => { if (cloudBtn) { cloudBtn.classList.toggle("on", cloudOn); cloudBtn.setAttribute("aria-pressed", cloudOn); } };
-  setCloudBtn();
-  if (cloudBtn) cloudBtn.addEventListener("click", () => {
-    cloudOn = !cloudOn; store.set("wx.clouds", cloudOn); setCloudBtn();
-    if (cloudOn) { const at = FRAMES?.list[k]?.time ?? nowSec(); clouds.options.src = cloudSrc(at); clouds.options.time = cloudTime(at, k >= layers.length - 1, clouds.options.src); clouds.addTo(map); }
-    else map.removeLayer(clouds);
-    status();
-  });
-
-  // Status pill: a spinner while the visible rain frame or the clouds are still
-  // fetching, then what actually came back, so an empty map reads as "nothing
-  // there" rather than "not loaded". Rain is measured from the loaded tiles'
-  // pixels (RainViewer serves CORS), cloud from the coverage each tile recorded.
-  const busy = new Set();
-  let statusT;   // declared up here: adding a layer fires "loading" synchronously
-  const track = (layer, name) => layer.on("loading", () => { busy.add(name); status(); }).on("load", () => { busy.delete(name); status(); });
-  track(clouds, "clouds");
-  if (cloudOn) clouds.addTo(map);   // after tracking, so the first load shows the spinner
-  const probe = document.createElement("canvas"); probe.width = probe.height = 32;
-  const pctx = probe.getContext("2d", { willReadFrequently: true });
-  // Only the part of each tile that is actually on screen counts: tiles reach well
-  // past the edges (more so as the z7 radar is upscaled), and rain off-screen
-  // shouldn't make the pill say "in view".
-  const rainInView = layer => {
-    const view = map.getPixelBounds();
-    let any = false, seen = 0;
-    for (const t of Object.values(layer._tiles || {})) {
-      if (!t.current || !t.loaded || !t.el.complete || !t.el.naturalWidth) continue;
-      const tb = layer._tileCoordsToBounds(t.coords);
-      const tl = map.project(tb.getNorthWest()), br = map.project(tb.getSouthEast());
-      const x0 = Math.max(tl.x, view.min.x), x1 = Math.min(br.x, view.max.x);
-      const y0 = Math.max(tl.y, view.min.y), y1 = Math.min(br.y, view.max.y);
-      if (x1 <= x0 || y1 <= y0) continue;
-      const W = t.el.naturalWidth, fx = W / (br.x - tl.x), fy = W / (br.y - tl.y);
-      seen++;
-      try {
-        pctx.clearRect(0, 0, 32, 32);
-        pctx.drawImage(t.el, (x0 - tl.x) * fx, (y0 - tl.y) * fy, (x1 - x0) * fx, (y1 - y0) * fy, 0, 0, 32, 32);
-        const d = pctx.getImageData(0, 0, 32, 32).data;
-        for (let i = 3; i < d.length; i += 4) if (d[i] > 40) { any = true; break; }
-      } catch { return null; }
-      if (any) break;
-    }
-    return seen ? any : null;
-  };
-  map.on("moveend zoomend", () => status());
-  const cloudInView = () => {
-    const tiles = Object.values(clouds._tiles || {}).filter(t => t.current && t.loaded && t.el._cover != null);
-    return tiles.length ? tiles.reduce((s, t) => s + t.el._cover, 0) / tiles.length : null;
-  };
-  function status() {
-    if (!statusEl) return;
-    clearTimeout(statusT);
-    statusT = setTimeout(() => {
-      const cur = layers[k], loadingRain = cur && busy.has(cur._leaflet_id), loadingCloud = cloudOn && busy.has("clouds");
-      if (loadingRain || loadingCloud) {
-        statusEl.innerHTML = `<span class="spin"></span>Loading ${loadingRain && loadingCloud ? "radar & clouds" : loadingRain ? "radar" : "clouds"}…`;
-        statusEl.hidden = false; return;
-      }
-      const rain = cur ? rainInView(cur) : null, cov = cloudOn ? cloudInView() : null;
-      const parts = [];
-      if (rain != null) parts.push(rain ? `${ms("rainy", "ic-rain")}Rain in view` : "No rain in view");
-      const night = clouds.options.src === "ir";
-      if (cov != null) parts.push(night
-        ? (cov < .03 ? "no mid/high cloud (night: low cloud not visible)" : `mid/high cloud ${Math.round(cov * 100)}% (night)`)
-        : (cov < .03 ? "clear sky" : `cloud ${Math.round(cov * 100)}%`));
-      statusEl.innerHTML = parts.join(" · ");
-      statusEl.hidden = !parts.length;
-    }, 120);
-  }
-  const show = i => {
-    k = i;
-    layers.forEach((l, j) => l.setOpacity(j === i ? .8 : 0));
-    syncCloud(); status();
-    slider.value = i;
-    slider.style.setProperty("--p", `${layers.length > 1 ? (i / (layers.length - 1)) * 100 : 100}%`);
-    const f = FRAMES.list[i]; if (!f) return;
-    const ago = Math.round((Date.now() / 1000 - f.time) / 60);
-    timeEl.innerHTML = i === layers.length - 1 ? `<b>Now</b> · ${hm(f.time)}` : `${hm(f.time)} · <b>${ago} min ago</b>`;
-  };
-  const latest = () => layers.length && show(layers.length - 1);
-  slider.addEventListener("input", () => {
-    show(+slider.value);
-    clearTimeout(back); back = setTimeout(latest, 2 * 60e3);
-  });
-  return {
-    map,
-    setFrames() {
-      if (!FRAMES) return;
-      const atNow = k >= layers.length - 1, keep = !atNow && FRAMES.list.findIndex(f => f.time === FRAMES.list[k]?.time);
-      layers.forEach(l => map.removeLayer(l));
-      layers = FRAMES.list.map(f => {
-        const l = L.tileLayer(`${FRAMES.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
-          { opacity: 0, maxNativeZoom: 7, maxZoom: 11, zIndex: 5, crossOrigin: "anonymous" }).addTo(map);
-        return track(l, l._leaflet_id);
-      });
-      slider.max = Math.max(0, layers.length - 1);
-      show(atNow || keep == null || keep < 0 ? layers.length - 1 : keep);
-    },
-    setTheme(dark) {
-      base.setUrl(esriUrl(dark, "Base")); ref.setUrl(esriUrl(dark, "Reference"));
-      L.Util.setOptions(clouds, cloudStyle()); clouds.setOpacity(clouds.options.opacity); clouds.redraw();
-    },
-    // New radar frames every 10 min: also pull the newest cloud image when showing now.
-    refreshClouds() { if (cloudOn && k >= layers.length - 1) clouds.redraw(); },
-    recentre() { you.setLatLng([LOC.lat, LOC.lon]); map.setView([LOC.lat, LOC.lon], map.getZoom()); },
-    destroy() { clearTimeout(back); clearTimeout(cloudT); clearTimeout(statusT); map.remove(); },
-  };
-}
-$("radarBig").addEventListener("click", () => {
-  openModal(`<div id="bigmap"></div><div class="mapstatus" id="bStatus" hidden></div><div class="radarbar"><span class="rtime" id="bTime">Radar</span><input type="range" class="rslider" id="bSlider" min="0" max="0" step="1" aria-label="Radar time"><button id="bCloud" class="cloudtog" title="Cloud cover">${ms("cloud")}</button><button id="bZoom" title="Whole UK">${ms("zoom_out_map")}</button></div>`, { wide: true });
-  bigRadar = makeRadar($("bigmap"), 9, $("bTime"), $("bSlider"), $("bCloud"), $("bStatus"));
-  bigRadar.setFrames();
-  $("bZoom").onclick = () => bigRadar.map.setView([54.5, -3], 6);
-  modalCleanup = () => { bigRadar.destroy(); bigRadar = null; };
-});
 
 // ---------- departures (TfL, straight from the browser) ----------
 // Arrivals gives live predictions for every TfL mode. For Overground and Elizabeth
@@ -944,13 +851,17 @@ function renderDeps() {
     const dir = k === "inbound" ? "Inbound" : k === "outbound" ? "Outbound" : k === "all" ? "All" : k;
     return `${dir}${top ? " · " + top : ""}`;
   };
-  $("dirTog").innerHTML = keys.length > 1 ? keys.map(k => `<button data-d="${esc(k)}" class="${k === depDir ? "on" : ""}">${esc(name(k))}</button>`).join("") : "";
+  // Icons in the card header (city = towards London, landscape = away), with the
+  // full "Inbound · Liverpool Street" as the tooltip; anything else stays text.
+  const glyph = k => k === "inbound" ? ms("location_city") : k === "outbound" ? ms("landscape") : esc(k.replace(/^Platform\s*/i, "P"));
+  $("dirTog").innerHTML = keys.length > 1 ? keys.map(k => `<button data-d="${esc(k)}" class="${k === depDir ? "on" : ""}" title="${esc(name(k))}" aria-label="${esc(name(k))}">${glyph(k)}</button>`).join("") : "";
+  $("dirName").textContent = depDir && keys.length > 1 ? name(depDir).replace(/^(Inbound|Outbound|All) · /, "to ") : "";
   const rows = depDir ? groups.get(depDir).slice(0, 20) : [];
   const keep = $("deps").scrollTop;
   $("deps").innerHTML = rows.length ? rows.map((r, i) => {
     const late = !r.cancelled && r.delayMin >= 1;
     const time = r.cancelled ? `<s>${hm(r.sched / 1000)}</s> <span class="cancel-t">Cancelled</span>`
-      : late ? `<s>${hm(r.sched / 1000)}</s> <span class="late-t">${hm(r.exp / 1000)} · ${r.delayMin} min late</span>`
+      : late ? `<s>${hm(r.sched / 1000)}</s> <span class="late-t">${hm(r.exp / 1000)} +${r.delayMin}</span>`
       : `${hm(r.exp / 1000)}${r.sched ? " · on time" : ""}`;
     // Minutes colour: green on time, orange late, red cancelled. Tube/DLR have no
     // timetable, so their status is unknown and the number stays plain ink.
@@ -991,6 +902,90 @@ $("station").addEventListener("click", () => {
   });
 });
 
+// ---------- birthdays ----------
+// Guests' names and birthdays never sit in the repo or on the public site in the
+// clear: birthdays.enc.json is AES-GCM, keyed by PBKDF2 from a passphrase that
+// lives only on the device (set once by opening /weather/#bkey=<passphrase>).
+// Rebuild it with tools/birthdays-encrypt.mjs.
+const GROUPS = { family: [0, "Family"], groom: [1, "Groom's party"], bride: [2, "Bride's party"], guest: [3, "Guest"] };
+let BDAYS = null, bdLocked = false;
+(function takeKeyFromHash() {
+  const m = /[#&]bkey=([^&]+)/.exec(location.hash);
+  if (!m) return;
+  store.set("wx.bkey", decodeURIComponent(m[1]));
+  history.replaceState(null, "", location.pathname + location.search);   // don't leave it in the address bar
+})();
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function loadBirthdays() {
+  const pass = store.get("wx.bkey", null);
+  if (!pass) { bdLocked = true; return renderBirthdays(); }
+  try {
+    const e = await (await fetch("/weather/birthdays.enc.json", { cache: "no-cache" })).json();
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(e.salt), iterations: e.iter, hash: "SHA-256" },
+      base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(e.iv) }, key, b64(e.ct));
+    BDAYS = JSON.parse(new TextDecoder().decode(plain)).people;
+    bdLocked = false;
+  } catch { bdLocked = true; }
+  renderBirthdays();
+}
+// Days from today (local) to the next occurrence; Feb 29 counts as Feb 28 off-year.
+function daysUntil(p, from = new Date()) {
+  const t0 = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  for (const y of [t0.getFullYear(), t0.getFullYear() + 1]) {
+    let d = new Date(y, p.m - 1, p.d);
+    if (d.getMonth() !== p.m - 1) d = new Date(y, 1, 28);
+    if (d >= t0) return Math.round((d - t0) / 864e5);
+  }
+  return 366;
+}
+const prio = p => GROUPS[p.g]?.[0] ?? 3;
+const bdWhen = n => n === 0 ? "Today" : n === 1 ? "Tomorrow" : n < 7 ? new Date(Date.now() + n * 864e5).toLocaleDateString("en-GB", { weekday: "long" }) : `in ${n} days`;
+const bdDate = p => new Date(2000, p.m - 1, p.d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const ageOn = (p, n) => p.y ? ` · turns ${new Date(Date.now() + n * 864e5).getFullYear() - p.y}` : "";
+function bdRow(p, n, big = false) {
+  const [rank, gname] = GROUPS[p.g] || GROUPS.guest;
+  return `<div class="bd${big ? " big" : ""}${rank < 3 ? " vip" : ""}"><span class="who"><b>${esc(p.n)}</b>
+    <small>${rank < 3 ? `<span class="grp g-${p.g}">${gname}</span>` : ""}${bdDate(p)}${ageOn(p, n)}</small></span>
+    <span class="when${n === 0 ? " today" : ""}">${bdWhen(n)}</span></div>`;
+}
+function renderBirthdays() {
+  const el = $("bdBody"); if (!el) return;
+  if (bdLocked || !BDAYS) {
+    el.innerHTML = `<div class="empty">${bdLocked ? "Locked on this device. Open the setup link once to unlock." : "Loading…"}</div>`;
+    return;
+  }
+  const up = BDAYS.map(p => ({ p, n: daysUntil(p) })).sort((a, b) => a.n - b.n || prio(a.p) - prio(b.p));
+  const today = up.filter(x => x.n === 0);
+  let html;
+  if (today.length) {
+    $("bdTitle").textContent = "Birthday today";
+    html = today.map(x => bdRow(x.p, 0, true)).join("") + `<div class="bdnext">Next: ${up.filter(x => x.n > 0).slice(0, 2).map(x => `${esc(x.p.n)} (${bdWhen(x.n)})`).join(", ")}</div>`;
+  } else {
+    $("bdTitle").textContent = "Next birthdays";
+    // Everyone's next few by date, then the nearest of family and the wedding
+    // party if none of them made that list.
+    const next = up.slice(0, 4), vip = up.filter(x => prio(x.p) < 3 && !next.includes(x)).slice(0, 2);
+    html = next.map((x, i) => bdRow(x.p, x.n, i === 0)).join("") +
+      (vip.length && !next.some(x => prio(x.p) < 3) ? `<div class="bdsub">Family & wedding party</div>${vip.map(x => bdRow(x.p, x.n)).join("")}` : "");
+  }
+  el.innerHTML = html;
+}
+$("bdCard").addEventListener("click", () => {
+  if (!BDAYS) return;
+  const up = BDAYS.map(p => ({ p, n: daysUntil(p) })).sort((a, b) => a.n - b.n || prio(a.p) - prio(b.p));
+  const months = new Map();
+  for (const x of up) {
+    const k = new Date(Date.now() + x.n * 864e5).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    if (!months.has(k)) months.set(k, []); months.get(k).push(x);
+  }
+  openModal(`<h3>${ms("cake", "ic-sun")}Birthdays</h3><p class="lede">${BDAYS.length} guests · family and the wedding parties are marked.</p>
+    ${[...months].map(([k, xs]) => `<h4>${k}</h4><div class="bdlist">${xs.map(x => bdRow(x.p, x.n)).join("")}</div>`).join("")}`);
+});
+// The day rolls over at midnight; the minute timer below keeps "Tomorrow" honest.
+setInterval(() => { if (!document.hidden) renderBirthdays(); }, 10 * 60e3);
+
 // ---------- keep the screen on, keep everything fresh ----------
 let wakeLock = null;
 async function keepAwake() {
@@ -1001,37 +996,35 @@ document.addEventListener("pointerdown", keepAwake, { passive: true });   // iOS
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   keepAwake();
-  if (Date.now() - wxAt > WX_MS) { loadWeather(); loadAir(); loadFrames(); }
+  if (Date.now() - wxAt > WX_MS) { loadWeather(); loadAir(); }
+  renderBirthdays();
   loadDeps();
 });
-setInterval(() => { if (!document.hidden) { loadWeather(); loadFrames(); } }, WX_MS);
+setInterval(() => { if (!document.hidden) loadWeather(); }, WX_MS);
 setInterval(() => { if (!document.hidden) loadAir(); }, AQ_MS);
 setInterval(() => { if (!document.hidden) loadDeps(); }, DEP_MS);
 setInterval(() => { if (!document.hidden) locate(); }, LOC_MS);
 // Charts and "in 2h 10m" drift; redraw the cheap bits each minute.
 setInterval(() => {
   if (!WX || document.hidden) return;
-  if (applyTheme()) renderWeather();
-  else { renderSummary(); renderNowcast(); if (hourSel === 0) renderHourly(); }
+  renderSummary(); renderNowcast(); if (hourSel === 0) renderHourly();
 }, 60e3);
 // A wall screen left for days: reload once overnight to pick up deploys.
 (function nightlyReload() {
   const d = new Date(), t = new Date(d); t.setHours(3, 30, 0, 0); if (t <= d) t.setDate(t.getDate() + 1);
   setTimeout(() => location.reload(), t - d);
 })();
-let _rs; addEventListener("resize", () => { clearTimeout(_rs); _rs = setTimeout(() => { if (WX) { renderHourly(); renderDays(); } radar?.map.invalidateSize(); }, 150); });
+let _rs; addEventListener("resize", () => { clearTimeout(_rs); _rs = setTimeout(() => { if (WX) { renderHourly(); renderDays(); } }, 150); });
 // The icon font arriving changes nothing in layout, but chart glyphs drawn before it
 // loads can render as their ligature names in Safari; redraw once it's in.
 document.fonts?.ready.then(() => { if (WX) renderHourly(); });
 
 // ---------- boot ----------
 (function init() {
-  applyTheme();
   setPlace(PLACE);
-  radar = makeRadar($("map"), 8, $("radarTime"), $("radarSlider"), $("radarCloud"), $("radarStatus"));
   const cached = store.get("wx.cache", null);
   if (cached) { WX = cached; TZ = WX.timezone; renderWeather(); $("stamp").textContent = "Refreshing…"; }
-  loadWeather(); loadAir(); loadFrames(); loadStations();
+  loadWeather(); loadAir(); loadStations(); loadBirthdays();
   locate();
   keepAwake();
 })();

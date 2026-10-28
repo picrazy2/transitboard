@@ -1,7 +1,7 @@
 /* Weather board — built on the budget app's design tokens (~/Code/budget/src/index.css,
    docs/DESIGN_SYSTEM.md): iOS label semantics, opaque surfaces for content, glass only
    for chrome that floats over content, generous radii, rounded numerals, one tint.
-   Light by day, dark after sunset (weather.js stamps data-theme from is_day).
+   Dark only: the light tokens below stay as the base the dark set overrides.
    Tuned for an iPad Air 5th gen: 1180×820 landscape, 820×1180 portrait. */
 :root {
   --bg: #f5f5f7;
@@ -139,10 +139,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   height: 100%; display: grid; gap: var(--gap); padding: 14px 16px 16px;
   grid-template-columns: 1.2fr 1fr 1fr;
   grid-template-rows: auto minmax(0, 1.1fr) minmax(0, 1fr);
-  grid-template-areas: "top sum now" "hourly hourly radar" "days tiles deps";
+  grid-template-areas: "top . now" "hourly hourly bdays" "days sum deps";
 }
-.top { grid-area: top } .now { grid-area: now } .summary { grid-area: sum } .hourly { grid-area: hourly } .radar { grid-area: radar }
-.days { grid-area: days } .tiles { grid-area: tiles } .deps { grid-area: deps }
+.top { grid-area: top } .now { grid-area: now } .summary { grid-area: sum } .hourly { grid-area: hourly } .bdays { grid-area: bdays }
+.days { grid-area: days } .deps { grid-area: deps }
 
 .card {
   background: var(--surface-1); border-radius: var(--r-md); box-shadow: var(--shadow-2);
@@ -169,19 +169,21 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .nowtext { display: flex; flex-direction: column; gap: 2px; font-size: 15px; color: var(--ink-muted); white-space: nowrap; min-width: 0; overflow: hidden }
 .nowtext > * { overflow: hidden; text-overflow: ellipsis }
 .nowtext b { color: var(--ink); font-size: 20px; font-weight: 600 }
-.hilo { display: flex; gap: 12px; font-family: var(--rounded); font-weight: 700; font-size: 19px; font-variant-numeric: tabular-nums }
+.hilo { display: flex; gap: 14px; font-family: var(--rounded); font-weight: 700; font-size: 32px; line-height: 1.05; font-variant-numeric: tabular-nums; margin-top: 2px }
 .hi { color: var(--hi) } .lo { color: var(--lo) }
 .summary {
   min-width: 0; align-self: stretch;
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 10px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 10px;
 }
 /* Grouped surface with hairline separators, not boxes in boxes. */
 /* Each summary item and detail tile is its own card, on the same rhythm as the grid. */
 .chip, .tile { background: var(--surface-1); border-radius: var(--r-sm); box-shadow: var(--shadow-2); transition: background-color .6s var(--ease-out), transform .15s var(--ease-out) }
 .chip:active, .tile:active { transform: scale(.97) }
 .day:active { background: var(--surface-2) }
-.chip { display: flex; align-items: center; gap: 10px; padding: 6px 14px; text-align: left; min-width: 0; min-height: 0; overflow: hidden }
-.chip > .ms { font-size: 26px; flex: none }
+.chip { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 8px 14px; text-align: left; min-width: 0; min-height: 0; overflow: hidden }
+.chip .txt { width: 100% }
+.chip > .ms { font-size: 22px; flex: none }
+.chip > .moonsvg { width: 22px; height: 22px }
 .chip .txt { display: flex; flex-direction: column; min-width: 0 }
 .chip .k { font-size: 13px; color: var(--ink-muted) }
 .chip .v { font-family: var(--rounded); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2 }
@@ -204,51 +206,6 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .hourdetail { font-size: 14px; color: var(--ink-muted); min-height: 20px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .hourdetail b { color: var(--ink); font-weight: 600 }
 .hourdetail .ms { font-size: 17px }
-
-/* ---------- radar ---------- */
-.radar { padding: 0; position: relative }
-#map, #bigmap { position: absolute; inset: 0; background: var(--surface-2) }
-.radarbar {
-  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 500;
-  display: flex; align-items: center; gap: 8px; padding: 5px; font-size: 14px;
-  border-radius: var(--r-full); background: var(--glass-thick);
-  backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
-  border: 1px solid var(--glass-rim);
-  box-shadow: inset 0 1px 1px var(--glass-highlight), inset 0 -1px 1px var(--glass-shadow-edge), var(--shadow-2);
-}
-.radarbar .rtime { flex: none; min-width: 128px; padding-left: 10px; font-size: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap }
-.radarbar .rtime b { color: var(--ink); font-weight: 600 }
-/* iOS-style slider: filled track up to the thumb, white knob with a soft shadow. */
-.rslider { flex: 1; min-width: 0; height: 30px; margin: 0 4px; background: none; -webkit-appearance: none; appearance: none; touch-action: none }
-.rslider::-webkit-slider-runnable-track { height: 4px; border-radius: var(--r-full);
-  background: linear-gradient(90deg, var(--accent) var(--p, 100%), var(--border-strong) var(--p, 100%)) }
-.rslider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
-  background: #fff; box-shadow: 0 0 0 0.5px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.18) }
-.rslider::-moz-range-track { height: 4px; border-radius: 9999px; background: var(--border-strong) }
-.rslider::-moz-range-progress { height: 4px; border-radius: 9999px; background: var(--accent) }
-.rslider::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.18) }
-.radarbar button { width: 34px; height: 34px; border-radius: var(--r-full); display: grid; place-items: center; color: var(--accent) }
-.radarbar button:active { background: var(--accent-soft) }
-.radarbar .ms { font-size: 22px }
-/* Cloud toggle: tinted fill when on, plain when off. */
-.radarbar .cloudtog { color: var(--ink-faint) }
-.radarbar .cloudtog.on { color: var(--accent); background: var(--accent-soft) }
-.leaflet-container { font: inherit; background: var(--surface-2) }
-/* Status pill over the map: spinner while loading, then what's actually in view. */
-.mapstatus {
-  position: absolute; top: 10px; left: 10px; z-index: 500; display: flex; align-items: center; gap: 7px;
-  padding: 5px 12px; border-radius: var(--r-full); font-size: 13px; font-weight: 500; color: var(--ink);
-  background: var(--glass-thick); backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
-  border: 1px solid var(--glass-rim); box-shadow: inset 0 1px 1px var(--glass-highlight), var(--shadow-1);
-}
-.mapstatus[hidden] { display: none }
-.mapstatus .ms { font-size: 16px; margin-right: 3px }
-.spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite }
-@keyframes spin { to { transform: rotate(360deg) } }
-.leaflet-control-attribution { font-size: 9px; background: transparent !important; color: var(--ink-faint) }
-.leaflet-control-attribution a { color: var(--ink-faint) }
-.leaflet-bottom.leaflet-right { bottom: 54px }
-.youdot { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-shadow: 0 0 0 6px var(--accent-soft), var(--shadow-2) }
 
 /* ---------- days ---------- */
 .daylist { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0 -8px }
@@ -287,9 +244,8 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .bar b { position: absolute; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--ink); border: 2px solid var(--surface-1) }
 
 /* ---------- tiles: nine small cards ---------- */
-.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); padding: 0; gap: 10px; background: none; box-shadow: none; border-radius: 0; overflow: visible }
-.tile { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 12px; text-align: left; min-height: 0; min-width: 0; overflow: hidden;
-  }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 104px; gap: 10px }
+.tile { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 10px 14px; text-align: left; min-height: 0; min-width: 0; overflow: hidden; background: var(--surface-2) }
 .tile .k { font-size: 13px; color: var(--ink-muted); white-space: nowrap; display: flex; align-items: center; gap: 5px }
 .tile .k .ms { font-size: 16px }
 .tile .v { font-family: var(--rounded); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; white-space: nowrap; display: flex; align-items: center; gap: 6px }
@@ -301,9 +257,12 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .station { font-size: 17px; font-weight: 600; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; color: var(--ink) }
 .station .ms { color: var(--accent); font-size: 22px }
 .station small { font-size: 13px; font-weight: 400; color: var(--ink-muted) }
-.dirtog { display: flex; background: var(--surface-2); border-radius: var(--r-full); padding: 2px; margin-bottom: 4px }
+.deps .cardhead { margin-bottom: 2px }
+.dirtog { display: flex; flex: none; background: var(--surface-2); border-radius: var(--r-full); padding: 2px }
 .dirtog:empty { display: none }
-.dirtog button { flex: 1; min-width: 0; padding: 6px 10px; border-radius: var(--r-full); font-size: 13px; font-weight: 500; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all .2s var(--ease-out) }
+.dirtog button { min-width: 38px; height: 32px; padding: 0 8px; border-radius: var(--r-full); font-size: 13px; font-weight: 600; color: var(--ink-muted); display: grid; place-items: center; transition: all .2s var(--ease-out) }
+.dirtog .ms { font-size: 20px; vertical-align: 0 }
+.dirname { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-muted); margin-bottom: 2px; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .dirtog button.on { background: var(--surface-1); color: var(--ink); box-shadow: var(--shadow-1) }
 [data-theme="dark"] .dirtog button.on { background: var(--surface-3) }
 .deplist { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
@@ -311,10 +270,12 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent) }
 .deplist::-webkit-scrollbar { display: none }
 .dep { flex: none }
-.dep { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 0.5px solid var(--separator) }
+.dep { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 0.5px solid var(--separator) }
+.dep > span:first-child { min-width: 0 }
 .dep:last-child { border-bottom: 0; margin-bottom: 14px }
 .dep .to { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
-.dep .meta { font-size: 13px; color: var(--ink-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden }
+.dep .meta { font-size: 13px; color: var(--ink-muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; min-width: 0 }
+.dep .meta > * { flex: none }
 .pill { font-size: 11px; font-weight: 600; color: #fff; padding: 1px 8px; border-radius: var(--r-full); background: var(--c) }
 .dep .eta { font-family: var(--rounded); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; line-height: 1 }
 .dep .eta small { font-size: 13px; color: var(--ink-muted); font-weight: 600; margin-left: 2px }
@@ -367,29 +328,25 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 @media (orientation: portrait) {
   .grid {
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.1fr);
-    grid-template-areas: "top now" "sum sum" "hourly hourly" "radar deps" "days tiles";
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+    grid-template-areas: "top now" "hourly hourly" "bdays deps" "days sum";
   }
   .top { justify-content: space-between }
-  .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto }
-  .chip { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 14px }
   .clock { font-size: 96px }
   .nowtemp { font-size: 84px }
   .nowicon { font-size: 64px }
   .day { grid-template-columns: 56px 28px 38px 1fr 32px 32px; gap: 6px; font-size: 15px }
-  .tile { padding: 8px 12px }
-  .tile .v { font-size: 24px }
 }
 
 /* ---------- smaller landscape (phones on their side, split view): scroll ---------- */
 @media (orientation: landscape) and (max-height: 640px) {
   body { overflow: auto }
   .grid { height: auto; grid-template-columns: 1fr 1fr; grid-template-rows: auto;
-    grid-template-areas: "top now" "sum sum" "hourly radar" "days deps" "tiles tiles" }
-  .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto }
+    grid-template-areas: "top now" "hourly bdays" "days deps" "sum sum" }
+  .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, 96px) }
 
   .clock { font-size: 72px } .nowtemp { font-size: 64px } .nowicon { font-size: 52px }
-  .hourly, .radar { height: 360px } .days { height: 420px } .deps { height: 420px } .tiles { height: 300px }
+  .hourly, .bdays { height: 360px } .days { height: 420px } .deps { height: 420px }
 }
 /* ---------- phones upright ---------- */
 @media (orientation: portrait) and (max-width: 700px) {
@@ -397,9 +354,9 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
   .grid { height: auto; display: flex; flex-direction: column }
   .top { flex-direction: column; align-items: flex-start; gap: 8px }
   .now { border-left: 0; padding: 0 }
-  .summary { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .summary { grid-template-rows: repeat(3, 92px) }
   .clock { font-size: 72px }
-  .hourly { height: 380px } .radar { height: 340px } .days { height: 460px } .tiles { height: 330px } .deps { min-height: 320px }
+  .hourly { height: 380px } .bdays { min-height: 300px } .days { height: 460px } .deps { min-height: 320px }
 }
 
 /* ---------- sun & moon sheet ---------- */
@@ -423,25 +380,64 @@ h2 .sub { color: var(--ink-muted); font-weight: 400; margin-left: 6px }
 .moonrow b { font-size: 19px; font-weight: 600 }
 .moonrow span { font-size: 14px; color: var(--ink-muted) }
 
-/* ---------- night without rain: no map ----------
-   Radar is empty and satellite cloud is unreliable after dark, so the map card
-   goes; the summary drops into its slot and the header is just clock + now. */
-.nomap .radar { display: none }
-@media (orientation: landscape) {
-  .nomap .grid { grid-template-areas: "top . now" "hourly hourly sum" "days tiles deps" }
+/* ---------- birthdays ---------- */
+.bdays { cursor: pointer }
+.bdays h2 { display: flex; align-items: center; gap: 8px }
+.bdays h2 .ms { font-size: 22px }
+.bdbody { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden }
+.bd { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 0.5px solid var(--separator) }
+.bd:last-child { border-bottom: 0 }
+.bd .who { display: flex; flex-direction: column; min-width: 0 }
+.bd b { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.bd small { font-size: 13px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px }
+.bd .when { font-family: var(--rounded); font-size: 15px; font-weight: 600; color: var(--ink-muted); white-space: nowrap }
+.bd .when.today { color: var(--sun) }
+.bd.big b { font-size: 22px }
+.bd.big .when { font-size: 18px; color: var(--ink) }
+.bd.big .when.today { color: var(--sun) }
+.grp { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-full); background: var(--surface-3); color: var(--ink) }
+.grp.g-family { background: color-mix(in srgb, var(--sun) 28%, var(--surface-2)) }
+.grp.g-groom { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)) }
+.grp.g-bride { background: color-mix(in srgb, var(--cat-5) 35%, var(--surface-2)) }
+.bdsub { font-size: 12px; color: var(--ink-muted); margin: 8px 0 0; text-transform: none }
+.bdnext { font-size: 13px; color: var(--ink-muted); margin-top: auto; padding-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.bdlist { background: var(--surface-1); border-radius: var(--r-sm); padding: 0 14px }
+.sheet h4 { margin: 16px 0 6px; font-size: 15px; font-weight: 600; color: var(--ink-muted) }
+
+/* ---------- sheets: sunrise columns, moon ---------- */
+.sunchart { height: 300px; background: var(--surface-1); border-radius: var(--r-sm); touch-action: none }
+.sunchart svg { display: block; width: 100%; height: 100% }
+.sunchart text { font-size: 12px; font-family: var(--rounded); font-variant-numeric: tabular-nums }
+#stDetail { margin: 0; font-weight: 400; color: var(--ink-muted); font-size: 14px }
+#stDetail b { color: var(--ink); font-weight: 600 }
+.daylight.cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; grid-auto-flow: column; grid-template-rows: repeat(10, auto) }
+.daylight.cols .dlrow { grid-template-columns: 74px 64px 1fr 64px 78px; gap: 8px; font-size: 14px }
+.daylight.cols .dlrow:nth-child(10n) { border-bottom: 0 }
+.daylight.cols:has(.dlrow:nth-child(21)) { grid-template-rows: none; grid-auto-flow: row }
+.morebtn { display: block; margin: 12px auto 0; padding: 9px 18px; border-radius: var(--r-full); background: var(--surface-2); color: var(--accent); font-weight: 600; font-size: 15px }
+.phases { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; background: var(--surface-1); border-radius: var(--r-sm); padding: 12px 8px }
+.ph { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0; border-radius: var(--r-xs); font-size: 12px; color: var(--ink-muted); text-align: center }
+.ph .moonsvg { width: 40px; height: 40px }
+.ph.on { background: var(--surface-3); color: var(--ink); font-weight: 600 }
+.moonmeaning { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px }
+.moonmeaning div { background: var(--surface-1); border-radius: var(--r-sm); padding: 12px 14px }
+.moonmeaning span { font-size: 13px; color: var(--ink-muted) }
+.moonmeaning p { margin: 4px 0 0; font-size: 15px; line-height: 1.4 }
+.mooncal { display: grid; grid-template-columns: repeat(15, minmax(0, 1fr)); gap: 4px; background: var(--surface-1); border-radius: var(--r-sm); padding: 10px 8px }
+.mc { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums }
+.mc .moonsvg { width: 26px; height: 26px }
+.mc.on { color: var(--accent); font-weight: 600 }
+.sheet h3 .moonsvg { width: 30px; height: 30px }
+.fine { font-size: 12px; color: var(--ink-faint); margin: 12px 0 0 }
+@media (max-width: 700px) {
+  .sunchart { height: 300px; background: var(--surface-1); border-radius: var(--r-sm); touch-action: none }
+.sunchart svg { display: block; width: 100%; height: 100% }
+.sunchart text { font-size: 12px; font-family: var(--rounded); font-variant-numeric: tabular-nums }
+#stDetail { margin: 0; font-weight: 400; color: var(--ink-muted); font-size: 14px }
+#stDetail b { color: var(--ink); font-weight: 600 }
+.daylight.cols { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none }
+  .phases { grid-template-columns: repeat(4, minmax(0, 1fr)) }
+  .moonmeaning { grid-template-columns: 1fr }
+  .mooncal { grid-template-columns: repeat(10, minmax(0, 1fr)) }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) }
 }
-@media (orientation: portrait) {
-  .nomap .grid { grid-template-rows: auto minmax(0, 1.05fr) minmax(0, 1fr) minmax(0, 1.1fr);
-    grid-template-areas: "top now" "hourly hourly" "sum deps" "days tiles" }
-  .nomap .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)) }
-}
-@media (orientation: landscape) and (max-height: 640px) {
-  .nomap .grid { grid-template-areas: "top now" "hourly sum" "days deps" "tiles tiles" }
-  .nomap .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)) }
-}
-/* In the map's slot the summary cards stack icon over text, so nothing truncates. */
-.nomap .chip { padding: 12px 16px; gap: 6px; flex-direction: column; align-items: flex-start; justify-content: center }
-.nomap .chip .txt { width: 100% }
-.nomap .chip > .ms { font-size: 30px }
-.nomap .chip .v { font-size: 22px }
-.nomap .chip .s { font-size: 13px }
