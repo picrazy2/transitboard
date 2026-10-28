@@ -920,7 +920,7 @@ $("station").addEventListener("click", () => {
 // lives only on the device (set once by opening /weather/#bkey=<passphrase>).
 // Rebuild it with tools/birthdays-encrypt.mjs.
 const GROUPS = { family: [0, "Family"], groom: [1, "Groom's party"], bride: [2, "Bride's party"], guest: [3, "Guest"] };
-let BDAYS = null, bdLocked = false;
+let BDAYS = null, BD_MISSING = [], bdLocked = false;
 function takeKeyFromHash() {
   const m = /[#&]bkey=([^&]+)/.exec(location.hash);
   if (!m) return false;
@@ -941,7 +941,8 @@ async function loadBirthdays() {
     const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(e.salt), iterations: e.iter, hash: "SHA-256" },
       base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(e.iv) }, key, b64(e.ct));
-    BDAYS = JSON.parse(new TextDecoder().decode(plain)).people;
+    const data = JSON.parse(new TextDecoder().decode(plain));
+    BDAYS = data.people; BD_MISSING = data.missing || [];
     bdLocked = false;
   } catch { bdLocked = true; }
   renderBirthdays();
@@ -1009,7 +1010,9 @@ $("bdCard").addEventListener("click", () => {
   const ago = d => d === 1 ? "Yesterday" : `${d} days ago`;
   openModal(`<h3>${ms("cake", "ic-sun")}Birthdays</h3><p class="lede">${BDAYS.length} guests.</p>
     ${recent.length ? `<h4>Last 30 days</h4><div class="bdlist recent">${recent.map(x => bdRow(x.p, -1, false, ago(x.d))).join("")}</div>` : ""}
-    ${[...months].map(([k, xs]) => `<h4>${k}</h4><div class="bdlist">${xs.map(x => bdRow(x.p, x.n)).join("")}</div>`).join("")}`);
+    ${[...months].map(([k, xs]) => `<h4>${k}</h4><div class="bdlist">${xs.map(x => bdRow(x.p, x.n)).join("")}</div>`).join("")}
+    ${BD_MISSING.length ? `<h4>No birthday yet · ${BD_MISSING.length}</h4><div class="bdmissing">${BD_MISSING.map(m =>
+      `<span>${esc(m.n)}${m.g === "family" ? ` <span class="grp g-family">Family</span>` : ""}</span>`).join("")}</div>` : ""}`);
 });
 // The day rolls over at midnight; the minute timer below keeps "Tomorrow" honest.
 setInterval(() => { if (!document.hidden) renderBirthdays(); }, 10 * 60e3);
