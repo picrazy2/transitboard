@@ -359,7 +359,10 @@ function hourlyChart(from, n, mode, sel, onPick, nowFirst = false) {
   return { ...base, icons,
     bars: { v: mm, max: nice, color: "--rain", axis: "mm", full: false,
       alpha: sl("precipitation_probability").map(p => (.3 + .6 * (p ?? 0) / 100).toFixed(2)) },
-    lines: [{ v: sl("apparent_temperature"), color: "--ink-faint", w: 2, dash: "4 4" },
+    // Rain also as a line, drawn even when it's all zero, so the right-hand axis
+    // always has something on it. Scaled to the bars: they use the bottom 40%.
+    lines: [{ v: mm.map(v => v ?? 0), min: 0, max: nice / .4, color: "--rain", w: 2.5 },
+            { v: sl("apparent_temperature"), color: "--ink-faint", w: 2, dash: "4 4" },
             { v: sl("temperature_2m"), color: "--hi", labels: true, fmt: v => `${r0(v)}°`, fill: true }] };
 }
 
@@ -957,12 +960,14 @@ const prio = p => GROUPS[p.g]?.[0] ?? 3;
 const bdWhen = n => n === 0 ? "Today" : n === 1 ? "Tomorrow" : n < 7 ? new Date(Date.now() + n * 864e5).toLocaleDateString("en-GB", { weekday: "long" }) : `in ${n} days`;
 const bdDate = p => new Date(2000, p.m - 1, p.d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 const ageOn = (p, n) => p.y ? ` · turns ${new Date(Date.now() + n * 864e5).getFullYear() - p.y}` : "";
-function bdRow(p, n, big = false) {
-  const [rank, gname] = GROUPS[p.g] || GROUPS.guest;
-  return `<div class="bd${big ? " big" : ""}${rank < 3 ? " vip" : ""}"><span class="who"><b>${esc(p.n)}</b>
-    <small>${rank < 3 ? `<span class="grp g-${p.g}">${gname}</span>` : ""}${bdDate(p)}${ageOn(p, n)}</small></span>
-    <span class="when${n === 0 ? " today" : ""}">${bdWhen(n)}</span></div>`;
+// Only family gets a badge; the wedding parties still sort first, unlabelled.
+function bdRow(p, n, big = false, when = bdWhen(n)) {
+  return `<div class="bd${big ? " big" : ""}"><span class="who"><b>${esc(p.n)}</b>
+    <small>${p.g === "family" ? `<span class="grp g-family">Family</span>` : ""}${bdDate(p)}${n >= 0 ? ageOn(p, n) : ""}</small></span>
+    <span class="when${n === 0 ? " today" : ""}">${when}</span></div>`;
 }
+// Days since the most recent occurrence (0 today, up to 365).
+const daysSince = p => { const n = daysUntil(p); return n === 0 ? 0 : 365 - n; };
 function renderBirthdays() {
   const el = $("bdBody"); if (!el) return;
   if (bdLocked || !BDAYS) {
@@ -1000,7 +1005,10 @@ $("bdCard").addEventListener("click", () => {
     const k = new Date(Date.now() + x.n * 864e5).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
     if (!months.has(k)) months.set(k, []); months.get(k).push(x);
   }
-  openModal(`<h3>${ms("cake", "ic-sun")}Birthdays</h3><p class="lede">${BDAYS.length} guests · family and the wedding parties are marked.</p>
+  const recent = BDAYS.map(p => ({ p, d: daysSince(p) })).filter(x => x.d >= 1 && x.d <= 30).sort((a, b) => a.d - b.d);
+  const ago = d => d === 1 ? "Yesterday" : `${d} days ago`;
+  openModal(`<h3>${ms("cake", "ic-sun")}Birthdays</h3><p class="lede">${BDAYS.length} guests.</p>
+    ${recent.length ? `<h4>Last 30 days</h4><div class="bdlist recent">${recent.map(x => bdRow(x.p, -1, false, ago(x.d))).join("")}</div>` : ""}
     ${[...months].map(([k, xs]) => `<h4>${k}</h4><div class="bdlist">${xs.map(x => bdRow(x.p, x.n)).join("")}</div>`).join("")}`);
 });
 // The day rolls over at midnight; the minute timer below keeps "Tomorrow" honest.
